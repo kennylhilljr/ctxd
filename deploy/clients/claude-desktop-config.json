@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "ctxd": {
+      "command": "ctxd",
+      "args": ["stdio", "--client", "claude-desktop"]
+    }
+  }
+}

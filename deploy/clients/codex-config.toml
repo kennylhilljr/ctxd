@@ -1,0 +1,37 @@
+# Merge into ~/.codex/config.toml (SPEC section 9.5).
+# New or changed hooks must be approved once in Codex's /hooks browser.
+
+[mcp_servers.ctxd]
+url = "http://127.0.0.1:7411/mcp"
+bearer_token_env_var = "CTXD_CODEX_TOKEN"
+
+[[hooks.SessionStart]]
+[[hooks.SessionStart.hooks]]
+type = "command"
+command = "ctxd hook session-start --client codex"
+timeout = 5
+
+[[hooks.Stop]]
+[[hooks.Stop.hooks]]
+type = "command"
+command = "ctxd hook stop --client codex"
+timeout = 5
+
+[[hooks.PreCompact]]
+[[hooks.PreCompact.hooks]]
+type = "command"
+command = "ctxd hook pre-compact --client codex"
+timeout = 5
+
+[[hooks.PostCompact]]
+[[hooks.PostCompact.hooks]]
+type = "command"
+command = "ctxd hook post-compact --client codex"
+timeout = 5
+
+[[hooks.PostToolUse]]
+matcher = "^Bash$"
+[[hooks.PostToolUse.hooks]]
+type = "command"
+command = "ctxd hook post-tool-use --client codex"
+timeout = 5

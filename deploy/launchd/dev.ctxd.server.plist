@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- launchd agent for ctxd (SPEC section 12). Install to ~/Library/LaunchAgents/ and replace USERNAME. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>dev.ctxd.server</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/ctxd</string>
+    <string>server</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/Users/USERNAME/Library/Logs/ctxd/server.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/USERNAME/Library/Logs/ctxd/server.err.log</string>
+</dict>
+</plist>
