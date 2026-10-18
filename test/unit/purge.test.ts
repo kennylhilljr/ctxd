@@ -3,6 +3,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type Database from "better-sqlite3";
+import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { HlcClock } from "../../src/core/hlc.js";
 import { newId } from "../../src/core/ids.js";
@@ -180,15 +181,91 @@ describe("purgeEntry (SPEC v6 section 7.6.6)", () => {
     expect(row.purged_at).toBeNull();
   });
 
-  it("does not crash a rebuild after a purge (known M1 gap: the entry ends up absent, not a placeholder)", () => {
+  it("reconstructs the purged entry's stub row on rebuild (SPEC v7 7.6.6: fixed M1 gap, was previously absent)", () => {
     const f = setup();
     const created = writeEntry(writeCtx(f, f.humanId), { scope: "notes", kind: "note", title: "N", body: "x", request_id: newId() } as never);
     if ("held" in created) throw new Error("unexpected hold");
     purgeEntry(writeCtx(f, f.humanId), created.ref, "x");
 
     expect(() => rebuild(f.db)).not.toThrow();
-    const row = f.db.prepare("SELECT 1 FROM entries WHERE entry_id = ?").get(created.id);
-    expect(row).toBeUndefined();
+    const row = f.db.prepare("SELECT title, summary, body, tags, purged_at, purge_fingerprint, kind FROM entries WHERE entry_id = ?").get(
+      created.id,
+    ) as
+      | { title: string; summary: string; body: string; tags: string; purged_at: string | null; purge_fingerprint: string | null; kind: string }
+      | undefined;
+    expect(row).toBeDefined();
+    expect(row!.title).toBe("[purged]");
+    expect(row!.summary).toBe("");
+    expect(row!.body).toBe("");
+    expect(row!.tags).toBe("[]");
+    expect(row!.purged_at).not.toBeNull();
+    expect(row!.purge_fingerprint).not.toBeNull();
+    expect(row!.kind).toBe("note");
+  });
+});
+
+function dumpHashWithLeases(db: Database.Database): string {
+  const rows = (table: string, order: string) => JSON.stringify(db.prepare(`SELECT * FROM ${table} ORDER BY ${order}`).all());
+  const dump = [rows("entries", "entry_id"), rows("relations", "link_id"), rows("flags", "flag_id"), rows("leases", "task_id")].join("\u0000");
+  return createHash("sha256").update(dump).digest("hex");
+}
+
+// AGENTS.md: "every change to sync or apply comes with property tests for convergence." Covers
+// SPEC-v7's purge-replay fix: random event orders, including at least one purge interleaved with
+// an unrelated update, must rebuild to identical state, with the purged entry's stub row present
+// both before and after the rebuild (not just absent both times).
+describe("ctxd rebuild reconstructs a purged entry's stub row regardless of replay order (property test, SPEC v7 7.6.6)", () => {
+  it("matches pre-rebuild state across random event orders including a purge", () => {
+    fc.assert(
+      fc.property(
+        fc.array(fc.record({ title: fc.string({ minLength: 1, maxLength: 20 }), body: fc.string({ minLength: 1, maxLength: 30 }) }), {
+          minLength: 2,
+          maxLength: 5,
+        }),
+        fc.nat(),
+        (notes, seed) => {
+          const f = setup();
+          const created: { id: string; ref: string; rev: string }[] = [];
+          for (const n of notes) {
+            const result = writeEntry(writeCtx(f, f.humanId), {
+              scope: "notes",
+              kind: "note",
+              title: n.title || "untitled",
+              body: n.body || "empty",
+              request_id: newId(),
+            } as never);
+            if ("held" in result) throw new Error("unexpected hold");
+            created.push(result);
+          }
+
+          // Update one entry before purging a different one, so the purge handler can't lean on
+          // some other live row; the purged entry's scope_id/kind/slug must come from the purge
+          // event's own payload.
+          const updateTarget = created[seed % created.length]!;
+          writeEntry(writeCtx(f, f.humanId), {
+            scope: "notes",
+            kind: "note",
+            title: "Updated",
+            body: "Updated body.",
+            id: updateTarget.id,
+            expected_rev: updateTarget.rev,
+            request_id: newId(),
+          } as never);
+
+          const purgeTarget = created[(seed + 1) % created.length]!;
+          purgeEntry(writeCtx(f, f.humanId), purgeTarget.ref, "property test purge");
+
+          const beforeRow = f.db.prepare("SELECT 1 FROM entries WHERE entry_id = ?").get(purgeTarget.id);
+          const before = dumpHashWithLeases(f.db);
+          rebuild(f.db);
+          const afterRow = f.db.prepare("SELECT 1 FROM entries WHERE entry_id = ?").get(purgeTarget.id);
+          const after = dumpHashWithLeases(f.db);
+
+          return before === after && beforeRow !== undefined && afterRow !== undefined;
+        },
+      ),
+      { numRuns: 25 },
+    );
   });
 });
 
