@@ -32,6 +32,7 @@ import { run as runLogCommand } from "./log.js";
 import { run as runJournalCommand } from "./journal.js";
 import { run as runSignalsCommand } from "./signals.js";
 import { run as runInstallHooksCommand } from "./install-hooks.js";
+import { run as runFeaturesCommand } from "./features.js";
 
 /** Each command's parsed-args entry point, added as its milestone lands. */
 const COMMAND_RUNNERS: Record<string, (argv: string[]) => number | Promise<number>> = {
@@ -63,6 +64,7 @@ const COMMAND_RUNNERS: Record<string, (argv: string[]) => number | Promise<numbe
   journal: runJournalCommand,
   signals: runSignalsCommand,
   "install-hooks": runInstallHooksCommand,
+  features: runFeaturesCommand,
 };
 
 const COMMANDS: Record<string, { milestone: string; summary: string }> = {
@@ -112,6 +114,7 @@ const COMMANDS: Record<string, { milestone: string; summary: string }> = {
   digest: { milestone: "M5", summary: "Print or write a weekly digest" },
   signals: { milestone: "M2", summary: "Open blockers, incidents, blocking tasks and flags" },
   stats: { milestone: "M1", summary: "Response sizes per tool and client" },
+  features: { milestone: "M3", summary: "List or set feature flags" },
 };
 
 function usage(): string {

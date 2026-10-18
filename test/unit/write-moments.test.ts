@@ -98,6 +98,16 @@ describe("preCompactHandler (W2)", () => {
     const checkpoint = JSON.parse(readFileSync(checkpointPath, "utf8")) as { head: string | null; branch: string | null };
     expect(checkpoint.head).toMatch(/^[0-9a-f]{40}$/);
   });
+
+  it("hooks.checkpoint off (PRD-feature-flags-v1): writes no checkpoint file", async () => {
+    const f = setup();
+    const repo = initGitRepo();
+    const result = await preCompactHandler(
+      baseCtx(f, { event: "pre-compact", input: { cwd: repo }, flags: new Map([["hooks.checkpoint", false]]) }),
+    );
+    expect(result).toBeUndefined();
+    expect(existsSync(join(f.dataDir, "sessions", "claude-code-s1.checkpoint.json"))).toBe(false);
+  });
 });
 
 describe("stopHandler (W1)", () => {
@@ -135,6 +145,19 @@ describe("stopHandler (W1)", () => {
       input: { cwd: repo },
     });
     expect(await stopHandler(ctx)).toBeUndefined();
+  });
+
+  it("hooks.nudge off (PRD-feature-flags-v1): never blocks even past the turns threshold, but still checkpoints", async () => {
+    const f = setup();
+    const repo = initGitRepo();
+    const ctx = baseCtx(f, {
+      scope: "notes",
+      config: { nudge: { enabled: true, min_minutes_between: 30, turns_threshold: 1, completion_markers: ["done"] } } as HookContext["config"],
+      input: { cwd: repo, last_assistant_message: "still working" },
+      flags: new Map([["hooks.nudge", false]]),
+    });
+    expect(await stopHandler(ctx)).toBeUndefined();
+    expect(existsSync(join(f.dataDir, "sessions", "claude-code-s1.checkpoint.json"))).toBe(true);
   });
 });
 
@@ -214,6 +237,19 @@ describe("sessionEndHandler's mechanical claim release (M2 slice 9)", () => {
     sessionEndHandler(baseCtx(f, { event: "session-end", scope: "notes", input: { cwd: repo } }));
 
     expect(leaseState(f, taskId)).toBe("active");
+  });
+
+  it("claims.mechanical_release off (PRD-feature-flags-v1): a committed, clean lease stays active, but the journal entry still writes", () => {
+    const f = setup();
+    const repo = initGitRepo();
+    const taskId = claimWithBaseHead(f, "claude-code:s1", execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf8" }).trim());
+
+    execFileSync("git", ["commit", "--allow-empty", "-m", "more work", "-q"], { cwd: repo });
+    sessionEndHandler(baseCtx(f, { event: "session-end", scope: "notes", input: { cwd: repo }, flags: new Map([["claims.mechanical_release", false]]) }));
+
+    expect(leaseState(f, taskId)).toBe("active");
+    const row = f.db.prepare("SELECT COUNT(*) AS n FROM entries WHERE scope_id = ? AND kind = 'journal'").get(f.scopeId) as { n: number };
+    expect(row.n).toBe(1);
   });
 });
 

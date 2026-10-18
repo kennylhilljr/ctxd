@@ -226,4 +226,15 @@ describe("review rules (SPEC v6 10.4, human only, narrow by construction)", () =
     expect(result.status).toBe("active");
     expect(buildReviewReport(f.db).proposed).toEqual([]);
   });
+
+  it("review.remembered_rules off (PRD-feature-flags-v1): a matching rule is ignored and the write stays proposed", () => {
+    const f = setup();
+    addRule(wctx(f, f.humanId), "sample-app", { kind: "decision", client: "agent-a", action: "auto-accept" });
+    const ctx: WriteContext = { ...wctx(f, f.agentAId), flags: new Map([["review.remembered_rules", false]]) };
+    const result = writeEntry(ctx, { scope: "sample-app", kind: "decision", title: "D", body: "b", request_id: newId() } as never) as {
+      status: string;
+    };
+    expect(result.status).toBe("proposed");
+    expect(buildReviewReport(f.db).proposed).toHaveLength(1);
+  });
 });
