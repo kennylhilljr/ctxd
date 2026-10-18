@@ -10,18 +10,25 @@ import type { CtxdHookEvent } from "../../src/hooks/adapters.js";
  * adapter, output formats, exit-0 guarantee) but aren't a substitute for real captures if the
  * owner ever gets a chance to record genuine ones from a live client.
  *
- * Current-state honesty: `pre-tool-use` (the path guard, slice 4), `session-start` (the crash
- * sweep plus read moments R1 to R4, slices 6 and 7) and `subagent-start` (read moment R5, slice
- * 7) all have registered real handlers now. None of these fixtures bind the conformance kit's
- * scratch repo to a scope, so `session-start`'s brief handler takes its "not bound to a ctxd
- * scope" fallback path (SPEC v6 9.1's "out-of-pool or unassigned notice") rather than a real
- * brief; `subagent-start`'s own fallback for the same case is to skip silently (R5), so its
- * fixtures are still "nothing happened." A bound scope's actual brief content is exercised by
- * `test/unit/brief.test.ts`, not duplicated here; this kit is about the hook contract (field
- * names, output format, the exit-0 guarantee), not brief content. Every other event's fixtures
- * expect exit 0 with no output, because HOOK_HANDLERS has nothing registered for them yet;
- * that's the correct, current behavior, not a gap in the fixture. As the write-moments slice
- * registers handlers for those events, their fixtures' `expected` blocks need updating too.
+ * Current-state honesty: every event now has a registered real handler (`pre-tool-use` the path
+ * guard, slice 4; `session-start` the crash sweep plus read moments R1 to R4, slices 6 and 7;
+ * `subagent-start` read moment R5, slice 7; `pre-compact`, `stop`, `session-end` and
+ * `post-tool-use` the write moments W1 to W4, slice 8). None of these fixtures bind the
+ * conformance kit's scratch repo to a scope, nor does its stdin `cwd` ("/scratch/sample-app")
+ * resolve to a real git checkout, so each handler takes its own documented no-scope or no-git
+ * fallback rather than doing real work:
+ * - `session-start` prints the "not bound to a ctxd scope" notice (SPEC v6 9.1's "out-of-pool or
+ *   unassigned notice"); `subagent-start` skips silently (R5's own fallback for the same case).
+ * - `pre-compact` still writes its checkpoint file (that has no scope dependency at all), but
+ *   produces no stdout either way (SPEC 9.2: "none; never blocks compaction").
+ * - `stop` writes its checkpoint, then exits before the nudge check since there is no scope to
+ *   nudge about.
+ * - `session-end` and `post-tool-use` both require a scope to write a journal entry into, so with
+ *   none bound they produce nothing.
+ * A bound scope's real behavior (brief content, the nudge block, mechanical journal entries) is
+ * exercised by `test/unit/brief.test.ts`, `test/unit/read-moments.test.ts` and
+ * `test/unit/write-moments.test.ts`, not duplicated here; this kit is about the hook contract
+ * (field names, output format, the exit-0 guarantee), not feature content.
  */
 
 export interface ConformanceFixture {
@@ -41,7 +48,7 @@ export interface ConformanceFixture {
   };
 }
 
-const NOTHING_YET = { exitCode: 0 }; // no handler registered for this event yet; see the file note above
+const NOTHING_YET = { exitCode: 0 }; // either no handler yet, or its documented no-scope/no-git fallback produces no output; see the file note above
 
 function claudeCode(event: CtxdHookEvent, variant: string, stdin: Record<string, unknown>, expected: ConformanceFixture["expected"] = NOTHING_YET): ConformanceFixture {
   return { client: "claude-code", event, variant, stdin, expected };

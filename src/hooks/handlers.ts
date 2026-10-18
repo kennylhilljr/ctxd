@@ -1,12 +1,12 @@
 /**
  * Registers each M2 hook event's real handler into HOOK_HANDLERS (src/cli/hook.ts). Imported
- * once, for its side effect, by src/cli/index.ts before any hook event is dispatched. Later M2
- * slices (write moments) add their own registrations here.
+ * once, for its side effect, by src/cli/index.ts before any hook event is dispatched.
  */
 import { HOOK_HANDLERS, withDeadline, type HookContext, type HookResult } from "../cli/hook.js";
 import { crashSweep } from "./crashSweep.js";
 import { checkPathGuard } from "./pathGuard.js";
 import { sessionStartBrief, subagentStartBrief } from "./readMoments.js";
+import { postToolUseHandler, preCompactHandler, sessionEndHandler, stopHandler } from "./writeMoments.js";
 
 function guardedPrefixes(ctx: HookContext): string[] {
   const prefixes = [ctx.dataDir, "~/.config/ctxd/"];
@@ -30,3 +30,11 @@ HOOK_HANDLERS["pre-tool-use"] = (ctx: HookContext): HookResult => {
   if (result.blocked) return { block: { reason: result.reason! } };
   return undefined;
 };
+
+HOOK_HANDLERS["pre-compact"] = (ctx: HookContext): Promise<HookResult> => preCompactHandler(ctx);
+
+HOOK_HANDLERS["stop"] = (ctx: HookContext): Promise<HookResult> => stopHandler(ctx);
+
+HOOK_HANDLERS["session-end"] = (ctx: HookContext): HookResult => sessionEndHandler(ctx);
+
+HOOK_HANDLERS["post-tool-use"] = (ctx: HookContext): HookResult => postToolUseHandler(ctx);
