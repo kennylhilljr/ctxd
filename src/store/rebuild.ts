@@ -8,7 +8,7 @@ import { syncSignalsForScope } from "../journal/sync.js";
  */
 export function rebuild(db: Database.Database): void {
   db.transaction(() => {
-    db.exec("DELETE FROM relations; DELETE FROM entries; DELETE FROM signals;");
+    db.exec("DELETE FROM relations; DELETE FROM entries; DELETE FROM signals; DELETE FROM flags; DELETE FROM leases;");
 
     const events = db.prepare("SELECT * FROM events ORDER BY hlc, event_id").all() as {
       event_id: string;
@@ -25,7 +25,7 @@ export function rebuild(db: Database.Database): void {
 
     const touchedScopes = new Set<string>();
     for (const e of events) {
-      if (e.part !== "content" && e.part !== "status" && e.part !== "relations") continue; // other parts land with their own M1/M2 slices
+      if (e.part !== "content" && e.part !== "status" && e.part !== "relations" && e.part !== "claim") continue; // "meta" lands with its own M1/M2 slice
       applyEvent(db, {
         eventId: e.event_id,
         scopeId: e.scope_id,

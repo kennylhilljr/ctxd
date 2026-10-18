@@ -1,5 +1,6 @@
 import type Database from "better-sqlite3";
 import { revVersion } from "../core/ids.js";
+import { decodeHlc } from "../core/hlc.js";
 
 /**
  * Turns one already-appended event into its effect on `entries` and `relations` (SPEC v6
@@ -12,7 +13,7 @@ export interface EventForMaterialize {
   scopeId: string;
   entryId: string;
   op: string;
-  part: "content" | "status" | "relations";
+  part: "content" | "status" | "relations" | "claim" | "meta";
   rev: string;
   clientId: string;
   hlc: string;
@@ -118,6 +119,76 @@ export function applyEvent(db: Database.Database, e: EventForMaterialize, { skip
       e.eventId,
     );
     db.prepare("UPDATE entries SET relations_rev = ? WHERE entry_id = ?").run(e.rev, e.entryId);
+    return;
+  }
+
+  if (e.part === "status" && e.op === "flag") {
+    const p = e.payload as { flag_id: string; problem: string; reason: string };
+    db.prepare("INSERT INTO flags (flag_id, entry_id, problem, reason, flagged_by, flagged_hlc, resolved) VALUES (?, ?, ?, ?, ?, ?, NULL)").run(
+      p.flag_id,
+      e.entryId,
+      p.problem,
+      p.reason,
+      e.clientId,
+      e.hlc,
+    );
+    // "An entry already flagged gets an additional flag row; its status is unchanged" (SPEC 7.6.1):
+    // only the first open flag moves status to 'flagged', preserving the original status_before.
+    const current = db.prepare("SELECT status FROM entries WHERE entry_id = ?").get(e.entryId) as { status: string };
+    if (current.status !== "flagged") {
+      db.prepare("UPDATE entries SET status = 'flagged', status_before = ?, status_rev = ?, updated_hlc = ? WHERE entry_id = ?").run(
+        current.status,
+        e.rev,
+        e.hlc,
+        e.entryId,
+      );
+    }
+    return;
+  }
+
+  if (e.part === "claim" && e.op === "claim") {
+    const p = e.payload as {
+      holder: string;
+      paths: string[] | null;
+      ttl_minutes: number;
+      session_ref: string | null;
+      taken_over_from: string | null;
+    };
+    const expiresAt = new Date(decodeHlc(e.hlc).physical + p.ttl_minutes * 60_000).toISOString();
+    db.prepare(
+      `INSERT INTO leases (task_id, scope_id, holder, state, paths, claim_event, claim_hlc, session_ref, expires_at, last_activity_hlc, tentative, taken_over_by)
+       VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, 0, ?)
+       ON CONFLICT (task_id) DO UPDATE SET
+         scope_id = excluded.scope_id, holder = excluded.holder, state = 'active', paths = excluded.paths,
+         claim_event = excluded.claim_event, claim_hlc = excluded.claim_hlc, session_ref = excluded.session_ref,
+         expires_at = excluded.expires_at, last_activity_hlc = excluded.last_activity_hlc,
+         released_at = NULL, changed_files = NULL, drift = NULL, lost_by = NULL, taken_over_by = excluded.taken_over_by`,
+    ).run(
+      e.entryId,
+      e.scopeId,
+      p.holder,
+      p.paths !== null ? JSON.stringify(p.paths) : null,
+      e.eventId,
+      e.hlc,
+      p.session_ref,
+      expiresAt,
+      e.hlc,
+      p.taken_over_from,
+    );
+    return;
+  }
+
+  if (e.part === "claim" && e.op === "release") {
+    const p = e.payload as { changed_files: string[] | null; drift: string[] | null };
+    db.prepare(
+      "UPDATE leases SET state = 'released', released_at = ?, changed_files = ?, drift = ?, last_activity_hlc = ? WHERE task_id = ?",
+    ).run(
+      new Date(decodeHlc(e.hlc).physical).toISOString(),
+      p.changed_files !== null ? JSON.stringify(p.changed_files) : null,
+      p.drift !== null ? JSON.stringify(p.drift) : null,
+      e.hlc,
+      e.entryId,
+    );
     return;
   }
 

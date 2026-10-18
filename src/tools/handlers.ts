@@ -5,6 +5,14 @@ import type { BriefInput } from "../brief/assemble.js";
 import { contextSearch } from "./search.js";
 import type { SearchInput } from "../search/fts.js";
 import { contextGet, type GetInput } from "./get.js";
+import { contextWrite } from "./write.js";
+import type { contextWriteInput } from "./schemas.js";
+import type { z } from "zod";
+import { contextHandoff, type HandoffInput } from "./handoff.js";
+import { contextFlag } from "./flag.js";
+import type { FlagInput } from "../store/flag.js";
+import { contextClaim } from "./claim.js";
+import type { ClaimInput } from "../store/claim.js";
 
 /**
  * One MCP tool's implementation: validated input in, a JSON-serializable result out (or it
@@ -25,8 +33,8 @@ export const TOOL_HANDLERS: Record<string, ToolHandler> = {
   context_brief: (ctx, input) => contextBrief(ctx, input as unknown as BriefInput),
   context_search: (ctx, input) => contextSearch(ctx, input as unknown as SearchInput),
   context_get: (ctx, input) => contextGet(ctx, input as unknown as GetInput),
-  context_write: notYet("context_write", "M1 slice 6"),
-  context_handoff: notYet("context_handoff", "M1 slice 6"),
-  context_flag: notYet("context_flag", "M1 slice 6"),
-  context_claim: notYet("context_claim", "M1 slice 6"),
+  context_write: (ctx, input) => contextWrite(ctx, input as unknown as z.infer<typeof contextWriteInput>),
+  context_handoff: (ctx, input) => contextHandoff(ctx, input as unknown as HandoffInput),
+  context_flag: (ctx, input) => contextFlag(ctx, input as unknown as FlagInput),
+  context_claim: (ctx, input) => contextClaim(ctx, input as unknown as ClaimInput),
 };
