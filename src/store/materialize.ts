@@ -223,6 +223,14 @@ export function applyEvent(db: Database.Database, e: EventForMaterialize, { skip
     return;
   }
 
+  if (e.part === "status" && e.op === "resolve") {
+    // `ctxd review --approve` (SPEC 7.4's "a resolve event... clears it", for both a proposed
+    // entry awaiting review and, once M3's sync lands, a conflicted one): always lands on
+    // 'active'. Unlike unflag, there is no status_before to restore from.
+    db.prepare("UPDATE entries SET status = 'active', status_before = NULL, status_rev = ?, updated_hlc = ? WHERE entry_id = ?").run(e.rev, e.hlc, e.entryId);
+    return;
+  }
+
   if (e.part === "meta" && e.op === "purge") {
     const before = db.prepare("SELECT rowid, title, body, tags FROM entries WHERE entry_id = ?").get(e.entryId) as
       | { rowid: number; title: string; body: string; tags: string }
