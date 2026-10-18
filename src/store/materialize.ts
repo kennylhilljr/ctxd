@@ -32,6 +32,7 @@ interface CreatePayload {
   skill_name?: string | null;
   confirmed_by_user?: boolean;
   review_after?: string | null;
+  supersedes?: string | null;
 }
 
 export function applyEvent(db: Database.Database, e: EventForMaterialize): void {
@@ -41,8 +42,8 @@ export function applyEvent(db: Database.Database, e: EventForMaterialize): void 
       `INSERT INTO entries (
          entry_id, scope_id, kind, slug, significance, skill_name, title, summary, body, tags,
          content_rev, content_version, status, status_rev, relations_rev, review_after,
-         confirmed_by_user, created_by, updated_by, created_hlc, updated_hlc
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         confirmed_by_user, supersedes, created_by, updated_by, created_hlc, updated_hlc
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       e.entryId,
       e.scopeId,
@@ -60,6 +61,7 @@ export function applyEvent(db: Database.Database, e: EventForMaterialize): void 
       e.rev,
       p.review_after ?? null,
       p.confirmed_by_user ? 1 : 0,
+      p.supersedes ?? null,
       e.clientId,
       e.clientId,
       e.hlc,

@@ -124,10 +124,10 @@ export function writeEntry(ctx: WriteContext, input: Input): WriteResult {
         new CtxdError("NOT_ALLOWED", "Cannot update an entry in a scope you cannot write to"),
       );
     }
-    return performHeldWrite(ctx, client, scope, input);
+    return performHeldWrite(ctx, client, scope, input, hash);
   }
 
-  return performDirectWrite(ctx, client, scope, input, decision.kind === "propose");
+  return performDirectWrite(ctx, client, scope, input, decision.kind === "propose", hash);
 }
 
 /** Reconstruct the response for a retried request_id without writing anything again. */
@@ -162,6 +162,7 @@ function performDirectWrite(
   scope: { id: string; name: string },
   input: Input,
   forceProposed: boolean,
+  hash: string,
 ): WriteResult {
   const { db } = ctx;
   const clientName = (db.prepare("SELECT name FROM clients WHERE client_id = ?").get(client.id) as { name: string }).name;
@@ -225,7 +226,7 @@ function performDirectWrite(
       const hlc = ctx.clock.tick();
       contentRev = makeRev(revVersion(existing.content_rev) + 1, eventId);
       const payload: Record<string, unknown> = { title, body, summary, tags };
-      appendPrimaryEvent(db, ctx, input, { scopeId: scope.id, entryId, op: "update", part: "content", rev: contentRev, parentRevs: [existing.content_rev], payload, eventId, hlc });
+      appendPrimaryEvent(db, ctx, input, hash, { scopeId: scope.id, entryId, op: "update", part: "content", rev: contentRev, parentRevs: [existing.content_rev], payload, eventId, hlc });
       applyEvent(db, { eventId, scopeId: scope.id, entryId, op: "update", part: "content", rev: contentRev, clientId: ctx.clientId, hlc, payload, prev: null });
     } else {
       entryId = newId();
@@ -233,6 +234,14 @@ function performDirectWrite(
       const hlc = ctx.clock.tick();
       contentRev = makeRev(1, eventId);
       const slug = slugify(title, entryId, input.kind);
+
+      let supersedesTarget: ReturnType<typeof resolveEntry> = null;
+      if (input.supersedes) {
+        supersedesTarget = resolveEntry(db, input.supersedes);
+        if (!supersedesTarget || supersedesTarget.kind !== input.kind) {
+          throw new CtxdError("VALIDATION", "supersedes target not found or a different kind", {}, "supersedes");
+        }
+      }
       const payload: Record<string, unknown> = {
         kind: input.kind,
         slug,
@@ -243,11 +252,12 @@ function performDirectWrite(
         status,
         significance: input.significance ?? null,
         confirmed_by_user: input.confirmed_by_user ?? false,
+        supersedes: supersedesTarget ? formatRef(supersedesTarget.scopeName, supersedesTarget.id) : null,
       };
-      appendPrimaryEvent(db, ctx, input, { scopeId: scope.id, entryId, op: "create", part: "content", rev: contentRev, parentRevs: [], payload, eventId, hlc });
+      appendPrimaryEvent(db, ctx, input, hash, { scopeId: scope.id, entryId, op: "create", part: "content", rev: contentRev, parentRevs: [], payload, eventId, hlc });
       applyEvent(db, { eventId, scopeId: scope.id, entryId, op: "create", part: "content", rev: contentRev, clientId: ctx.clientId, hlc, payload, prev: null });
 
-      if (input.supersedes) markSuperseded(db, ctx, input.supersedes, input.kind, scope.name, entryId, touchedScopes);
+      if (supersedesTarget) markSuperseded(db, ctx, supersedesTarget, touchedScopes);
       for (const link of links) addRelation(db, ctx, scope.id, entryId, link, touchedScopes);
     }
 
@@ -258,19 +268,8 @@ function performDirectWrite(
   return { id: result.entryId, ref: formatRef(scope.name, result.entryId), rev: result.contentRev, status: result.finalStatus };
 }
 
-function markSuperseded(
-  db: Database.Database,
-  ctx: WriteContext,
-  supersedesRef: string,
-  kind: Kind,
-  scopeName: string,
-  newEntryId: string,
-  touchedScopes: Set<string>,
-): void {
-  const target = resolveEntry(db, supersedesRef);
-  if (!target || target.kind !== kind) {
-    throw new CtxdError("VALIDATION", "supersedes target not found or a different kind", {}, "supersedes");
-  }
+/** Marks the superseded entry via its own status event (the new entry's `supersedes` column is set from its own create payload). */
+function markSuperseded(db: Database.Database, ctx: WriteContext, target: NonNullable<ReturnType<typeof resolveEntry>>, touchedScopes: Set<string>): void {
   const eventId = newId();
   const hlc = ctx.clock.tick();
   const rev = makeRev(1, eventId);
@@ -278,7 +277,6 @@ function markSuperseded(
   const prev = { status: target.status };
   appendSideEvent(db, ctx, { scopeId: target.scopeId, entryId: target.id, op: "status", part: "status", rev, parentRevs: [target.statusRev], payload, prev, eventId, hlc });
   applyEvent(db, { eventId, scopeId: target.scopeId, entryId: target.id, op: "status", part: "status", rev, clientId: ctx.clientId, hlc, payload, prev });
-  db.prepare("UPDATE entries SET supersedes = ? WHERE entry_id = ?").run(formatRef(target.scopeName, target.id), newEntryId);
   touchedScopes.add(target.scopeId);
 }
 
@@ -314,7 +312,11 @@ interface ReviewRule {
 /** Review-policy rules (SPEC v6 section 10.4): null means "no matching rule", fall back to defaults. */
 function reviewedStatus(db: Database.Database, scopeId: string, input: Input, clientName: string): Status | null {
   const row = db.prepare("SELECT review_policy FROM scopes WHERE scope_id = ?").get(scopeId) as { review_policy: string };
-  const rules = JSON.parse(row.review_policy) as ReviewRule[];
+  // scopes.review_policy defaults to '{}' in the schema even though SPEC v6 10.4 describes it
+  // as a JSON list of rules (flagged for SPEC-v7); treat anything that isn't an array as "no
+  // rules yet" rather than crashing.
+  const parsed = JSON.parse(row.review_policy) as unknown;
+  const rules = Array.isArray(parsed) ? (parsed as ReviewRule[]) : [];
   const matches = rules.some(
     (r) =>
       r.action === "auto-accept" &&
@@ -353,9 +355,15 @@ interface EventSpec {
   hlc: string;
 }
 
-/** The one event per write that carries the client's request_id/session (idempotency, SPEC v6 section 6 step 2). */
-function appendPrimaryEvent(db: Database.Database, ctx: WriteContext, input: Input, spec: EventSpec): void {
-  insertEvent(db, ctx, spec, input.session ?? null, input.request_id, requestHash({ ...input, request_id: undefined }));
+/**
+ * The one event per write that carries the client's request_id/session (idempotency, SPEC v6
+ * section 6 step 2). `hash` is computed once by writeEntry, from the caller's original input,
+ * and threaded through explicitly: a held write's holding-scope write must store the same hash
+ * the top-level idempotency check will recompute on retry, not one recomputed from whatever
+ * `input` a given call site happens to hold.
+ */
+function appendPrimaryEvent(db: Database.Database, ctx: WriteContext, input: Input, hash: string, spec: EventSpec): void {
+  insertEvent(db, ctx, spec, input.session ?? null, input.request_id, hash);
 }
 
 /** A secondary event from the same write (a supersede side-effect or a link): no request_id of its own. */
@@ -397,9 +405,10 @@ function insertEvent(
 
 function performHeldWrite(
   ctx: WriteContext,
-  client: { id: string },
+  client: { id: string; vendor: string },
   targetScope: { id: string; name: string },
   input: Input,
+  hash: string,
 ): WriteResult {
   const { db } = ctx;
   const clientRow = db.prepare("SELECT name FROM clients WHERE client_id = ?").get(client.id) as { name: string };
@@ -415,8 +424,12 @@ function performHeldWrite(
       holding = loadScopeByName(db, holdingName)!;
     }
 
-    const heldWrite = writeEntry({ ...ctx, assumedPools: undefined }, { ...input, scope: holdingName });
-    if ("held" in heldWrite) throw new Error("unreachable: holding scope writes are never themselves held");
+    // performDirectWrite directly, not the recursive writeEntry: the access decision and the
+    // idempotency check (whether this is fresh) were already made by the caller, and input.scope
+    // is unused by performDirectWrite (it writes into the `holding` scope object given here), so
+    // there is no need to rebuild `input` with a substituted scope just to pass it back through.
+    const heldWrite = performDirectWrite(ctx, client, holding, input, true, hash);
+    if ("held" in heldWrite) throw new Error("unreachable: performDirectWrite never returns a held result");
 
     const poolIds = (db.prepare("SELECT pool_id FROM pool_grants WHERE scope_id = ?").all(targetScope.id) as { pool_id: string }[]).map(
       (r) => r.pool_id,

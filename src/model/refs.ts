@@ -4,7 +4,9 @@
  */
 
 const ULID = /^[0-9A-HJKMNP-TV-Z]{26}$/;
-const SCOPE = /^(?:_me|[a-z0-9][a-z0-9._-]{0,79})$/;
+// Matches fsview/paths.ts's SCOPE_RE: a leading underscore covers the reserved namespaces
+// (_me, _me.<pool>, _hold.<client>, _system), and "@" covers client names like codex@laptop.
+const SCOPE = /^[a-z0-9_][a-z0-9._@-]{0,99}$/;
 
 export interface EntryRef {
   scope: string;
@@ -29,7 +31,7 @@ export function parseRef(value: string): EntryRef | { scope: null; id: string } 
 /** Extract every well-formed reference from free text, e.g. a commit message or handoff. */
 export function findRefs(text: string): EntryRef[] {
   const out: EntryRef[] = [];
-  for (const m of text.matchAll(/ctxd:([a-z0-9_][a-z0-9._-]{0,79})\/([0-9A-HJKMNP-TV-Z]{26})/g)) {
+  for (const m of text.matchAll(/ctxd:([a-z0-9_][a-z0-9._@-]{0,99})\/([0-9A-HJKMNP-TV-Z]{26})/g)) {
     if (SCOPE.test(m[1]!)) out.push({ scope: m[1]!, id: m[2]! });
   }
   return out;
