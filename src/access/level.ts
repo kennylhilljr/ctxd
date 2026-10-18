@@ -1,8 +1,9 @@
 import type { AccessLevel, ScopeKind, Vendor, VendorPolicy } from "../core/kinds.js";
 
 /**
- * Access evaluation (SPEC v4 section 10.5; PRD-pools-access-v1 section 5).
- * Pure function over a snapshot of access metadata. Default deny.
+ * Access evaluation (SPEC v5 sections 10.5 and 10.7; PRD-pools-access-v2 sections 5 to 7).
+ * Pure functions over a snapshot of access metadata. Default deny.
+ * Every call is evaluated under the session's persona: the pools assumed by its persona token.
  */
 
 export interface ClientInfo {
@@ -70,11 +71,20 @@ export function effectiveVendorPolicy(scope: ScopeInfo, snapshot: AccessSnapshot
   return "any";
 }
 
+/** Pools that actually contribute grants in this session: assumed by the token and still a membership. */
+export function effectivePools(client: ClientInfo, snapshot: AccessSnapshot, assumedPools?: readonly string[]): string[] {
+  const member = poolsOf(client, snapshot);
+  if (!assumedPools) return member;
+  const assumed = new Set(assumedPools);
+  return member.filter((p) => assumed.has(p));
+}
+
 export function accessLevel(
   client: ClientInfo,
   scope: ScopeInfo,
   snapshot: AccessSnapshot,
   now: number = Date.now(),
+  assumedPools?: readonly string[],
 ): AccessLevel {
   // 1. Human client: everything.
   if (client.vendor === "human") return "write";
@@ -86,7 +96,7 @@ export function accessLevel(
   if (scope.kind === "hold") return scope.owner === client.id ? "propose" : "none";
 
   // 4. Grants from pools and unexpired temporary grants.
-  const pools = new Set(poolsOf(client, snapshot));
+  const pools = new Set(effectivePools(client, snapshot, assumedPools));
   let level: AccessLevel = "none";
   for (const g of snapshot.grants) {
     if (g.scopeId === scope.id && pools.has(g.poolId)) level = maxLevel(level, g.level);
@@ -121,7 +131,8 @@ export function workingSet(
   for (const s of allScopes) if (s.kind === "me") set.add(s.id);
   let pools = poolsOf(client, snapshot);
   if (poolOverride) pools = pools.filter((p) => p === poolOverride);
-  if (sessionScope && atLeast(accessLevel(client, sessionScope, snapshot, now), "read")) {
+  const assumed = poolOverride ? pools : undefined;
+  if (sessionScope && atLeast(accessLevel(client, sessionScope, snapshot, now, assumed), "read")) {
     if (!poolOverride || snapshot.grants.some((g) => g.poolId === poolOverride && g.scopeId === sessionScope.id)) {
       set.add(sessionScope.id);
     }
@@ -131,6 +142,31 @@ export function workingSet(
     for (const s of allScopes) if (s.kind === "profile" && s.owner === poolOverride) set.add(s.id);
   }
   return [...set].sort();
+}
+
+/** Opaque reference for traversal targets the session cannot read (SPEC v5 10.7). */
+export interface RestrictedRef {
+  ref: string;
+  restricted: true;
+}
+
+/**
+ * Traversal rule: re-check access on every hop. Returns the entry unchanged when readable,
+ * otherwise an opaque reference with no kind, title, summary or status.
+ */
+export function visibleOrRestricted<T extends { ref: string }>(
+  target: T,
+  targetScope: ScopeInfo,
+  client: ClientInfo,
+  snapshot: AccessSnapshot,
+  assumedPools: readonly string[] | undefined,
+  sealedLocked: (scope: ScopeInfo) => boolean = () => false,
+  now: number = Date.now(),
+): T | RestrictedRef {
+  if (sealedLocked(targetScope) || !atLeast(accessLevel(client, targetScope, snapshot, now, assumedPools), "read")) {
+    return { ref: target.ref, restricted: true };
+  }
+  return target;
 }
 
 export type WriteDecision = { kind: "write" } | { kind: "propose" } | { kind: "hold" } | { kind: "forbidden" };

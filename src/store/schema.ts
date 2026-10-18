@@ -1,8 +1,8 @@
 /**
- * Database schema (SPEC v4 section 4). Keep in sync with the spec.
- * The event log is the source of truth; entries, relations, siblings, leases, overlaps, sessions, flags, batches and FTS are materialized.
+ * Database schema (SPEC v5 section 4). Keep in sync with the spec.
+ * The event log is the source of truth; everything else is materialized. Sealed pools use the same schema in their own encrypted file (SPEC v5 10.6).
  */
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 export const SCHEMA_SQL = `
 CREATE TABLE nodes (
@@ -119,6 +119,8 @@ CREATE TABLE pools (
   name         TEXT NOT NULL UNIQUE,   -- e.g. pool-dev; "all" is reserved
   description  TEXT NOT NULL DEFAULT '',
   defaults     TEXT NOT NULL DEFAULT '{}', -- JSON: replication, vendor_policy, review_policy, intent_policy for new scopes
+  storage      TEXT NOT NULL DEFAULT 'shared' CHECK (storage IN ('shared','sealed')),
+  sealed_file  TEXT,                   -- for sealed pools: file name derived from pool_id, never from the name
   created_at   TEXT NOT NULL
 );
 
@@ -133,6 +135,31 @@ CREATE TABLE pool_members (
   pool_id      TEXT NOT NULL REFERENCES pools(pool_id),
   principal    TEXT NOT NULL,          -- "client:<client_id>" or "tag:<tag>"
   PRIMARY KEY (pool_id, principal)
+);
+
+CREATE TABLE persona_tokens (
+  token_hash   TEXT PRIMARY KEY,       -- SHA-256 of the token; the secret lives only in the issuing machine's Keychain
+  client_id    TEXT NOT NULL,
+  pools        TEXT NOT NULL,          -- JSON sorted array of pool ids; '[]' means the _me-only token
+  node_id      TEXT NOT NULL,          -- machine whose Keychain holds the secret
+  created_at   TEXT NOT NULL,
+  rotated_from TEXT,
+  revoked_at   TEXT
+);
+CREATE INDEX persona_tokens_client ON persona_tokens(client_id);
+
+CREATE TABLE persona_prefs (           -- resolves ambiguity when several of a client's pools grant a scope
+  client_id    TEXT NOT NULL,
+  scope_id     TEXT NOT NULL,
+  pool_id      TEXT NOT NULL,
+  PRIMARY KEY (client_id, scope_id)
+);
+
+CREATE TABLE pool_enrollments (        -- machines allowed to hold a sealed pool
+  pool_id      TEXT NOT NULL,
+  node_id      TEXT NOT NULL,
+  enrolled_at  TEXT NOT NULL,
+  PRIMARY KEY (pool_id, node_id)
 );
 
 CREATE TABLE client_grants (           -- temporary grants

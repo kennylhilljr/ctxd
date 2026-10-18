@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   accessLevel,
   decideWrite,
+  visibleOrRestricted,
   poolsOf,
   workingSet,
   type AccessSnapshot,
@@ -112,5 +113,41 @@ describe("session working set (SPEC v4 10.5)", () => {
 
   it("includes the profile of each pool that grants the session scope", () => {
     expect(workingSet(codex, scopes.ctxd!, all, snapshot, undefined, 0)).toEqual(["ctxd", "me", "meDev"]);
+  });
+});
+
+describe("per-session persona (SPEC v5 10.5)", () => {
+  it("limits a multi-pool agent to its assumed pool", () => {
+    // desktop belongs to pool-ops and pool-notes; assuming pool-ops makes notes unreachable
+    expect(accessLevel(desktop, scopes.notes!, snapshot, 0, ["pool-ops"])).toBe("none");
+    expect(accessLevel(desktop, scopes.projectB!, snapshot, 0, ["pool-ops"])).toBe("write");
+    expect(accessLevel(desktop, scopes.notes!, snapshot, 0, ["pool-notes"])).toBe("write");
+  });
+
+  it("ignores assumed pools the agent is no longer a member of", () => {
+    expect(accessLevel(codex, scopes.notes!, snapshot, 0, ["pool-notes"])).toBe("none");
+  });
+
+  it("keeps global _me readable under any persona", () => {
+    expect(accessLevel(desktop, scopes.me!, snapshot, 0, ["pool-ops"])).toBe("propose");
+  });
+});
+
+describe("traversal rule (SPEC v5 10.7)", () => {
+  const target = { ref: "ctxd:private-a/01JABCDEFGHJKMNPQRSTVWXYZ0", kind: "fact", title: "secret-ish", summary: "x" };
+
+  it("returns an opaque reference for unreadable targets", () => {
+    expect(visibleOrRestricted(target, scopes.privateA!, codex, snapshot, ["pool-dev"], undefined, 0)).toEqual({
+      ref: target.ref,
+      restricted: true,
+    });
+  });
+
+  it("returns an opaque reference for locked sealed targets even when readable", () => {
+    expect(visibleOrRestricted(target, scopes.privateA!, local, snapshot, ["pool-private"], () => true, 0)).toEqual({
+      ref: target.ref,
+      restricted: true,
+    });
+    expect(visibleOrRestricted(target, scopes.privateA!, local, snapshot, ["pool-private"], () => false, 0)).toBe(target);
   });
 });

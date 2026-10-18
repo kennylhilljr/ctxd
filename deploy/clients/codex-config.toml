@@ -1,10 +1,10 @@
-# Merge into ~/.codex/config.toml (SPEC v3 section 9.5). Requires Codex rust-v0.145.0 or later for SessionEnd.
+# Merge into ~/.codex/config.toml (SPEC v5 section 9.5). This user-level entry is the only one needed; never add ctxd config to a repository. Requires Codex rust-v0.145.0 or later for SessionEnd.
 # Codex clamps hook timeouts to 3 seconds; ctxd hands slow work to a detached worker.
 # New or changed hooks must be approved once in Codex's /hooks browser.
 
 [mcp_servers.ctxd]
-url = "http://127.0.0.1:7411/mcp"
-bearer_token_env_var = "CTXD_CODEX_TOKEN"
+command = "ctxd"
+args = ["mcp", "--client", "codex"]
 
 [[hooks.SessionStart]]
 [[hooks.SessionStart.hooks]]

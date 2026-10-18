@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * ctxd command-line entry point (SPEC v3 section 13).
+ * ctxd command-line entry point (SPEC v5 section 13).
  * Scaffold: commands route to their modules as milestones land.
  */
 import { parseArgs } from "node:util";
@@ -28,6 +28,13 @@ const COMMANDS: Record<string, { milestone: string; summary: string }> = {
   status: { milestone: "M4", summary: "Health, scope, claims and sync" },
   statusline: { milestone: "M4", summary: "One-line status for the Claude Code status line" },
   worker: { milestone: "M2", summary: "Internal: detached hook work" },
+  mcp: { milestone: "M1", summary: "Stdio MCP launcher: picks the persona, proxies with its token" },
+  persona: { milestone: "M1", summary: "Issue, rotate, revoke or prefer persona tokens" },
+  pool: { milestone: "M1", summary: "Persona pools: create, grant, members, seal, enroll, lock" },
+  flag: { milestone: "M1", summary: "Flag or unflag an entry" },
+  quarantine: { milestone: "M2", summary: "Quarantine a source's writes; then revert or release" },
+  purge: { milestone: "M1", summary: "Erase an entry's content everywhere" },
+  tidy: { milestone: "M5", summary: "Interactive cleanup suggestions" },
 };
 
 function usage(): string {
