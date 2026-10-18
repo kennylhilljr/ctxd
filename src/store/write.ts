@@ -80,11 +80,13 @@ function sanitizeField(text: string, failures: Set<string>): string {
 
 export function writeEntry(ctx: WriteContext, input: Input): WriteResult {
   const { db } = ctx;
+  const rejectAs = (scopeId: string | undefined, entryId: string | undefined, err: CtxdError): never => reject(db, ctx.clientId, scopeId, entryId, err);
+
   const scope = loadScopeByName(db, input.scope);
-  if (!scope) reject(db, ctx.clientId, undefined, undefined, new CtxdError("NOT_FOUND", `Scope not found: ${input.scope}`));
+  if (!scope) rejectAs(undefined, undefined, new CtxdError("NOT_FOUND", `Scope not found: ${input.scope}`));
 
   const client = loadClient(db, ctx.clientId);
-  if (!client) reject(db, ctx.clientId, scope.id, undefined, new CtxdError("UNAUTHORIZED", "Unknown or revoked client"));
+  if (!client) rejectAs(scope.id, undefined, new CtxdError("UNAUTHORIZED", "Unknown or revoked client"));
 
   const snapshot = loadAccessSnapshot(db);
   const level = accessLevel(client, scope, snapshot, Date.now(), ctx.assumedPools);
@@ -92,7 +94,7 @@ export function writeEntry(ctx: WriteContext, input: Input): WriteResult {
   const decision = decideWrite(level, vendorBlocked);
 
   if (decision.kind === "forbidden") {
-    reject(db, ctx.clientId, scope.id, undefined, new CtxdError("SCOPE_FORBIDDEN", `No access to scope: ${scope.name}`));
+    rejectAs(scope.id, undefined, new CtxdError("SCOPE_FORBIDDEN", `No access to scope: ${scope.name}`));
   }
 
   // Step 2: idempotency. Runs before the hold/direct branch (matching the spec's own step
@@ -103,26 +105,14 @@ export function writeEntry(ctx: WriteContext, input: Input): WriteResult {
     .get(ctx.clientId, input.request_id) as { entry_id: string; scope_id: string; request_hash: string } | undefined;
   if (existingEvent) {
     if (existingEvent.request_hash !== hash) {
-      reject(
-        db,
-        ctx.clientId,
-        scope.id,
-        existingEvent.entry_id,
-        new CtxdError("IDEMPOTENCY_MISMATCH", "request_id was already used with different input"),
-      );
+      rejectAs(scope.id, existingEvent.entry_id, new CtxdError("IDEMPOTENCY_MISMATCH", "request_id was already used with different input"));
     }
     return replayResult(db, ctx.clientId, existingEvent.entry_id, existingEvent.scope_id);
   }
 
   if (decision.kind === "hold") {
     if (input.id) {
-      reject(
-        db,
-        ctx.clientId,
-        scope.id,
-        input.id,
-        new CtxdError("NOT_ALLOWED", "Cannot update an entry in a scope you cannot write to"),
-      );
+      rejectAs(scope.id, input.id, new CtxdError("NOT_ALLOWED", "Cannot update an entry in a scope you cannot write to"));
     }
     return performHeldWrite(ctx, client, scope, input, hash);
   }
@@ -215,6 +205,7 @@ function performDirectWrite(
   }
 
   const result = db.transaction(() => {
+    const allocSeq = seqAllocator(db, ctx.nodeId);
     const touchedScopes = new Set<string>([scope.id]);
     let entryId: string;
     let contentRev: string;
@@ -225,7 +216,7 @@ function performDirectWrite(
       const hlc = ctx.clock.tick();
       contentRev = makeRev(revVersion(existing.content_rev) + 1, eventId);
       const payload: Record<string, unknown> = { title, body, summary, tags };
-      appendPrimaryEvent(db, ctx, input, hash, { scopeId: scope.id, entryId, op: "update", part: "content", rev: contentRev, parentRevs: [existing.content_rev], payload, eventId, hlc });
+      appendPrimaryEvent(db, ctx, input, hash, allocSeq, { scopeId: scope.id, entryId, op: "update", part: "content", rev: contentRev, parentRevs: [existing.content_rev], payload, eventId, hlc });
       applyEvent(db, { eventId, scopeId: scope.id, entryId, op: "update", part: "content", rev: contentRev, clientId: ctx.clientId, hlc, payload, prev: null });
     } else {
       entryId = newId();
@@ -253,11 +244,11 @@ function performDirectWrite(
         confirmed_by_user: input.confirmed_by_user ?? false,
         supersedes: supersedesTarget ? formatRef(supersedesTarget.scopeName, supersedesTarget.id) : null,
       };
-      appendPrimaryEvent(db, ctx, input, hash, { scopeId: scope.id, entryId, op: "create", part: "content", rev: contentRev, parentRevs: [], payload, eventId, hlc });
+      appendPrimaryEvent(db, ctx, input, hash, allocSeq, { scopeId: scope.id, entryId, op: "create", part: "content", rev: contentRev, parentRevs: [], payload, eventId, hlc });
       applyEvent(db, { eventId, scopeId: scope.id, entryId, op: "create", part: "content", rev: contentRev, clientId: ctx.clientId, hlc, payload, prev: null });
 
-      if (supersedesTarget) markSuperseded(db, ctx, supersedesTarget, touchedScopes);
-      for (const link of links) addRelation(db, ctx, scope.id, entryId, link, touchedScopes);
+      if (supersedesTarget) markSuperseded(db, ctx, supersedesTarget, allocSeq, touchedScopes);
+      for (const link of links) addRelation(db, ctx, scope.id, entryId, link, allocSeq, touchedScopes);
     }
 
     for (const scopeId of touchedScopes) syncSignalsForScope(db, scopeId);
@@ -268,13 +259,13 @@ function performDirectWrite(
 }
 
 /** Marks the superseded entry via its own status event (the new entry's `supersedes` column is set from its own create payload). */
-function markSuperseded(db: Database.Database, ctx: WriteContext, target: NonNullable<ReturnType<typeof resolveEntry>>, touchedScopes: Set<string>): void {
+function markSuperseded(db: Database.Database, ctx: WriteContext, target: NonNullable<ReturnType<typeof resolveEntry>>, allocSeq: () => number, touchedScopes: Set<string>): void {
   const eventId = newId();
   const hlc = ctx.clock.tick();
   const rev = makeRev(1, eventId);
   const payload = { status: "superseded" };
   const prev = { status: target.status };
-  appendSideEvent(db, ctx, { scopeId: target.scopeId, entryId: target.id, op: "status", part: "status", rev, parentRevs: [target.statusRev], payload, prev, eventId, hlc });
+  appendSideEvent(db, ctx, allocSeq, { scopeId: target.scopeId, entryId: target.id, op: "status", part: "status", rev, parentRevs: [target.statusRev], payload, prev, eventId, hlc });
   applyEvent(db, { eventId, scopeId: target.scopeId, entryId: target.id, op: "status", part: "status", rev, clientId: ctx.clientId, hlc, payload, prev });
   touchedScopes.add(target.scopeId);
 }
@@ -285,6 +276,7 @@ function addRelation(
   scopeId: string,
   entryId: string,
   link: { type: string; ref: string; note?: string },
+  allocSeq: () => number,
   touchedScopes: Set<string>,
 ): void {
   const eventId = newId();
@@ -292,7 +284,7 @@ function addRelation(
   const rev = makeRev(1, eventId);
   const linkId = newId();
   const payload = { type: link.type, ref: link.ref, note: link.note ?? null, link_id: linkId };
-  appendSideEvent(db, ctx, { scopeId, entryId, op: "relate", part: "relations", rev, parentRevs: [], payload, prev: null, eventId, hlc });
+  appendSideEvent(db, ctx, allocSeq, { scopeId, entryId, op: "relate", part: "relations", rev, parentRevs: [], payload, prev: null, eventId, hlc });
   applyEvent(db, { eventId, scopeId, entryId, op: "relate", part: "relations", rev, clientId: ctx.clientId, hlc, payload, prev: null });
   const linkTarget = parseRef(link.ref);
   if (linkTarget?.scope) {
@@ -354,6 +346,12 @@ interface EventSpec {
   hlc: string;
 }
 
+/** Allocates origin_seq once per transaction instead of re-querying MAX(origin_seq) per event. */
+function seqAllocator(db: Database.Database, nodeId: string): () => number {
+  let next = nextOriginSeq(db, nodeId);
+  return () => next++;
+}
+
 /**
  * The one event per write that carries the client's request_id/session (idempotency, SPEC v6
  * section 6 step 2). `hash` is computed once by writeEntry, from the caller's original input,
@@ -361,13 +359,13 @@ interface EventSpec {
  * the top-level idempotency check will recompute on retry, not one recomputed from whatever
  * `input` a given call site happens to hold.
  */
-function appendPrimaryEvent(db: Database.Database, ctx: WriteContext, input: Input, hash: string, spec: EventSpec): void {
-  insertEvent(db, ctx, spec, input.session ?? null, input.request_id, hash);
+function appendPrimaryEvent(db: Database.Database, ctx: WriteContext, input: Input, hash: string, allocSeq: () => number, spec: EventSpec): void {
+  insertEvent(db, ctx, spec, input.session ?? null, input.request_id, hash, allocSeq);
 }
 
 /** A secondary event from the same write (a supersede side-effect or a link): no request_id of its own. */
-function appendSideEvent(db: Database.Database, ctx: WriteContext, spec: EventSpec): void {
-  insertEvent(db, ctx, spec, null, null, null);
+function appendSideEvent(db: Database.Database, ctx: WriteContext, allocSeq: () => number, spec: EventSpec): void {
+  insertEvent(db, ctx, spec, null, null, null, allocSeq);
 }
 
 function insertEvent(
@@ -377,6 +375,7 @@ function insertEvent(
   sessionRef: string | null,
   requestId: string | null | undefined,
   reqHash: string | null,
+  allocSeq: () => number,
 ): void {
   db.prepare(
     `INSERT INTO events (event_id, origin_node, origin_seq, hlc, scope_id, entry_id, op, part, parent_revs, rev, client_id, session_ref, request_id, request_hash, payload, prev, received_at)
@@ -384,7 +383,7 @@ function insertEvent(
   ).run(
     spec.eventId,
     ctx.nodeId,
-    nextOriginSeq(db, ctx.nodeId),
+    allocSeq(),
     spec.hlc,
     spec.scopeId,
     spec.entryId,
