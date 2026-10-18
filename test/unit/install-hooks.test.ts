@@ -1,5 +1,16 @@
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { run } from "../../src/cli/install-hooks.js";
+import {
+  claudeCodeSettingsPath,
+  codexConfigPath,
+  installClaudeCodeHooks,
+  installCodexHooks,
+  run,
+  uninstallClaudeCodeHooks,
+  uninstallCodexHooks,
+} from "../../src/cli/install-hooks.js";
 
 interface HookEntry {
   type: string;
@@ -155,16 +166,229 @@ describe("ctxd install-hooks with an invalid --client", () => {
   });
 });
 
-describe("ctxd install-hooks without --dry-run", () => {
-  it("prints the not-yet-implemented message, writes nothing, and exits 0", () => {
-    const code = run(["--client", "claude-code"]);
-    expect(code).toBe(0);
-    expect(errorLines.join("\n")).toContain("isn't implemented yet");
-    expect(errorLines.join("\n")).toContain("planned for a later M2 slice");
-    expect(logLines.length).toBe(0);
+// ---------------------------------------------------------------------------
+// Real write: always against a temporary $HOME, never the real one.
+// ---------------------------------------------------------------------------
+
+let tempHome: string;
+let realHome: string | undefined;
+beforeEach(() => {
+  tempHome = mkdtempSync(join(tmpdir(), "ctxd-install-hooks-home-"));
+  realHome = process.env.HOME;
+  process.env.HOME = tempHome;
+});
+afterEach(() => {
+  process.env.HOME = realHome;
+});
+
+function backupsIn(dir: string): string[] {
+  return existsSync(dir) ? readdirSync(dir).filter((f) => f.includes(".ctxd-backup-")) : [];
+}
+
+describe("installClaudeCodeHooks (real write)", () => {
+  it("creates settings.json from scratch with every ctxd hook, and is idempotent", () => {
+    const path = claudeCodeSettingsPath(tempHome);
+    const first = installClaudeCodeHooks(path);
+    expect(first.changed).toBe(true);
+    expect(first.backupPath).toBeNull(); // nothing existed to back up
+
+    const written = JSON.parse(readFileSync(path, "utf8")) as ClaudeCodeHooksConfig;
+    expect(written.hooks.Stop?.[0]?.hooks[0]).toMatchObject({ command: "ctxd", args: ["hook", "stop", "--client", "claude-code"] });
+
+    const second = installClaudeCodeHooks(path);
+    expect(second.changed).toBe(false);
+    expect(readFileSync(path, "utf8")).toBe(`${JSON.stringify(written, null, 2)}\n`);
+    expect(backupsIn(join(tempHome, ".claude"))).toHaveLength(0); // no-op: no backup taken
   });
 
-  it("does not throw for codex either", () => {
-    expect(() => run(["--client", "codex"])).not.toThrow();
+  it("preserves unrelated settings keys and another tool's hook group for the same event, and backs up the original", () => {
+    const dir = join(tempHome, ".claude");
+    mkdirSync(dir, { recursive: true });
+    const path = join(dir, "settings.json");
+    const original = {
+      permissions: { allow: ["Bash(npm test:*)"] },
+      hooks: { PostToolUse: [{ matcher: "Edit", hooks: [{ type: "command", command: "some-other-tool", timeout: 5 }] }] },
+    };
+    writeFileSync(path, JSON.stringify(original, null, 2));
+
+    const result = installClaudeCodeHooks(path);
+    expect(result.changed).toBe(true);
+    expect(result.backupPath).not.toBeNull();
+    expect(JSON.parse(readFileSync(result.backupPath!, "utf8"))).toEqual(original);
+
+    const written = JSON.parse(readFileSync(path, "utf8")) as { permissions: unknown; hooks: Record<string, HookGroup[]> };
+    expect(written.permissions).toEqual(original.permissions);
+    expect(written.hooks.PostToolUse).toHaveLength(2);
+    expect(written.hooks.PostToolUse?.[0]).toMatchObject({ matcher: "Edit" });
+    expect(written.hooks.PostToolUse?.[1]).toMatchObject({ matcher: "Bash" });
+  });
+
+  it("refuses to touch a settings.json that is not valid JSON", () => {
+    const dir = join(tempHome, ".claude");
+    mkdirSync(dir, { recursive: true });
+    const path = join(dir, "settings.json");
+    writeFileSync(path, "{ not json");
+
+    expect(() => installClaudeCodeHooks(path)).toThrow(/not valid JSON/);
+    expect(readFileSync(path, "utf8")).toBe("{ not json"); // untouched
+  });
+});
+
+describe("uninstallClaudeCodeHooks (real write)", () => {
+  it("removes exactly ctxd's groups, leaving another tool's hooks and other settings keys intact", () => {
+    const path = claudeCodeSettingsPath(tempHome);
+    mkdirSync(join(tempHome, ".claude"), { recursive: true });
+    writeFileSync(
+      path,
+      JSON.stringify({
+        permissions: { allow: ["Bash(npm test:*)"] },
+        hooks: { PostToolUse: [{ matcher: "Edit", hooks: [{ type: "command", command: "some-other-tool", timeout: 5 }] }] },
+      }),
+    );
+    installClaudeCodeHooks(path);
+
+    const result = uninstallClaudeCodeHooks(path);
+    expect(result.changed).toBe(true);
+
+    const written = JSON.parse(readFileSync(path, "utf8")) as { permissions: unknown; hooks: Record<string, HookGroup[]> };
+    expect(written.permissions).toEqual({ allow: ["Bash(npm test:*)"] });
+    expect(written.hooks.PostToolUse).toEqual([{ matcher: "Edit", hooks: [{ type: "command", command: "some-other-tool", timeout: 5 }] }]);
+    expect(written.hooks.Stop).toBeUndefined();
+    expect(written.hooks.SessionStart).toBeUndefined();
+  });
+
+  it("is a no-op when ctxd was never installed", () => {
+    const path = claudeCodeSettingsPath(tempHome);
+    const result = uninstallClaudeCodeHooks(path);
+    expect(result.changed).toBe(false);
+    expect(existsSync(path)).toBe(false);
+  });
+
+  it("round-trips: install then uninstall restores the exact original bytes", () => {
+    const path = claudeCodeSettingsPath(tempHome);
+    mkdirSync(join(tempHome, ".claude"), { recursive: true });
+    const originalText = `${JSON.stringify({ permissions: { allow: [] } }, null, 2)}\n`;
+    writeFileSync(path, originalText);
+
+    installClaudeCodeHooks(path);
+    uninstallClaudeCodeHooks(path);
+
+    expect(readFileSync(path, "utf8")).toBe(originalText);
+  });
+});
+
+describe("installCodexHooks (real write)", () => {
+  it("creates config.toml from scratch, and is idempotent", () => {
+    const path = codexConfigPath(tempHome);
+    const first = installCodexHooks(path);
+    expect(first.changed).toBe(true);
+    expect(first.backupPath).toBeNull();
+    const text = readFileSync(path, "utf8");
+    expect(text).toContain("[mcp_servers.ctxd]");
+    expect(text).toContain(">>> ctxd managed block");
+
+    const second = installCodexHooks(path);
+    expect(second.changed).toBe(false);
+    expect(readFileSync(path, "utf8")).toBe(text);
+  });
+
+  it("preserves unrelated TOML content byte for byte outside ctxd's marked block, and backs up the original", () => {
+    const dir = join(tempHome, ".codex");
+    mkdirSync(dir, { recursive: true });
+    const path = join(dir, "config.toml");
+    const original = `# my own notes\n[mcp_servers.other]\ncommand = "other"\n`;
+    writeFileSync(path, original);
+
+    const result = installCodexHooks(path);
+    expect(result.changed).toBe(true);
+    expect(readFileSync(result.backupPath!, "utf8")).toBe(original);
+
+    const written = readFileSync(path, "utf8");
+    expect(written.startsWith(original)).toBe(true);
+    expect(written).toContain("[mcp_servers.ctxd]");
+    expect(written).toContain("[mcp_servers.other]");
+  });
+
+  it("replaces a stale ctxd block in place rather than duplicating it", () => {
+    const path = codexConfigPath(tempHome);
+    installCodexHooks(path);
+    const afterFirst = readFileSync(path, "utf8");
+
+    // Simulate a future version of ctxd's own block changing: hand-edit between the markers.
+    const tampered = afterFirst.replace("timeout = 3\n\n[[hooks.Stop", "timeout = 99\n\n[[hooks.Stop");
+    writeFileSync(path, tampered);
+
+    const result = installCodexHooks(path);
+    expect(result.changed).toBe(true);
+    const written = readFileSync(path, "utf8");
+    expect(written).toBe(afterFirst); // restored to the canonical block, not appended again
+    expect(written.match(/ctxd managed block \(added/g)).toHaveLength(1);
+  });
+});
+
+describe("uninstallCodexHooks (real write)", () => {
+  it("removes exactly ctxd's block, leaving the rest exactly as it was", () => {
+    const path = codexConfigPath(tempHome);
+    const dir = join(tempHome, ".codex");
+    mkdirSync(dir, { recursive: true });
+    const original = `# my own notes\n[mcp_servers.other]\ncommand = "other"\n`;
+    writeFileSync(path, original);
+
+    installCodexHooks(path);
+    const result = uninstallCodexHooks(path);
+    expect(result.changed).toBe(true);
+    expect(readFileSync(path, "utf8")).toBe(original);
+  });
+
+  it("is a no-op when ctxd was never installed", () => {
+    const path = codexConfigPath(tempHome);
+    const result = uninstallCodexHooks(path);
+    expect(result.changed).toBe(false);
+    expect(existsSync(path)).toBe(false);
+  });
+});
+
+describe("ctxd install-hooks CLI, real write (against a temporary HOME)", () => {
+  it("installs for claude-code, reports the path, and prints the MCP registration reminder", () => {
+    const code = run(["--client", "claude-code"]);
+    expect(code).toBe(0);
+    const output = logLines.join("\n");
+    expect(output).toContain("installed ctxd's hooks into");
+    expect(output).toContain(join(tempHome, ".claude", "settings.json"));
+    expect(output).toContain("claude mcp add");
+    expect(existsSync(claudeCodeSettingsPath(tempHome))).toBe(true);
+  });
+
+  it("installs for codex and prints the hooks-approval reminder", () => {
+    const code = run(["--client", "codex"]);
+    expect(code).toBe(0);
+    const output = logLines.join("\n");
+    expect(output).toContain("installed ctxd's hooks into");
+    expect(output.toLowerCase()).toContain("approved");
+    expect(existsSync(codexConfigPath(tempHome))).toBe(true);
+  });
+
+  it("a second run reports nothing to do", () => {
+    run(["--client", "claude-code"]);
+    logLines = [];
+    const code = run(["--client", "claude-code"]);
+    expect(code).toBe(0);
+    expect(logLines.join("\n")).toContain("nothing to do");
+  });
+
+  it("--uninstall removes what install added", () => {
+    run(["--client", "claude-code"]);
+    logLines = [];
+    const code = run(["--client", "claude-code", "--uninstall"]);
+    expect(code).toBe(0);
+    expect(logLines.join("\n")).toContain("removed ctxd's hooks from");
+    const settings = JSON.parse(readFileSync(claudeCodeSettingsPath(tempHome), "utf8")) as ClaudeCodeHooksConfig;
+    expect(settings.hooks ?? {}).toEqual({});
+  });
+
+  it("rejects --dry-run combined with --uninstall", () => {
+    const code = run(["--client", "claude-code", "--dry-run", "--uninstall"]);
+    expect(code).toBe(1);
+    expect(errorLines.join("\n")).toContain("cannot be combined");
   });
 });
