@@ -13,7 +13,16 @@ export const KINDS = [
 ] as const;
 export type Kind = (typeof KINDS)[number];
 
-export const STATUSES = ["active", "proposed", "superseded", "archived", "conflicted", "deleted"] as const;
+export const STATUSES = [
+  "active",
+  "proposed",
+  "flagged",
+  "quarantined",
+  "superseded",
+  "archived",
+  "conflicted",
+  "deleted",
+] as const;
 export type Status = (typeof STATUSES)[number];
 
 /** Kinds whose content cannot be updated after creation (SPEC section 4). */
@@ -37,3 +46,7 @@ export type Replication = "all" | "home" | "local";
 export type VendorPolicy = "any" | "local-only";
 export type Vendor = "anthropic" | "openai" | "google" | "local" | "human" | "other";
 export type NodeRole = "home" | "roaming";
+export type AccessLevel = "none" | "read" | "propose" | "write";
+export type ScopeKind = "project" | "me" | "profile" | "hold";
+export const FLAG_PROBLEMS = ["wrong", "stale", "duplicate", "unsafe"] as const;
+export type FlagProblem = (typeof FLAG_PROBLEMS)[number];

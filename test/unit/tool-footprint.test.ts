@@ -16,13 +16,14 @@ describe("MCP footprint (PRD NFR-4)", () => {
     expect(estimateTokens(payload)).toBeLessThan(1500);
   });
 
-  it("exposes exactly the six PRD tools", () => {
+  it("exposes exactly the seven PRD tools", () => {
     expect(TOOLS.map((t) => t.name)).toEqual([
       "context_brief",
       "context_search",
       "context_get",
       "context_write",
       "context_handoff",
+      "context_flag",
       "context_claim",
     ]);
   });

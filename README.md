@@ -10,6 +10,8 @@ A local-first shared context store for AI agents. Claude Code, Codex, Claude Des
 - **Hooks do the work.** Hooks load a compact brief when a session starts and capture a handoff when work ends ([Hooks PRD](docs/prd/components/PRD-hooks-v1.md)).
 - **Private sync.** Replicas sync over your tailnet using an append-only event log, and work fully offline ([ADR 0002](docs/adr/0002-event-log-sync.md)).
 - **Reviewed content.** Agent-written decisions and conventions are *proposed* until you approve them with `ctxd review`.
+- **Persona pools.** Agents are assigned to personas that grant specific projects; they share context inside a pool and never write into one without your permission ([Pools PRD](docs/prd/components/PRD-pools-access-v1.md)).
+- **Easy cleanup.** Flag, quarantine and revert, roll back, or purge bad context ([Context hygiene PRD](docs/prd/components/PRD-context-hygiene-v1.md)).
 - **Claims with write intent.** Agents declare which paths they will touch, so overlaps between agents are caught early ([Claims PRD](docs/prd/components/PRD-claims-v1.md)).
 
 ## Documents
@@ -18,15 +20,17 @@ The PRD is a parent document plus component PRDs that reference each other. Each
 
 | Document | Purpose |
 |---|---|
-| [PRD v3](docs/prd/PRD-v3.md) (parent) | Vision, goals, scope, cross-cutting requirements, milestones, risks, and the index of component PRDs |
-| [Knowledge model](docs/prd/components/PRD-knowledge-model-v1.md) | What is stored: kinds, versioned parts, references, relationships, history |
-| [Hooks and agent lifecycle](docs/prd/components/PRD-hooks-v2.md) | **When agents read and write**: hooks, the Stop-hook nudge, per-client behavior, crash sweep, bypass |
-| [Claims and write intent](docs/prd/components/PRD-claims-v2.md) | Task claims, write intent, overlap, drift, stale-claim takeover |
-| [Trust and safety](docs/prd/components/PRD-trust-safety-v2.md) | Redaction, capture filters, path guard, provenance, review queue, tokens and access |
-| [Replication and offline work](docs/prd/components/PRD-replication-v2.md) | Per-machine replicas, sync over Tailscale, per-part conflicts |
-| [Briefs and search](docs/prd/components/PRD-briefs-search-v2.md) | What agents receive when they read: detail tiers, lessons, caps |
-| [Spec v3](docs/spec/SPEC-v3.md) | Architecture, data model, MCP tools, hooks, sync, security, operations; traceability to the component PRDs |
-| [Prior art v3](docs/research/prior-art-v3.md) | Survey of related projects, including coordinate-agents, OpenWork, OpenViking and DataHub, and what was adopted |
+| [PRD v4](docs/prd/PRD-v4.md) (parent) | Vision, goals, scope, cross-cutting requirements, milestones, risks, and the index of component PRDs |
+| [Knowledge model](docs/prd/components/PRD-knowledge-model-v2.md) | What is stored: kinds, statuses, versioned parts, references, relationships, history |
+| [Persona pools and access](docs/prd/components/PRD-pools-access-v1.md) | Who sees and writes what: personas, grants, holding scopes, access requests |
+| [Hooks and agent lifecycle](docs/prd/components/PRD-hooks-v3.md) | **When agents read and write**: hooks, the Stop-hook nudge, per-client behavior, crash sweep, bypass |
+| [Claims and write intent](docs/prd/components/PRD-claims-v3.md) | Task claims, write intent, overlap, drift, stale-claim takeover |
+| [Trust and safety](docs/prd/components/PRD-trust-safety-v3.md) | Redaction, capture filters, path guard, provenance, review queue, tokens |
+| [Context hygiene](docs/prd/components/PRD-context-hygiene-v1.md) | Cleaning bad context: flag, quarantine and revert, rollback, purge, tidy |
+| [Replication and offline work](docs/prd/components/PRD-replication-v3.md) | Per-machine replicas, sync over Tailscale, per-part conflicts, purge propagation |
+| [Briefs and search](docs/prd/components/PRD-briefs-search-v3.md) | What agents receive when they read: detail tiers, lessons, caps, persona narrowing |
+| [Spec v4](docs/spec/SPEC-v4.md) | Architecture, data model, MCP tools, hooks, sync, access, cleanup, security, operations; traceability |
+| [Prior art v3](docs/research/prior-art-v3.md) | Survey of related projects and what was adopted |
 | [ADRs](docs/adr/) | Key decisions |
 
 ## Development

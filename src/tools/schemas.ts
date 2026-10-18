@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { KINDS } from "../core/kinds.js";
+import { FLAG_PROBLEMS, KINDS } from "../core/kinds.js";
 
 /**
  * MCP tool contracts (SPEC section 8.2).
@@ -81,6 +81,13 @@ export const contextClaimInput = z.object({
   request_id: requestId.optional(),
 });
 
+export const contextFlagInput = z.object({
+  ref: z.string().min(1).describe("Entry id or ctxd: reference"),
+  problem: z.enum(FLAG_PROBLEMS),
+  reason: z.string().min(1).max(300),
+  request_id: requestId.optional(),
+});
+
 export interface ToolContract {
   name: string;
   description: string;
@@ -113,6 +120,11 @@ export const TOOLS: readonly ToolContract[] = [
     name: "context_handoff",
     description: "Write a handoff (done, next, open questions) or read the latest ones.",
     input: contextHandoffInput,
+  },
+  {
+    name: "context_flag",
+    description: "Flag an entry contradicted by code, the user or facts. It leaves briefs until reviewed.",
+    input: contextFlagInput,
   },
   {
     name: "context_claim",

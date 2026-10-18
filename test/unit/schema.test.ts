@@ -2,7 +2,7 @@ import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 import { SCHEMA_SQL } from "../../src/store/schema.js";
 
-describe("schema (SPEC v3 section 4)", () => {
+describe("schema (SPEC v4 section 4)", () => {
   it("applies cleanly to an empty SQLite database", () => {
     const db = new Database(":memory:");
     db.exec(SCHEMA_SQL);
@@ -10,7 +10,7 @@ describe("schema (SPEC v3 section 4)", () => {
       .prepare("SELECT name FROM sqlite_master WHERE type IN ('table') ORDER BY name")
       .all()
       .map((r) => (r as { name: string }).name);
-    for (const t of ["events", "entries", "relations", "scope_repos", "rejections", "leases", "claim_overlaps", "sessions", "sync_state"]) {
+    for (const t of ["events", "entries", "relations", "scope_repos", "rejections", "leases", "claim_overlaps", "sessions", "sync_state", "pools", "pool_grants", "pool_members", "client_grants", "access_requests", "flags", "batches", "batch_members", "read_stats"]) {
       expect(tables).toContain(t);
     }
   });

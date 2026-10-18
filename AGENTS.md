@@ -2,7 +2,7 @@
 
 ## Read first
 
-- The parent [PRD v3](docs/prd/PRD-v3.md), the latest version of each component PRD in [docs/prd/components/](docs/prd/components/), and [Spec v3](docs/spec/SPEC-v3.md) are the source of truth. If code and spec disagree, raise it; do not silently diverge.
+- The parent [PRD v4](docs/prd/PRD-v4.md), the latest version of each component PRD in [docs/prd/components/](docs/prd/components/), and [Spec v4](docs/spec/SPEC-v4.md) are the source of truth. If code and spec disagree, raise it; do not silently diverge.
 - Component PRDs reference their parent, their siblings and the spec sections that implement them. Keep those references current when adding or versioning a document.
 - Use the latest numbered version of each document. Never edit a past version; create the next numbered file instead.
 
@@ -14,6 +14,8 @@
 - **The event log is the source of truth.** Never mutate materialized state without an event (ADR 0002).
 - **Sync changes ship with tests.** Every change to sync or apply comes with property tests for convergence.
 - **No secrets in fixtures or docs.**
+- **Access is default deny.** Every new tool or command goes through the access evaluation in Spec 10.5; agents never get human-only operations.
+- **Purge is the only history rewrite.** Nothing else may modify stored events (Spec 7.6.6).
 - **Writing style for docs:** no em dashes, en dashes or double hyphens in prose; use commas, colons, semicolons, periods or parentheses.
 
 ## Commands

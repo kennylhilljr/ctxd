@@ -12,6 +12,7 @@ export const ERROR_CODES = [
   "CLAIM_OVERLAP",
   "BUDGET_EXCEEDED",
   "IDEMPOTENCY_MISMATCH",
+  "NOT_ALLOWED",
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];
