@@ -3,7 +3,7 @@
  * ctxd command-line entry point (SPEC v6 section 13).
  * Scaffold: commands route to their modules as milestones land.
  */
-import { parseArgs } from "node:util";
+import { run as runHookCommand } from "./hook.js";
 import { run as runInitCommand } from "./init.js";
 import { run as runRebuildCommand } from "./rebuild.js";
 import { run as runClientCommand } from "./client.js";
@@ -26,11 +26,7 @@ import { run as runReadCommand } from "./read.js";
 
 /** Each command's parsed-args entry point, added as its milestone lands. */
 const COMMAND_RUNNERS: Record<string, (argv: string[]) => number | Promise<number>> = {
-  hook: (argv) => {
-    // Hooks must never break a session (SPEC section 9.1): exit 0 silently until M2 lands.
-    parseArgs({ args: argv, allowPositionals: true, strict: false });
-    return 0;
-  },
+  hook: runHookCommand,
   init: runInitCommand,
   rebuild: runRebuildCommand,
   client: runClientCommand,
