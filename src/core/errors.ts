@@ -8,7 +8,10 @@ export const ERROR_CODES = [
   "IMMUTABLE_KIND",
   "REDACTED_SECRET",
   "CLAIM_HELD",
+  "CLAIM_STALE",
+  "CLAIM_OVERLAP",
   "BUDGET_EXCEEDED",
+  "IDEMPOTENCY_MISMATCH",
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];

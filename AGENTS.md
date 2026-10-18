@@ -2,7 +2,8 @@
 
 ## Read first
 
-- [PRD v1](docs/prd/PRD-v1.md) and [Spec v1](docs/spec/SPEC-v1.md) are the source of truth. If code and spec disagree, raise it; do not silently diverge.
+- The parent [PRD v2](docs/prd/PRD-v2.md), its component PRDs in [docs/prd/components/](docs/prd/components/), and [Spec v2](docs/spec/SPEC-v2.md) are the source of truth. If code and spec disagree, raise it; do not silently diverge.
+- Component PRDs reference their parent, their siblings and the spec sections that implement them. Keep those references current when adding or versioning a document.
 - Use the latest numbered version of each document. Never edit a past version; create the next numbered file instead.
 
 ## Rules

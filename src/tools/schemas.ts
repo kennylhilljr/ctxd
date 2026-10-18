@@ -67,6 +67,13 @@ export const contextClaimInput = z.object({
   action: z.enum(["claim", "release", "list"]),
   task_id: z.string().optional(),
   title: z.string().min(1).max(200).optional().describe("Creates the task if new"),
+  paths: z
+    .array(z.string().min(1).max(512))
+    .max(50)
+    .optional()
+    .describe("Repo-relative globs you expect to change; [] = no writes"),
+  take_over: z.boolean().optional().describe("Take over a stale claim after checking its facts"),
+  changed_files: z.array(z.string().min(1).max(512)).max(500).optional().describe("On release"),
   ttl_minutes: z.number().int().min(15).max(1440).default(120),
   request_id: requestId.optional(),
 });
@@ -106,7 +113,7 @@ export const TOOLS: readonly ToolContract[] = [
   },
   {
     name: "context_claim",
-    description: "Claim, release or list task leases so agents do not duplicate work.",
+    description: "Claim, release or list tasks. Pass paths to detect overlap with other agents' claims.",
     input: contextClaimInput,
   },
 ];

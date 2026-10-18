@@ -1,8 +1,8 @@
 /**
- * Database schema (SPEC section 4). Keep in sync with the spec.
- * The event log is the source of truth; entries, siblings, leases and FTS are materialized.
+ * Database schema (SPEC v2 section 4). Keep in sync with the spec.
+ * The event log is the source of truth; entries, siblings, leases, overlaps, sessions and FTS are materialized.
  */
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 export const SCHEMA_SQL = `
 CREATE TABLE nodes (
@@ -18,6 +18,7 @@ CREATE TABLE clients (
   client_id    TEXT PRIMARY KEY,
   name         TEXT NOT NULL UNIQUE,
   vendor       TEXT NOT NULL CHECK (vendor IN ('anthropic','openai','google','local','human','other')),
+  access       TEXT NOT NULL DEFAULT 'write' CHECK (access IN ('read','write')),
   node_id      TEXT NOT NULL REFERENCES nodes(node_id),
   token_hash   TEXT NOT NULL UNIQUE,
   scopes       TEXT NOT NULL DEFAULT '["*"]',
@@ -32,11 +33,13 @@ CREATE TABLE scopes (
   replication   TEXT NOT NULL DEFAULT 'all' CHECK (replication IN ('all','home','local')),
   vendor_policy TEXT NOT NULL DEFAULT 'any' CHECK (vendor_policy IN ('any','local-only')),
   review_policy TEXT NOT NULL DEFAULT '{}',
+  intent_policy TEXT NOT NULL DEFAULT 'warn' CHECK (intent_policy IN ('observe','warn','strict')),
   created_at    TEXT NOT NULL
 );
 
 CREATE TABLE events (
   event_id     TEXT PRIMARY KEY,
+  schema_version INTEGER NOT NULL DEFAULT 1,
   origin_node  TEXT NOT NULL,
   origin_seq   INTEGER NOT NULL,
   hlc          TEXT NOT NULL,
@@ -48,6 +51,7 @@ CREATE TABLE events (
   client_id    TEXT NOT NULL,
   session_ref  TEXT,
   request_id   TEXT,
+  request_hash TEXT,                 -- SHA-256 of the canonical request input, for idempotency checks
   payload      TEXT NOT NULL,
   received_at  TEXT NOT NULL,
   UNIQUE (origin_node, origin_seq),
@@ -85,13 +89,46 @@ CREATE TABLE entry_siblings (
 
 CREATE TABLE leases (
   task_id      TEXT PRIMARY KEY,
+  scope_id     TEXT NOT NULL,
   holder       TEXT NOT NULL,
+  state        TEXT NOT NULL CHECK (state IN ('active','released','expired','taken_over','lost')),
+  paths        TEXT,                 -- JSON array of normalized patterns; NULL = unknown, '[]' = no writes
   claim_event  TEXT NOT NULL,
   claim_hlc    TEXT NOT NULL,
+  session_ref  TEXT,
+  base_head    TEXT,                 -- git HEAD when claimed, for the drift audit
   expires_at   TEXT NOT NULL,
+  last_activity_hlc TEXT NOT NULL,
   tentative    INTEGER NOT NULL DEFAULT 0,
+  released_at  TEXT,
+  changed_files TEXT,                -- JSON array, recorded on release
+  drift        TEXT,                 -- JSON array of changed files outside paths
+  taken_over_by TEXT,
   lost_by      TEXT
 );
+CREATE INDEX leases_scope_state ON leases(scope_id, state);
+
+CREATE TABLE claim_overlaps (
+  task_id      TEXT NOT NULL,
+  other_task_id TEXT NOT NULL,
+  detected_hlc TEXT NOT NULL,
+  patterns     TEXT NOT NULL,        -- JSON: the overlapping pattern pairs (bounded)
+  policy       TEXT NOT NULL,
+  origin       TEXT NOT NULL CHECK (origin IN ('claim','sync')),
+  PRIMARY KEY (task_id, other_task_id)
+);
+
+CREATE TABLE sessions (
+  session_ref  TEXT PRIMARY KEY,      -- "<client>:<client session id>"
+  client_id    TEXT NOT NULL,
+  scope_id     TEXT,
+  state        TEXT NOT NULL CHECK (state IN ('active','compacting','idle','ended')),
+  started_at   TEXT NOT NULL,
+  last_seen_hlc TEXT NOT NULL,
+  head         TEXT,                  -- latest observed git HEAD
+  recovery     TEXT                   -- JSON: {task_id?, phase, last_request_summary}; no transcript content
+);
+CREATE INDEX sessions_client_state ON sessions(client_id, state);
 
 CREATE TABLE sync_state (
   peer_node    TEXT NOT NULL,
