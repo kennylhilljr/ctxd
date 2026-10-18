@@ -5,6 +5,7 @@
  */
 import { parseArgs } from "node:util";
 import { run as runInitCommand } from "./init.js";
+import { run as runRebuildCommand } from "./rebuild.js";
 
 /** Each command's parsed-args entry point, added as its milestone lands. */
 const COMMAND_RUNNERS: Record<string, (argv: string[]) => number> = {
@@ -14,6 +15,7 @@ const COMMAND_RUNNERS: Record<string, (argv: string[]) => number> = {
     return 0;
   },
   init: runInitCommand,
+  rebuild: runRebuildCommand,
 };
 
 const COMMANDS: Record<string, { milestone: string; summary: string }> = {
