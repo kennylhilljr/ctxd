@@ -1,6 +1,6 @@
 /** `ctxd init`: create config, data dir, node identity and the human client (SPEC v6 13, 1515, 1577). */
 import { parseArgs } from "node:util";
-import { createHash, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { dirname, join } from "node:path";
@@ -8,6 +8,7 @@ import { stringify } from "smol-toml";
 import { DEFAULT_CONFIG_PATH, configSchema, expandHome } from "../config/config.js";
 import { newId } from "../core/ids.js";
 import { nowIso } from "../core/time.js";
+import { sha256Hex } from "../core/hash.js";
 import { openDatabase } from "../store/db.js";
 
 export interface InitOptions {
@@ -19,7 +20,7 @@ export interface InitOptions {
 
 function newToken(): { raw: string; hash: string } {
   const raw = randomBytes(32).toString("hex");
-  const hash = createHash("sha256").update(raw).digest("hex");
+  const hash = sha256Hex(raw);
   return { raw, hash };
 }
 

@@ -1,11 +1,12 @@
 /** `ctxd persona issue|rotate|revoke|prefer`: persona tokens (SPEC v6 section 8.4, 13). */
 import { parseArgs } from "node:util";
 import { join } from "node:path";
-import { createHash, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import type Database from "better-sqlite3";
 import { resolveDataDir } from "./common.js";
 import { openDatabase } from "../store/db.js";
 import { nowIso } from "../core/time.js";
+import { sha256Hex } from "../core/hash.js";
 import { deleteSecret, storeSecret, type KeychainOptions } from "../access/keychain.js";
 
 const SERVICE = "ctxd";
@@ -53,7 +54,7 @@ export function issuePersona(
     return 1;
   }
   const raw = randomBytes(32).toString("hex");
-  const hash = createHash("sha256").update(raw).digest("hex");
+  const hash = sha256Hex(raw);
   db.prepare("INSERT INTO persona_tokens (token_hash, client_id, pools, node_id, created_at) VALUES (?, ?, ?, ?, ?)").run(
     hash,
     client.client_id,
@@ -93,7 +94,7 @@ export function rotatePersona(
     return 1;
   }
   const raw = randomBytes(32).toString("hex");
-  const hash = createHash("sha256").update(raw).digest("hex");
+  const hash = sha256Hex(raw);
   db.prepare("UPDATE persona_tokens SET revoked_at = ? WHERE token_hash = ?").run(nowIso(), old.token_hash);
   db.prepare(
     "INSERT INTO persona_tokens (token_hash, client_id, pools, node_id, created_at, rotated_from) VALUES (?, ?, ?, ?, ?, ?)",

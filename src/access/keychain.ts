@@ -13,7 +13,10 @@ export interface KeychainOptions {
 }
 
 function runSecurity(args: readonly string[]): string {
-  return execFileSync("/usr/bin/security", args as string[], { encoding: "utf8" });
+  // stderr is suppressed: a "not found" result is an expected, already-handled outcome (readSecret
+  // and deleteSecret both catch it), and letting the system security(1) binary print its own
+  // diagnostic straight to this process's stderr would look like an unhandled error to the user.
+  return execFileSync("/usr/bin/security", args as string[], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
 }
 
 export function storeSecret(service: string, account: string, secret: string, opts: KeychainOptions = {}): void {

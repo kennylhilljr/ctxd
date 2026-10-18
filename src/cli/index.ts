@@ -12,9 +12,11 @@ import { run as runPoolCommand } from "./pool.js";
 import { run as runGrantCommand } from "./grant.js";
 import { run as runAccessCommand } from "./access.js";
 import { run as runPersonaCommand } from "./persona.js";
+import { run as runServerCommand } from "./server.js";
+import { run as runMcpCommand } from "./mcp.js";
 
 /** Each command's parsed-args entry point, added as its milestone lands. */
-const COMMAND_RUNNERS: Record<string, (argv: string[]) => number> = {
+const COMMAND_RUNNERS: Record<string, (argv: string[]) => number | Promise<number>> = {
   hook: (argv) => {
     // Hooks must never break a session (SPEC section 9.1): exit 0 silently until M2 lands.
     parseArgs({ args: argv, allowPositionals: true, strict: false });
@@ -28,6 +30,8 @@ const COMMAND_RUNNERS: Record<string, (argv: string[]) => number> = {
   grant: runGrantCommand,
   access: runAccessCommand,
   persona: runPersonaCommand,
+  server: runServerCommand,
+  mcp: runMcpCommand,
 };
 
 const COMMANDS: Record<string, { milestone: string; summary: string }> = {
@@ -83,7 +87,7 @@ function usage(): string {
   return ["Usage: ctxd <command> [options]", "", "Commands:", ...lines].join("\n");
 }
 
-function main(argv: string[]): number {
+async function main(argv: string[]): Promise<number> {
   const [command, ...rest] = argv;
   if (!command || command === "help" || command === "--help") {
     console.log(usage());
@@ -99,9 +103,17 @@ function main(argv: string[]): number {
     return 2;
   }
   const runner = COMMAND_RUNNERS[command];
-  if (runner) return runner(rest);
+  if (runner) return await runner(rest);
   console.error(`ctxd ${command}: not implemented yet (planned for ${entry.milestone}).`);
   return 1;
 }
 
-process.exitCode = main(process.argv.slice(2));
+main(process.argv.slice(2)).then(
+  (code) => {
+    process.exitCode = code;
+  },
+  (err: unknown) => {
+    console.error(err instanceof Error ? err.message : String(err));
+    process.exitCode = 1;
+  },
+);
