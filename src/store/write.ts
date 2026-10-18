@@ -6,6 +6,7 @@ import { makeRev, newId, revVersion } from "../core/ids.js";
 import type { HlcClock } from "../core/hlc.js";
 import { nowIso } from "../core/time.js";
 import { ALWAYS_REVIEWED_KINDS, defaultAgentStatus, IMMUTABLE_KINDS, type Kind, type Status } from "../core/kinds.js";
+import { isFlagOn } from "../config/flags.js";
 import { CtxdError } from "../core/errors.js";
 import { sanitizeAgentText } from "../security/redact.js";
 import { parseSkill } from "../skills/skillmd.js";
@@ -28,6 +29,8 @@ export interface WriteContext {
   clientId: string;
   /** The session persona's pools; undefined = every pool the client belongs to (no persona yet). */
   assumedPools?: readonly string[];
+  /** Effective feature flags (PRD-feature-flags-v1); undefined only in call sites predating M3, where every flag behaves as on. */
+  flags?: Map<string, boolean>;
 }
 
 export type WriteResult =
@@ -236,7 +239,10 @@ function performDirectWrite(
   } else if (forceProposed || ALWAYS_REVIEWED_KINDS.has(input.kind)) {
     status = "proposed";
   } else {
-    status = reviewedStatus(db, scope.id, input, loadClientName(db, client.id)) ?? defaultAgentStatus(input.kind, input.significance);
+    // review.remembered_rules off (PRD-feature-flags-v1 section 4): every rule is ignored, so
+    // everything proposed waits for review instead of auto-accepting.
+    const rememberedRules = isFlagOn(ctx.flags, "review.remembered_rules");
+    status = (rememberedRules ? reviewedStatus(db, scope.id, input, loadClientName(db, client.id)) : null) ?? defaultAgentStatus(input.kind, input.significance);
   }
 
   const result = db.transaction(() => {

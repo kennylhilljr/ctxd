@@ -59,6 +59,8 @@ export const configSchema = z.object({
       dir: z.string().default("~/Library/Application Support/ctxd/mirror"),
     })
     .default({ enabled: false, dir: "~/Library/Application Support/ctxd/mirror" }),
+  /** Feature flags (PRD-feature-flags-v1 section 2): per machine, never synced. */
+  features: z.record(z.string(), z.boolean()).default({}),
 });
 
 export type CtxdConfig = z.infer<typeof configSchema>;
