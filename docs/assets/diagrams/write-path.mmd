@@ -1,0 +1,9 @@
+flowchart TB
+  w["context_write, hook capture or CLI"] --> acc{"Access check<br/>(persona pools)"}
+  acc -- "not allowed" --> hold["Held for your approval"]
+  acc -- "allowed" --> val["Idempotency and validation<br/>(request_id, aliases, kind rules)"]
+  val --> san["Sanitize<br/>(private blocks, hidden characters, secrets)"]
+  san --> cas["Concurrency check and status<br/>(expected_rev, active or proposed)"]
+  cas --> log[("Event log<br/>(source of truth)")]
+  log --> mat["Materialize<br/>(entries, relations, FTS, signals)"]
+  mat --> out["Briefs, search, ctxd:// paths, sync"]

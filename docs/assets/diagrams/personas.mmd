@@ -1,0 +1,26 @@
+flowchart LR
+  subgraph agents["Agents"]
+    a1["claude-code@laptop"]
+    a2["codex@laptop"]
+    a3["claude-desktop@hub"]
+  end
+  subgraph pools["Persona pools"]
+    p1["pool-dev"]
+    p2["pool-notes"]
+    p3["pool-private<br/>(sealed, Touch ID)"]
+  end
+  subgraph scopes["Scopes"]
+    s1["sample-app"]
+    s2["shared-tools"]
+    s3["notes"]
+    s4["private-a"]
+  end
+  me["_me<br/>(global memory)"]
+  a1 --> p1
+  a2 --> p1
+  a3 --> p2
+  p1 -- "write" --> s1
+  p1 -- "read" --> s2
+  p2 -- "write" --> s3
+  p3 -- "propose" --> s4
+  agents -. "every agent reads" .-> me

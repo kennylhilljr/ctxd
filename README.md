@@ -70,122 +70,56 @@ Mid-session, agents use seven small MCP tools (`context_brief`, `context_search`
 
 Each Mac runs one `ctxd server`. Agents reach it only on `127.0.0.1`; replicas reach each other only through `tailscale serve` on the tailnet.
 
-```mermaid
-flowchart LR
-  subgraph laptop["Laptop (travels)"]
-    direction TB
-    cc["Claude Code"] -- "hooks" --> hook["ctxd hook"]
-    cx["Codex"] -- "hooks" --> hook
-    cc -- "MCP (stdio)" --> mcp["ctxd mcp launcher"]
-    cx -- "MCP (stdio)" --> mcp
-    dt["Claude Desktop"] -- "MCP (stdio)" --> mcp
-    hook -- "127.0.0.1:7411" --> srv["ctxd server"]
-    mcp -- "127.0.0.1:7411" --> srv
-    srv --- db[("SQLite (WAL)<br/>event log, entries, FTS")]
-    srv --- sync1["sync listener<br/>127.0.0.1:7412"]
-  end
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/diagrams/overview-dark.svg">
+  <img src="docs/assets/diagrams/overview-light.svg" alt="Architecture: agents on each Mac talk to a local ctxd server on 127.0.0.1; servers replicate over tailscale serve" width="100%">
+</picture>
 
-  subgraph hub["Hub Mac (always on, at home)"]
-    direction TB
-    phone["Phone over SSH<br/>(Claude Code or Codex)"] --> srv2["ctxd server"]
-    srv2 --- db2[("SQLite (WAL)")]
-    srv2 --- sync2["sync listener<br/>127.0.0.1:7412"]
-  end
-
-  sync1 <-- "pull over tailscale serve<br/>(tailnet only, never Funnel)" --> sync2
-```
+<sub>Source: [overview.mmd](docs/assets/diagrams/overview.mmd)</sub>
 
 ### When agents read and write
 
 Continuity does not depend on an agent remembering to use a tool. Lifecycle hooks do the work at session boundaries; instructions and explicit requests cover the rest.
 
-```mermaid
-sequenceDiagram
-  autonumber
-  participant U as You
-  participant A as Agent (Claude Code or Codex)
-  participant H as ctxd hook
-  participant S as ctxd server
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/diagrams/lifecycle-dark.svg">
+  <img src="docs/assets/diagrams/lifecycle-light.svg" alt="Sequence: hooks load a brief at session start, agents claim, search and write mid-session, and hooks record commits, handoffs and session end" width="100%">
+</picture>
 
-  A->>H: SessionStart
-  H->>S: Brief for this scope and persona
-  S-->>A: Budgeted brief (signals, status, handoff, claims, skills)
-  U->>A: "Fix the flaky sync test"
-  A->>S: context_claim (paths test/sync/**)
-  S-->>A: Lease, plus any overlap with other agents
-  A->>S: context_search and context_get as needed
-  U->>A: "Yes, use tombstones"
-  A->>S: context_write (decision, proposed)
-  A->>H: PostToolUse (git commit)
-  H->>S: Journal entry for the commit
-  A->>H: Stop
-  H-->>A: Nudge to write a handoff (once, rate limited)
-  A->>S: context_handoff (done, next, open questions)
-  A->>H: SessionEnd
-  H->>S: Session journal entry, claim released
-```
+<sub>Source: [lifecycle.mmd](docs/assets/diagrams/lifecycle.mmd)</sub>
 
 ### Every write takes one path
 
 Agents, hooks and the CLI all write through one function. The event log is the source of truth, and everything an agent reads is materialized from it.
 
-```mermaid
-flowchart LR
-  w["context_write<br/>hook capture<br/>CLI"] --> acc{"Access check<br/>(persona pools)"}
-  acc -- "allowed" --> idem["Idempotency<br/>(request_id)"]
-  acc -- "not allowed" --> hold["Held for your approval"]
-  idem --> val["Validate<br/>(aliases, kind rules)"]
-  val --> san["Sanitize<br/>(private blocks, hidden<br/>characters, secrets)"]
-  san --> cas["Concurrency check<br/>(expected_rev)"]
-  cas --> st["Status<br/>(active or proposed)"]
-  st --> log[("Event log")]
-  log --> mat["Entries, relations,<br/>FTS, signals"]
-  mat --> out["Briefs, search,<br/>ctxd:// paths, sync"]
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/diagrams/write-path-dark.svg">
+  <img src="docs/assets/diagrams/write-path-light.svg" alt="Write path: access check, validation, sanitization, concurrency check, event log, then materialized entries" width="420">
+</picture>
+
+<sub>Source: [write-path.mmd](docs/assets/diagrams/write-path.mmd)</sub>
 
 ### Personas decide who sees what
 
 Agents belong to persona pools. Each session assumes exactly one persona and sees that pool's scopes plus the global `_me`. Nothing crosses pools unless a scope is placed in both.
 
-```mermaid
-flowchart LR
-  subgraph agents["Agents"]
-    a1["claude-code@laptop"]
-    a2["codex@laptop"]
-    a3["claude-desktop@hub"]
-  end
-  subgraph pools["Persona pools"]
-    p1["pool-dev"]
-    p2["pool-notes"]
-    p3["pool-private<br/>(sealed, Touch ID)"]
-  end
-  subgraph scopes["Scopes"]
-    s1["sample-app"]
-    s2["shared-tools"]
-    s3["notes"]
-    s4["private-a"]
-  end
-  me["_me<br/>(global memory)"]
-  a1 --> p1
-  a2 --> p1
-  a3 --> p2
-  p1 -- "write" --> s1
-  p1 -- "read" --> s2
-  p2 -- "write" --> s3
-  p3 -- "propose" --> s4
-  agents -. "every agent reads" .-> me
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/diagrams/personas-dark.svg">
+  <img src="docs/assets/diagrams/personas-light.svg" alt="Personas: agents belong to pools that grant scopes at read, propose or write; every agent reads the global _me" width="100%">
+</picture>
+
+<sub>Source: [personas.mmd](docs/assets/diagrams/personas.mmd)</sub>
 
 ### Replicas converge, online or not
 
 Every Mac keeps the full event log of the scopes it may hold and pulls what it has not seen yet, so each one works offline and catches up later. Each part of an entry is versioned separately, so approving an entry on one Mac while an agent links it on another is never a conflict.
 
-```mermaid
-flowchart LR
-  L["Laptop (roaming)<br/>works offline"] <-- "pull since last watermark" --> H["Hub (home)<br/>always on"]
-  S["Mac Studio (planned)<br/>adds a local model"] <-- "pull" --> H
-  P["Replication policy:<br/>home-only scopes stay on home Macs,<br/>local scopes never leave their Mac"] -.- H
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/diagrams/replication-dark.svg">
+  <img src="docs/assets/diagrams/replication-light.svg" alt="Replication: laptop, hub and a future Mac Studio pull events from each other; home-only and local scopes stay put" width="620">
+</picture>
+
+<sub>Source: [replication.mmd](docs/assets/diagrams/replication.mmd)</sub>
 
 ## Features
 
@@ -268,6 +202,8 @@ npm test
 ```
 
 Coding agents follow [AGENTS.md](AGENTS.md), including the Claude Code built-in skills every change goes through (`/run`, `/simplify`, `/verify`, `/code-review` and others) and the definition of done.
+
+Architecture diagrams are pre-rendered from `docs/assets/diagrams/*.mmd`; after editing one, run `docs/assets/diagrams/render.sh`.
 
 To watch a build's progress in Claude Code (slices, tests, typecheck, the definition of done, git and PRs), start it with the [ctxd-build mod](tools/claude-mods/ctxd-build/): `claude --plugin-dir tools/claude-mods/ctxd-build`.
 

@@ -1,0 +1,4 @@
+flowchart LR
+  L["Laptop (roaming)<br/>works offline"] <-- "pull since last watermark" --> H["Hub (home)<br/>always on"]
+  S["Mac Studio (planned)<br/>adds a local model"] <-- "pull" --> H
+  P["Replication policy:<br/>home-only scopes stay on home Macs,<br/>local scopes never leave their Mac"] -.- H

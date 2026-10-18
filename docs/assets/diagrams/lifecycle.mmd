@@ -1,0 +1,23 @@
+sequenceDiagram
+  autonumber
+  participant U as You
+  participant A as Agent (Claude Code or Codex)
+  participant H as ctxd hook
+  participant S as ctxd server
+
+  A->>H: SessionStart
+  H->>S: Brief for this scope and persona
+  S-->>A: Budgeted brief (signals, status, handoff, claims, skills)
+  U->>A: "Fix the flaky sync test"
+  A->>S: context_claim (paths test/sync/**)
+  S-->>A: Lease, plus any overlap with other agents
+  A->>S: context_search and context_get as needed
+  U->>A: "Yes, use tombstones"
+  A->>S: context_write (decision, proposed)
+  A->>H: PostToolUse (git commit)
+  H->>S: Journal entry for the commit
+  A->>H: Stop
+  H-->>A: Nudge to write a handoff (once, rate limited)
+  A->>S: context_handoff (done, next, open questions)
+  A->>H: SessionEnd
+  H->>S: Session journal entry, claim released
