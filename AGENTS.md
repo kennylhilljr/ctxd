@@ -18,6 +18,7 @@
 - **Access is default deny.** Every new tool or command goes through the access evaluation in Spec 10.5; agents never get human-only operations.
 - **Purge is the only history rewrite.** Nothing else may modify stored events (Spec 7.6.6).
 - **Writing style for docs:** no em dashes, en dashes or double hyphens in prose; use commas, colons, semicolons, periods or parentheses.
+- **Commits are authored by the owner.** Use the git identity already configured on the machine. Never change `user.name` or `user.email` (repository or global), never pass `--author` or `-c user.*`, and never rewrite authors of existing commits. Agents credit themselves with a `Co-Authored-By:` trailer in the commit message instead. If no identity is configured, stop and ask the owner rather than inventing one.
 
 ## Commands
 
