@@ -31,6 +31,7 @@ import { run as runRememberCommand } from "./remember.js";
 import { run as runLogCommand } from "./log.js";
 import { run as runJournalCommand } from "./journal.js";
 import { run as runSignalsCommand } from "./signals.js";
+import { run as runInstallHooksCommand } from "./install-hooks.js";
 
 /** Each command's parsed-args entry point, added as its milestone lands. */
 const COMMAND_RUNNERS: Record<string, (argv: string[]) => number | Promise<number>> = {
@@ -61,6 +62,7 @@ const COMMAND_RUNNERS: Record<string, (argv: string[]) => number | Promise<numbe
   log: runLogCommand,
   journal: runJournalCommand,
   signals: runSignalsCommand,
+  "install-hooks": runInstallHooksCommand,
 };
 
 const COMMANDS: Record<string, { milestone: string; summary: string }> = {
