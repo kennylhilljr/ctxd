@@ -485,30 +485,28 @@ function performHeldWrite(
       (r) => r.pool_id,
     );
 
-    // Per spec, an access_requests row is opened only when the target scope belongs to a pool.
-    // A held write to a scope that belongs to no pool (SCOPE_FORBIDDEN already never reaches
-    // here) leaves no reviewable request row; flagged for SPEC-v7 as a gap, since the only
-    // present-day recourse is a direct client_grant from the human, not a reviewable request.
-    let requestId = "";
-    if (poolIds.length > 0) {
-      const openRequest = db
-        .prepare("SELECT request_id, held_entries FROM access_requests WHERE client_id = ? AND scope_id = ? AND state = 'open'")
-        .get(client.id, targetScope.id) as { request_id: string; held_entries: string } | undefined;
-      if (openRequest) {
-        const entries = JSON.parse(openRequest.held_entries) as string[];
-        entries.push(heldWrite.ref);
-        db.prepare("UPDATE access_requests SET attempts = attempts + 1, last_at = ?, held_entries = ? WHERE request_id = ?").run(
-          nowIso(),
-          JSON.stringify(entries),
-          openRequest.request_id,
-        );
-        requestId = openRequest.request_id;
-      } else {
-        requestId = newId();
-        db.prepare(
-          "INSERT INTO access_requests (request_id, client_id, scope_id, pool_ids, held_entries, attempts, first_at, last_at, state) VALUES (?, ?, ?, ?, ?, 1, ?, ?, 'open')",
-        ).run(requestId, client.id, targetScope.id, JSON.stringify(poolIds), JSON.stringify([heldWrite.ref]), nowIso(), nowIso());
-      }
+    // An access_requests row opens unconditionally (SPEC v7 section 6 step 1), even when the
+    // target scope belongs to no pool: pool_ids is then the JSON empty array '[]'. This fixes an
+    // M1 gap where a pool-less scope's held writes had no reviewable path at all; `ctxd review`
+    // (a later M2 slice) needs to find these rows regardless of whether pool_ids is empty.
+    let requestId: string;
+    const openRequest = db
+      .prepare("SELECT request_id, held_entries FROM access_requests WHERE client_id = ? AND scope_id = ? AND state = 'open'")
+      .get(client.id, targetScope.id) as { request_id: string; held_entries: string } | undefined;
+    if (openRequest) {
+      const entries = JSON.parse(openRequest.held_entries) as string[];
+      entries.push(heldWrite.ref);
+      db.prepare("UPDATE access_requests SET attempts = attempts + 1, last_at = ?, held_entries = ? WHERE request_id = ?").run(
+        nowIso(),
+        JSON.stringify(entries),
+        openRequest.request_id,
+      );
+      requestId = openRequest.request_id;
+    } else {
+      requestId = newId();
+      db.prepare(
+        "INSERT INTO access_requests (request_id, client_id, scope_id, pool_ids, held_entries, attempts, first_at, last_at, state) VALUES (?, ?, ?, ?, ?, 1, ?, ?, 'open')",
+      ).run(requestId, client.id, targetScope.id, JSON.stringify(poolIds), JSON.stringify([heldWrite.ref]), nowIso(), nowIso());
     }
 
     return { heldWrite, requestId };

@@ -9,18 +9,21 @@ import { loadClient } from "./snapshot.js";
 import type { WriteContext } from "./write.js";
 
 /**
- * `ctxd purge <ref> --reason <text>` (SPEC v6 section 7.6.6): human only, confirmed. Erases
+ * `ctxd purge <ref> --reason <text>` (SPEC v7 section 7.6.6): human only, confirmed. Erases
  * content in place, deletes its FTS row, detaches its relations, and rewrites every OTHER
  * stored event for the entry to {"purged": true} -- the one operation that rewrites events
  * (ADR-0002's own carve-out). The fingerprint blocks re-inserting the same content later
  * (store/write.ts checks it on create).
  *
- * M1 scope notes (flagged for SPEC-v7, not silently cut):
+ * The purge event's own payload carries scope_id, kind and slug (read from the live row at
+ * purge time) so that materialize.ts can reconstruct the stub row by UPSERT on replay, whatever
+ * order the create and purge events are applied in (SPEC-v7 resolution to the M1 finding that a
+ * rebuild after a purge used to leave the entry absent instead of present with placeholder
+ * content).
+ *
+ * M1 scope notes still open, flagged for a later milestone:
  * - "Strip late arrivals" (step 3) is a sync-time concern; there's no replication in M1.
  * - "--rewrite-backups" (step 5) needs the M4 encrypted backup system.
- * - A rebuild after a purge leaves the entry absent from `entries` rather than present with
- *   placeholder content, since the create event that would normally insert the row is one of
- *   the neutered ones (see materialize.ts's top-of-applyEvent comment).
  */
 
 export interface PurgePreview {
@@ -44,11 +47,11 @@ export interface PurgeResult {
 function resolveForPurge(
   db: Database.Database,
   ref: string,
-): { row: { entry_id: string; scope_id: string; kind: string; title: string; body: string }; scopeName: string } {
+): { row: { entry_id: string; scope_id: string; kind: string; slug: string; title: string; body: string }; scopeName: string } {
   const parsed = parseRef(ref);
   const id = parsed ? parsed.id : ref;
-  const row = db.prepare("SELECT entry_id, scope_id, kind, title, body FROM entries WHERE entry_id = ?").get(id) as
-    | { entry_id: string; scope_id: string; kind: string; title: string; body: string }
+  const row = db.prepare("SELECT entry_id, scope_id, kind, slug, title, body FROM entries WHERE entry_id = ?").get(id) as
+    | { entry_id: string; scope_id: string; kind: string; slug: string; title: string; body: string }
     | undefined;
   if (!row) throw new CtxdError("NOT_FOUND", `Entry not found: ${ref}`, {}, "ref");
   const scope = db.prepare("SELECT name FROM scopes WHERE scope_id = ?").get(row.scope_id) as { name: string } | undefined;
@@ -69,7 +72,11 @@ export function purgeEntry(ctx: WriteContext, ref: string, reason: string): Purg
   const nextOriginSeq = (
     db.prepare("SELECT COALESCE(MAX(origin_seq), 0) + 1 AS next FROM events WHERE origin_node = ?").get(ctx.nodeId) as { next: number }
   ).next;
-  const payload = { fingerprint, reason };
+  // scope_id, kind and slug travel in the payload (not just fingerprint/reason) so a replay of
+  // this event alone -- e.g. a rebuild, where the entry's create event has already been neutered
+  // to {"purged": true} -- has enough to reconstruct the stub row (materialize.ts's purge
+  // handler does an UPSERT keyed on these).
+  const payload = { fingerprint, reason, scope_id: row.scope_id, kind: row.kind, slug: row.slug };
 
   db.transaction(() => {
     db.prepare(

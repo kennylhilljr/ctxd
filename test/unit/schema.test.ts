@@ -10,9 +10,17 @@ describe("schema (SPEC v6 section 4)", () => {
       .prepare("SELECT name FROM sqlite_master WHERE type IN ('table') ORDER BY name")
       .all()
       .map((r) => (r as { name: string }).name);
-    for (const t of ["events", "entries", "relations", "scope_repos", "rejections", "leases", "claim_overlaps", "sessions", "sync_state", "pools", "pool_grants", "pool_members", "client_grants", "access_requests", "flags", "batches", "batch_members", "read_stats", "persona_tokens", "persona_prefs", "pool_enrollments", "signals", "skill_syncs", "mirror_files", "tool_metrics"]) {
+    for (const t of ["events", "entries", "relations", "scope_repos", "rejections", "leases", "claim_overlaps", "sessions", "sync_state", "pools", "pool_grants", "pool_members", "client_grants", "access_requests", "flags", "batches", "batch_members", "read_stats", "persona_tokens", "persona_prefs", "pool_enrollments", "signals", "skill_syncs", "mirror_files", "tool_metrics", "commits"]) {
       expect(tables).toContain(t);
     }
+  });
+
+  it("defaults scopes.review_policy to the empty JSON list (SPEC v7 10.4)", () => {
+    const db = new Database(":memory:");
+    db.exec(SCHEMA_SQL);
+    db.prepare("INSERT INTO scopes (scope_id, name, created_at) VALUES ('s1','notes','t')").run();
+    const row = db.prepare("SELECT review_policy FROM scopes WHERE scope_id = 's1'").get() as { review_policy: string };
+    expect(row.review_policy).toBe("[]");
   });
 
   it("accepts the v6 kinds and rejects unknown kinds", () => {

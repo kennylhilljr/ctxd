@@ -46,10 +46,10 @@ export function applyEvent(db: Database.Database, e: EventForMaterialize, { skip
   // 2); replaying one of those neutered events (e.g. a rebuild after a purge) must not try to
   // materialize a create/update/etc with no real payload. The purge event's own payload is never
   // rewritten, so this never short-circuits the purge handler below it.
-  // Known M1 gap (SPEC-v7): this means a rebuild after a purge leaves the entry absent from
-  // `entries` rather than present with placeholder content, since the create event that would
-  // normally insert the row is one of the neutered ones. Flagged rather than engineering a
-  // self-sufficient purge-reconstructs-a-stub-row path under this session's time budget.
+  // Fixed in SPEC-v7 (was an M1 gap): a rebuild after a purge used to leave the entry absent from
+  // `entries`, since the create event that would normally insert the row is one of the neutered
+  // ones. The purge handler below now UPSERTs using scope_id/kind/slug carried in its own event
+  // payload, so it reconstructs the stub row whether or not the create event ran first.
   if ((e.payload as { purged?: boolean }).purged === true) return;
 
   if (e.part === "content" && e.op === "create") {
@@ -222,12 +222,51 @@ export function applyEvent(db: Database.Database, e: EventForMaterialize, { skip
   }
 
   if (e.part === "meta" && e.op === "purge") {
+    const payload = e.payload as { fingerprint: string; scope_id: string; kind: string; slug: string };
     const before = db.prepare("SELECT rowid, title, body, tags FROM entries WHERE entry_id = ?").get(e.entryId) as
       | { rowid: number; title: string; body: string; tags: string }
       | undefined;
+    // UPSERT, not a plain UPDATE (SPEC v7 7.6.6): a rebuild replays the create event neutered to
+    // {"purged": true} (the guard at the top of this function), so the row may not exist yet when
+    // this purge event itself is replayed. scope_id/kind/slug come from the purge event's own
+    // payload (recorded at purge time in store/purge.ts); the other NOT NULL columns get inert
+    // placeholders derived from the purge event (content_rev/status_rev/relations_rev from its
+    // rev, created/updated by/hlc from its client and hlc, status 'archived'), since a purged
+    // entry's status and revisions are never meaningfully read again (get.ts and fts.ts both key
+    // off purged_at, never status, to detect a purged entry).
+    // The ON CONFLICT branch sets every one of those placeholder columns too, not just the
+    // content fields: convergence (SPEC 7.3) requires a purged entry to materialize identically
+    // whether this event finds the row already live (the normal write path) or reconstructs it
+    // from nothing (a rebuild), so a purge must fully normalize the row either way rather than
+    // leave live-only fields (status, content_rev, created_hlc, ...) at their pre-purge values.
     db.prepare(
-      "UPDATE entries SET title = '[purged]', summary = '', body = '', tags = '[]', purged_at = ?, purge_fingerprint = ? WHERE entry_id = ?",
-    ).run(e.hlc, (e.payload as { fingerprint: string }).fingerprint, e.entryId);
+      `INSERT INTO entries (
+         entry_id, scope_id, kind, slug, title, summary, body, tags,
+         content_rev, content_version, status, status_rev, relations_rev,
+         purged_at, purge_fingerprint, created_by, updated_by, created_hlc, updated_hlc
+       ) VALUES (?, ?, ?, ?, '[purged]', '', '', '[]', ?, 1, 'archived', ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT (entry_id) DO UPDATE SET
+         title = '[purged]', summary = '', body = '', tags = '[]',
+         content_rev = excluded.content_rev, content_version = excluded.content_version,
+         status = excluded.status, status_rev = excluded.status_rev, relations_rev = excluded.relations_rev,
+         purged_at = excluded.purged_at, purge_fingerprint = excluded.purge_fingerprint,
+         created_by = excluded.created_by, updated_by = excluded.updated_by,
+         created_hlc = excluded.created_hlc, updated_hlc = excluded.updated_hlc`,
+    ).run(
+      e.entryId,
+      payload.scope_id,
+      payload.kind,
+      payload.slug,
+      e.rev,
+      e.rev,
+      e.rev,
+      e.hlc,
+      payload.fingerprint,
+      e.clientId,
+      e.clientId,
+      e.hlc,
+      e.hlc,
+    );
     // entries_fts is an external-content table: a plain DELETE does nothing (and can corrupt the
     // index); it needs the 'delete' command with the row's prior values, same as syncFtsRow.
     if (!skipFts && before) {

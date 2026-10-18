@@ -236,6 +236,28 @@ describe("writeEntry (SPEC v6 section 6)", () => {
     expect(request.attempts).toBe(1);
   });
 
+  it("holds a write to a scope that belongs to no pool, opening an access_requests row with pool_ids '[]' (SPEC v7 section 6 step 1)", () => {
+    const f = setup();
+    const noPoolScopeId = newId();
+    f.db.prepare("INSERT INTO scopes (scope_id, name, created_at) VALUES (?, 'unassigned', ?)").run(noPoolScopeId, now());
+
+    const result = writeEntry(ctxFor(f, f.agentId), {
+      scope: "unassigned",
+      kind: "note",
+      title: "No pool grants this scope",
+      body: "Held for review.",
+      request_id: requestId(),
+    } as never);
+    if (!("held" in result)) throw new Error("expected a held result");
+    expect(result.access_request).not.toBe("");
+    const request = f.db.prepare("SELECT client_id, scope_id, pool_ids FROM access_requests WHERE request_id = ?").get(
+      result.access_request,
+    ) as { client_id: string; scope_id: string; pool_ids: string };
+    expect(request.client_id).toBe(f.agentId);
+    expect(request.scope_id).toBe(noPoolScopeId);
+    expect(request.pool_ids).toBe("[]");
+  });
+
   it("replays a held write's idempotent retry without bumping access_requests again", () => {
     const f = setup();
     const reqId = requestId();

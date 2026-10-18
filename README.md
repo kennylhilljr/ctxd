@@ -254,7 +254,7 @@ The PRD is a parent document plus component PRDs that reference each other. Each
 | [Filesystem view](docs/prd/components/PRD-filesystem-view-v1.md) | `ctxd://` paths, folder summaries, browsing, the Markdown mirror |
 | [Skills](docs/prd/components/PRD-skills-v1.md) | Shared, approved, versioned procedures for every agent |
 | [Memory and journal](docs/prd/components/PRD-memory-journal-v1.md) | Preferences, the journal, digests, open signals, importance |
-| [Spec v6](docs/spec/SPEC-v6.md) | Architecture, data model, MCP tools, hooks, sync, access, cleanup, security, operations |
+| [Spec v7](docs/spec/SPEC-v7.md) | Architecture, data model, MCP tools, hooks, sync, access, cleanup, security, operations |
 | [Prior art v4](docs/research/prior-art-v4.md) | Related projects and what was adopted |
 | [ADRs](docs/adr/) | Key decisions |
 

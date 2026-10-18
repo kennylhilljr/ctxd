@@ -7,7 +7,7 @@
 | **Date** | 2026-10-18 |
 | **Supersedes** | [PRD v5](PRD-v5.md) |
 | **Component PRDs** | [Knowledge model](components/PRD-knowledge-model-v3.md), [Persona pools and access](components/PRD-pools-access-v2.md), [Hooks](components/PRD-hooks-v5.md), [Claims](components/PRD-claims-v3.md), [Trust and safety](components/PRD-trust-safety-v4.md), [Context hygiene](components/PRD-context-hygiene-v1.md), [Replication](components/PRD-replication-v4.md), [Briefs and search](components/PRD-briefs-search-v4.md), [Filesystem view](components/PRD-filesystem-view-v1.md), [Skills](components/PRD-skills-v1.md), [Memory and journal](components/PRD-memory-journal-v1.md) |
-| **Companion docs** | [Technical spec v6](../spec/SPEC-v6.md), [Prior art v4](../research/prior-art-v4.md), [ADRs](../adr/) |
+| **Companion docs** | [Technical spec v7](../spec/SPEC-v7.md), [Prior art v4](../research/prior-art-v4.md), [ADRs](../adr/) |
 
 ## Changes in v6
 

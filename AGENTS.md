@@ -2,7 +2,7 @@
 
 ## Read first
 
-- The parent [PRD v6](docs/prd/PRD-v6.md), the latest version of each component PRD in [docs/prd/components/](docs/prd/components/) (the parent's component index lists them), and [Spec v6](docs/spec/SPEC-v6.md) are the source of truth. If code and spec disagree, raise it; do not silently diverge.
+- The parent [PRD v6](docs/prd/PRD-v6.md), the latest version of each component PRD in [docs/prd/components/](docs/prd/components/) (the parent's component index lists them), and [Spec v7](docs/spec/SPEC-v7.md) are the source of truth. If code and spec disagree, raise it; do not silently diverge.
 - Component PRDs reference their parent, their siblings and the spec sections that implement them. Keep those references current when adding or versioning a document. Links inside an unchanged component may point to sibling versions current when it was written; the parent PRD's component index is authoritative.
 - Use the latest numbered version of each document. Never edit a past version; create the next numbered file instead.
 
