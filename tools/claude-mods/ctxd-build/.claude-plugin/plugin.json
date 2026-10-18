@@ -1,0 +1,6 @@
+{
+  "name": "ctxd-build",
+  "version": "0.1.0",
+  "description": "Shows ctxd build progress while Claude Code works: milestone slices, tests, typecheck, the definition of done, git and PRs.",
+  "types": "./types/index.d.ts"
+}

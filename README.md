@@ -269,6 +269,8 @@ npm test
 
 Coding agents follow [AGENTS.md](AGENTS.md), including the Claude Code built-in skills every change goes through (`/run`, `/simplify`, `/verify`, `/code-review` and others) and the definition of done.
 
+To watch a build's progress in Claude Code (slices, tests, typecheck, the definition of done, git and PRs), start it with the [ctxd-build mod](tools/claude-mods/ctxd-build/): `claude --plugin-dir tools/claude-mods/ctxd-build`.
+
 <details>
 <summary>Source layout</summary>
 
@@ -289,6 +291,7 @@ src/sync     pull protocol and event apply
 src/brief    brief assembly
 src/search   ranking
 deploy/      launchd and client configuration examples
+tools/       the ctxd-build Claude Code mod
 ```
 
 </details>

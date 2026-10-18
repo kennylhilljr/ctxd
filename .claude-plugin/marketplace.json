@@ -1,0 +1,14 @@
+{
+  "name": "ctxd",
+  "description": "Claude Code mods for building ctxd.",
+  "owner": {
+    "name": "ctxd"
+  },
+  "plugins": [
+    {
+      "name": "ctxd-build",
+      "source": "./tools/claude-mods/ctxd-build",
+      "description": "Shows ctxd build progress in Claude Code: milestone slices, tests, typecheck, the definition of done, git and PRs."
+    }
+  ]
+}

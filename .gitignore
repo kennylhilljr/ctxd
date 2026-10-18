@@ -11,3 +11,6 @@ coverage/
 
 # Local agent tooling session logs
 .harnesskit/
+
+# Types Claude Code lays beside a loaded mod
+tools/claude-mods/*/.claude-plugin/types/
