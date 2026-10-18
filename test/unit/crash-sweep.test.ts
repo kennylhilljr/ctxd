@@ -123,12 +123,14 @@ describe("crashSweep (SPEC v6 section 9.10)", () => {
 });
 
 describe("the registered session-start handler (via dispatchWithDb)", () => {
-  it("runs the crash sweep as a side effect and returns no text output", async () => {
+  it("runs the crash sweep as a side effect alongside whatever read moments returns", async () => {
+    // Read moments (slice 7) registers its own session-start output on top of the crash sweep's
+    // side effect; this test only asserts the sweep, not the brief text (see read-moments.test.ts).
     const f = setup();
     upsertSession(f.db, { sessionRef: "claude-code:crashed-4", clientId: f.clientId, scopeId: null, event: "session-start", nodeId: f.nodeId, clearRecovery: true });
     f.db.prepare("UPDATE sessions SET last_seen_hlc = ? WHERE session_ref = ?").run(staleHlc(f.nodeId, 45), "claude-code:crashed-4");
 
-    const result = await dispatchWithDb(
+    await dispatchWithDb(
       f.db,
       "session-start",
       CLAUDE_CODE_ADAPTER,
@@ -141,7 +143,6 @@ describe("the registered session-start handler (via dispatchWithDb)", () => {
       undefined,
     );
 
-    expect(result).toBeUndefined();
     const row = f.db.prepare("SELECT state, ended_by FROM sessions WHERE session_ref = ?").get("claude-code:crashed-4") as { state: string; ended_by: string | null };
     expect(row.state).toBe("ended");
     expect(row.ended_by).toBe("sweep");

@@ -10,15 +10,18 @@ import type { CtxdHookEvent } from "../../src/hooks/adapters.js";
  * adapter, output formats, exit-0 guarantee) but aren't a substitute for real captures if the
  * owner ever gets a chance to record genuine ones from a live client.
  *
- * Current-state honesty: `pre-tool-use` (the path guard, slice 4) and `session-start` (the crash
- * sweep, slice 6) have registered real handlers, but neither produces visible output yet: the
- * path guard only blocks a guarded path, and the crash sweep is a pure side effect (it finalizes
- * orphaned sessions in the database) with no brief text to print until read moments (slice 7)
- * builds one. Every other event's fixtures expect exit 0 with no output, because HOOK_HANDLERS
- * has nothing registered for them yet; that's the correct, current behavior, not a gap in the
- * fixture. As later M2 slices (read moments, write moments) register handlers that produce real
- * output, their fixtures' `expected` blocks need updating to assert it, not just "nothing
- * happened."
+ * Current-state honesty: `pre-tool-use` (the path guard, slice 4), `session-start` (the crash
+ * sweep plus read moments R1 to R4, slices 6 and 7) and `subagent-start` (read moment R5, slice
+ * 7) all have registered real handlers now. None of these fixtures bind the conformance kit's
+ * scratch repo to a scope, so `session-start`'s brief handler takes its "not bound to a ctxd
+ * scope" fallback path (SPEC v6 9.1's "out-of-pool or unassigned notice") rather than a real
+ * brief; `subagent-start`'s own fallback for the same case is to skip silently (R5), so its
+ * fixtures are still "nothing happened." A bound scope's actual brief content is exercised by
+ * `test/unit/brief.test.ts`, not duplicated here; this kit is about the hook contract (field
+ * names, output format, the exit-0 guarantee), not brief content. Every other event's fixtures
+ * expect exit 0 with no output, because HOOK_HANDLERS has nothing registered for them yet;
+ * that's the correct, current behavior, not a gap in the fixture. As the write-moments slice
+ * registers handlers for those events, their fixtures' `expected` blocks need updating too.
  */
 
 export interface ConformanceFixture {
@@ -50,8 +53,18 @@ function codex(event: CtxdHookEvent, variant: string, stdin: Record<string, unkn
 
 export const FIXTURES: ConformanceFixture[] = [
   // --- claude-code ---
-  claudeCode("session-start", "startup", { session_id: "cc-startup-1", cwd: "/scratch/sample-app", source: "startup" }),
-  claudeCode("session-start", "resume", { session_id: "cc-resume-1", cwd: "/scratch/sample-app", source: "resume" }),
+  claudeCode(
+    "session-start",
+    "startup",
+    { session_id: "cc-startup-1", cwd: "/scratch/sample-app", source: "startup" },
+    { exitCode: 0, textPresent: true, textContains: "not bound to a ctxd scope" },
+  ),
+  claudeCode(
+    "session-start",
+    "resume",
+    { session_id: "cc-resume-1", cwd: "/scratch/sample-app", source: "resume" },
+    { exitCode: 0, textPresent: true, textContains: "not bound to a ctxd scope" },
+  ),
   claudeCode("subagent-start", "default", { session_id: "cc-sub-1", cwd: "/scratch/sample-app" }),
   claudeCode("user-prompt-submit", "default", { session_id: "cc-prompt-1", cwd: "/scratch/sample-app" }),
   claudeCode("pre-compact", "default", { session_id: "cc-precompact-1", cwd: "/scratch/sample-app" }),
@@ -73,8 +86,18 @@ export const FIXTURES: ConformanceFixture[] = [
   claudeCode("post-tool-use", "default", { session_id: "cc-posttool-1", cwd: "/scratch/sample-app", tool_name: "Bash", tool_input: { command: "echo hi" } }),
 
   // --- codex (different field names: trigger instead of source, no stop_hook_active) ---
-  codex("session-start", "startup", { session_id: "cx-startup-1", cwd: "/scratch/sample-app", trigger: "startup" }),
-  codex("session-start", "resume", { session_id: "cx-resume-1", cwd: "/scratch/sample-app", trigger: "resume" }),
+  codex(
+    "session-start",
+    "startup",
+    { session_id: "cx-startup-1", cwd: "/scratch/sample-app", trigger: "startup" },
+    { exitCode: 0, textPresent: true, textContains: "not bound to a ctxd scope" },
+  ),
+  codex(
+    "session-start",
+    "resume",
+    { session_id: "cx-resume-1", cwd: "/scratch/sample-app", trigger: "resume" },
+    { exitCode: 0, textPresent: true, textContains: "not bound to a ctxd scope" },
+  ),
   codex("subagent-start", "default", { session_id: "cx-sub-1", cwd: "/scratch/sample-app" }),
   codex("user-prompt-submit", "default", { session_id: "cx-prompt-1", cwd: "/scratch/sample-app" }),
   codex("pre-compact", "default", { session_id: "cx-precompact-1", cwd: "/scratch/sample-app" }),
