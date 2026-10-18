@@ -1,9 +1,11 @@
 /**
  * Registers each M2 hook event's real handler into HOOK_HANDLERS (src/cli/hook.ts). Imported
  * once, for its side effect, by src/cli/index.ts before any hook event is dispatched. Later M2
- * slices (crash sweep, read moments, write moments) add their own registrations here.
+ * slices (read moments, write moments) add their own registrations, or extend session-start's
+ * below with real brief text once read moments lands.
  */
-import { HOOK_HANDLERS, type HookContext, type HookResult } from "../cli/hook.js";
+import { HOOK_HANDLERS, withDeadline, type HookContext, type HookResult } from "../cli/hook.js";
+import { crashSweep } from "./crashSweep.js";
 import { checkPathGuard } from "./pathGuard.js";
 
 function guardedPrefixes(ctx: HookContext): string[] {
@@ -11,6 +13,12 @@ function guardedPrefixes(ctx: HookContext): string[] {
   if (ctx.config?.mirror.dir) prefixes.push(ctx.config.mirror.dir);
   return prefixes;
 }
+
+HOOK_HANDLERS["session-start"] = async (ctx: HookContext): Promise<HookResult> => {
+  const graceMinutes = ctx.config?.hooks.crash_grace_minutes ?? 30;
+  await withDeadline(300, async () => crashSweep(ctx.db, ctx.nodeId, graceMinutes));
+  return undefined;
+};
 
 HOOK_HANDLERS["pre-tool-use"] = (ctx: HookContext): HookResult => {
   const toolName = ctx.adapter.fields.toolName ? (ctx.input[ctx.adapter.fields.toolName] as string | undefined) : undefined;

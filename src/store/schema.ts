@@ -2,7 +2,7 @@
  * Database schema (SPEC v6 section 4). Keep in sync with the spec.
  * The event log is the source of truth; everything else is materialized. Sealed pools use the same schema in their own encrypted file (SPEC v6 10.6).
  */
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
 
 export const SCHEMA_SQL = `
 CREATE TABLE nodes (
@@ -320,7 +320,8 @@ CREATE TABLE sessions (
   started_at   TEXT NOT NULL,
   last_seen_hlc TEXT NOT NULL,
   head         TEXT,                  -- latest observed git HEAD
-  recovery     TEXT                   -- JSON: {task_id?, phase, last_request_summary}; no transcript content
+  recovery     TEXT,                  -- JSON: {task_id?, phase, last_request_summary}; no transcript content
+  ended_by     TEXT                   -- NULL for a real client end hook; 'sweep' when the crash sweep finalized it (9.10)
 );
 CREATE INDEX sessions_client_state ON sessions(client_id, state);
 

@@ -10,12 +10,15 @@ import type { CtxdHookEvent } from "../../src/hooks/adapters.js";
  * adapter, output formats, exit-0 guarantee) but aren't a substitute for real captures if the
  * owner ever gets a chance to record genuine ones from a live client.
  *
- * Current-state honesty: as of this slice, only `pre-tool-use` has a registered real handler
- * (the path guard, slice 4). Every other event's fixtures expect exit 0 with no output, because
- * HOOK_HANDLERS has nothing registered for them yet; that's the correct, current behavior,
- * not a gap in the fixture. As later M2 slices (crash sweep, read moments, write moments)
- * register real handlers for session-start, stop, session-end and so on, their fixtures'
- * `expected` blocks need updating to assert the new real output, not just "nothing happened."
+ * Current-state honesty: `pre-tool-use` (the path guard, slice 4) and `session-start` (the crash
+ * sweep, slice 6) have registered real handlers, but neither produces visible output yet: the
+ * path guard only blocks a guarded path, and the crash sweep is a pure side effect (it finalizes
+ * orphaned sessions in the database) with no brief text to print until read moments (slice 7)
+ * builds one. Every other event's fixtures expect exit 0 with no output, because HOOK_HANDLERS
+ * has nothing registered for them yet; that's the correct, current behavior, not a gap in the
+ * fixture. As later M2 slices (read moments, write moments) register handlers that produce real
+ * output, their fixtures' `expected` blocks need updating to assert it, not just "nothing
+ * happened."
  */
 
 export interface ConformanceFixture {
