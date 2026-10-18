@@ -2,7 +2,7 @@
 
 ## Read first
 
-- The parent [PRD v6](docs/prd/PRD-v6.md), the latest version of each component PRD in [docs/prd/components/](docs/prd/components/) (the parent's component index lists them), and [Spec v7](docs/spec/SPEC-v7.md) are the source of truth. If code and spec disagree, raise it; do not silently diverge.
+- The parent [PRD v7](docs/prd/PRD-v7.md), the latest version of each component PRD in [docs/prd/components/](docs/prd/components/) (the parent's component index lists them), and the latest spec in [docs/spec/](docs/spec/) (Spec v7, then v8 once M3 writes it) are the source of truth. If code and spec disagree, raise it; do not silently diverge.
 - Component PRDs reference their parent, their siblings and the spec sections that implement them. Keep those references current when adding or versioning a document. Links inside an unchanged component may point to sibling versions current when it was written; the parent PRD's component index is authoritative.
 - Use the latest numbered version of each document. Never edit a past version; create the next numbered file instead.
 
@@ -18,6 +18,7 @@
 - **Access is default deny.** Every new tool or command goes through the access evaluation in Spec 10.5; agents never get human-only operations.
 - **Purge is the only history rewrite.** Nothing else may modify stored events (Spec 7.6.6).
 - **Writing style for docs:** no em dashes, en dashes or double hyphens in prose; use commas, colons, semicolons, periods or parentheses.
+- **Every optional behavior has a feature flag** ([Feature flags](docs/prd/components/PRD-feature-flags-v1.md)): registered once, readable by hooks without the server, safe to switch off (no data loss, no change to the tool list, hooks still exit 0). New risky features ship switched off.
 - **Commits are authored by the owner.** Use the git identity already configured on the machine. Never change `user.name` or `user.email` (repository or global), never pass `--author` or `-c user.*`, and never rewrite authors of existing commits. Agents credit themselves with a `Co-Authored-By:` trailer in the commit message instead. If no identity is configured, stop and ask the owner rather than inventing one.
 
 ## Commands
