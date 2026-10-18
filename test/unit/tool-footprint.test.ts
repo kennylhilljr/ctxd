@@ -1,18 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { z } from "zod";
 import { estimateTokens } from "../../src/core/tokens.js";
 import { SERVER_INSTRUCTIONS } from "../../src/tools/instructions.js";
+import { toolDefinitions } from "../../src/tools/list.js";
 import { TOOLS } from "../../src/tools/schemas.js";
 
 describe("MCP footprint (PRD NFR-4)", () => {
   it("keeps the tools/list payload under about 1,500 tokens", () => {
-    const payload = JSON.stringify(
-      TOOLS.map((t) => ({
-        name: t.name,
-        description: t.description,
-        inputSchema: z.toJSONSchema(t.input, { io: "input" }),
-      })),
-    );
+    const payload = JSON.stringify(toolDefinitions());
     expect(estimateTokens(payload)).toBeLessThan(1500);
   });
 
@@ -26,6 +20,13 @@ describe("MCP footprint (PRD NFR-4)", () => {
       "context_flag",
       "context_claim",
     ]);
+  });
+
+  it("serves definitions without the $schema keyword and with every tool's input", () => {
+    for (const d of toolDefinitions()) {
+      expect(d.inputSchema).not.toHaveProperty("$schema");
+      expect(d.inputSchema.type).toBe("object");
+    }
   });
 
   it("keeps the essential rules in the first 512 characters of instructions", () => {

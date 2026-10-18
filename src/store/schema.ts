@@ -1,8 +1,8 @@
 /**
- * Database schema (SPEC v5 section 4). Keep in sync with the spec.
- * The event log is the source of truth; everything else is materialized. Sealed pools use the same schema in their own encrypted file (SPEC v5 10.6).
+ * Database schema (SPEC v6 section 4). Keep in sync with the spec.
+ * The event log is the source of truth; everything else is materialized. Sealed pools use the same schema in their own encrypted file (SPEC v6 10.6).
  */
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 
 export const SCHEMA_SQL = `
 CREATE TABLE nodes (
@@ -65,7 +65,10 @@ CREATE INDEX events_entry ON events(entry_id, hlc);
 CREATE TABLE entries (
   entry_id     TEXT PRIMARY KEY,
   scope_id     TEXT NOT NULL REFERENCES scopes(scope_id),
-  kind         TEXT NOT NULL CHECK (kind IN ('brief','status','decision','convention','fact','lesson','handoff','task','pointer','note')),
+  kind         TEXT NOT NULL CHECK (kind IN ('brief','status','decision','convention','fact','lesson','handoff','task','pointer','note','preference','skill','journal')),
+  slug         TEXT NOT NULL,          -- path slug, fixed at create (4.2)
+  significance TEXT CHECK (significance IN ('routine','milestone','breakthrough','blocker','incident','decision')), -- journal only
+  skill_name   TEXT,                   -- skill only; equals the SKILL.md name (4.3)
   -- content part
   title        TEXT NOT NULL,
   summary      TEXT NOT NULL,          -- one line, at most 200 characters; agent-written or first sentence of body
@@ -92,6 +95,9 @@ CREATE TABLE entries (
   updated_hlc  TEXT NOT NULL
 );
 CREATE INDEX entries_scope_kind ON entries(scope_id, kind, status, updated_hlc);
+CREATE INDEX entries_slug ON entries(scope_id, kind, slug);      -- not unique: entries created offline on two nodes may collide (4.2)
+CREATE INDEX entries_skill ON entries(scope_id, skill_name) WHERE skill_name IS NOT NULL; -- not unique: name clashes are resolved on read (4.3)
+CREATE INDEX entries_journal ON entries(scope_id, created_hlc) WHERE kind = 'journal';
 
 CREATE TABLE entry_siblings (
   entry_id     TEXT NOT NULL,
@@ -105,7 +111,7 @@ CREATE TABLE entry_siblings (
 CREATE TABLE relations (
   link_id      TEXT PRIMARY KEY,       -- ULID of the add event's link; identity for add-wins merge
   entry_id     TEXT NOT NULL,
-  type         TEXT NOT NULL CHECK (type IN ('supersedes','implements','derived_from','blocks','relates_to','points_to')),
+  type         TEXT NOT NULL CHECK (type IN ('supersedes','implements','derived_from','blocks','relates_to','points_to','caused','resolved')),
   target       TEXT NOT NULL,          -- ctxd reference, or for points_to: file:, commit:, url:
   note         TEXT,
   added_event  TEXT NOT NULL,
@@ -216,8 +222,47 @@ CREATE TABLE batch_members (
 CREATE TABLE read_stats (              -- local only, never replicated
   entry_id     TEXT PRIMARY KEY,
   last_read_at TEXT NOT NULL,
-  reads        INTEGER NOT NULL DEFAULT 0
+  reads        INTEGER NOT NULL DEFAULT 0, -- context_get fetches and CLI reads
+  briefed      INTEGER NOT NULL DEFAULT 0  -- inclusions in briefs
 );
+
+CREATE TABLE signals (                 -- materialized from entries, relations and flags (11.4)
+  entry_id     TEXT PRIMARY KEY,       -- the blocker or incident journal entry, blocking task, or flagged entry
+  scope_id     TEXT NOT NULL,
+  source       TEXT NOT NULL CHECK (source IN ('journal','task','flag')),
+  opened_hlc   TEXT NOT NULL,
+  resolved_hlc TEXT,                   -- NULL while open
+  resolved_by  TEXT                    -- reference of the resolving entry, or the flag resolution
+);
+CREATE INDEX signals_open ON signals(scope_id) WHERE resolved_hlc IS NULL;
+
+CREATE TABLE skill_syncs (             -- local only: files written by native skill sync (12.2)
+  client       TEXT NOT NULL,          -- client adapter id, e.g. claude-code
+  skill_entry  TEXT NOT NULL,
+  path         TEXT NOT NULL,          -- absolute path of the written SKILL.md
+  content_hash TEXT NOT NULL,          -- SHA-256 of what ctxd wrote; a different hash on disk means a local edit
+  synced_at    TEXT NOT NULL,
+  PRIMARY KEY (client, skill_entry)
+);
+
+CREATE TABLE mirror_files (            -- local only: Markdown mirror state (12.1)
+  path         TEXT PRIMARY KEY,       -- relative to the mirror directory
+  entry_id     TEXT NOT NULL,
+  content_rev  TEXT NOT NULL,          -- revision the file was written from
+  file_hash    TEXT NOT NULL,
+  written_at   TEXT NOT NULL
+);
+
+CREATE TABLE tool_metrics (            -- local only: response metering (8.5)
+  at           TEXT NOT NULL,
+  client_id    TEXT NOT NULL,
+  tool         TEXT NOT NULL,          -- MCP tool, or "hook:<event>" for injected briefs
+  scope_id     TEXT,
+  chars        INTEGER NOT NULL,
+  est_tokens   INTEGER NOT NULL,
+  truncated    INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX tool_metrics_at ON tool_metrics(at);
 
 CREATE TABLE scope_repos (
   repo         TEXT PRIMARY KEY,       -- normalized origin, e.g. github.com/kennylhilljr/ctxd

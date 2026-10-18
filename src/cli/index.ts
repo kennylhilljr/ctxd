@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * ctxd command-line entry point (SPEC v5 section 13).
+ * ctxd command-line entry point (SPEC v6 section 13).
  * Scaffold: commands route to their modules as milestones land.
  */
 import { parseArgs } from "node:util";
@@ -35,6 +35,20 @@ const COMMANDS: Record<string, { milestone: string; summary: string }> = {
   quarantine: { milestone: "M2", summary: "Quarantine a source's writes; then revert or release" },
   purge: { milestone: "M1", summary: "Erase an entry's content everywhere" },
   tidy: { milestone: "M5", summary: "Interactive cleanup suggestions" },
+  ls: { milestone: "M2", summary: "List a ctxd:// folder with summary lines" },
+  tree: { milestone: "M2", summary: "Show the ctxd:// tree to a depth" },
+  read: { milestone: "M2", summary: "Print an entry, or a folder's overview" },
+  grep: { milestone: "M2", summary: "Full-text search within a subtree" },
+  open: { milestone: "M6", summary: "Open an entry's mirror file in $EDITOR" },
+  mirror: { milestone: "M6", summary: "Start, stop or check the Markdown mirror" },
+  import: { milestone: "M6", summary: "Import Markdown files as proposed entries" },
+  skills: { milestone: "M2", summary: "List, show, sync or import skills" },
+  remember: { milestone: "M2", summary: "Record a preference, convention or fact in _me" },
+  log: { milestone: "M2", summary: "Add a journal entry" },
+  journal: { milestone: "M2", summary: "Read the journal by day or time" },
+  digest: { milestone: "M5", summary: "Print or write a weekly digest" },
+  signals: { milestone: "M2", summary: "Open blockers, incidents, blocking tasks and flags" },
+  stats: { milestone: "M1", summary: "Response sizes per tool and client" },
 };
 
 function usage(): string {

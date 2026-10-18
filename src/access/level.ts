@@ -1,7 +1,7 @@
 import type { AccessLevel, ScopeKind, Vendor, VendorPolicy } from "../core/kinds.js";
 
 /**
- * Access evaluation (SPEC v5 sections 10.5 and 10.7; PRD-pools-access-v2 sections 5 to 7).
+ * Access evaluation (SPEC v6 sections 10.5 and 10.7; PRD-pools-access-v2 sections 5 to 7).
  * Pure functions over a snapshot of access metadata. Default deny.
  * Every call is evaluated under the session's persona: the pools assumed by its persona token.
  */
@@ -144,7 +144,7 @@ export function workingSet(
   return [...set].sort();
 }
 
-/** Opaque reference for traversal targets the session cannot read (SPEC v5 10.7). */
+/** Opaque reference for traversal targets the session cannot read (SPEC v6 10.7). */
 export interface RestrictedRef {
   ref: string;
   restricted: true;

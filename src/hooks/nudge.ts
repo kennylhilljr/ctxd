@@ -1,5 +1,5 @@
 /**
- * Stop-hook nudge state machine (PRD section 6.4, SPEC section 9.3).
+ * Stop-hook nudge state machine (PRD-hooks-v5 section 6, SPEC v6 section 9.3).
  * Pure function: callers load and persist SessionState and gather the observations.
  */
 
@@ -39,8 +39,10 @@ export interface NudgeDecision {
 export function nudgeReason(scope: string): string {
   return (
     `Before finishing: call context_handoff for scope "${scope}" with what you did, what is next, ` +
-    `and open questions. Record any new decisions with context_write. If nothing material changed ` +
-    `since the last handoff, reply "no handoff needed" and stop.`
+    `and open questions. Record new decisions with context_write, and anything worth keeping: a lesson ` +
+    `(kind lesson), a lasting preference the user stated (kind preference), or a procedure that worked ` +
+    `and will recur (kind skill). If you are blocked, log it (kind journal, significance blocker). ` +
+    `If nothing material changed since the last handoff, reply "no handoff needed" and stop.`
   );
 }
 

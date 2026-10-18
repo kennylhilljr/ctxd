@@ -2,7 +2,7 @@
 
 ## Read first
 
-- The parent [PRD v5](docs/prd/PRD-v5.md), the latest version of each component PRD in [docs/prd/components/](docs/prd/components/) (the parent's component index lists them), and [Spec v5](docs/spec/SPEC-v5.md) are the source of truth. If code and spec disagree, raise it; do not silently diverge.
+- The parent [PRD v6](docs/prd/PRD-v6.md), the latest version of each component PRD in [docs/prd/components/](docs/prd/components/) (the parent's component index lists them), and [Spec v6](docs/spec/SPEC-v6.md) are the source of truth. If code and spec disagree, raise it; do not silently diverge.
 - Component PRDs reference their parent, their siblings and the spec sections that implement them. Keep those references current when adding or versioning a document. Links inside an unchanged component may point to sibling versions current when it was written; the parent PRD's component index is authoritative.
 - Use the latest numbered version of each document. Never edit a past version; create the next numbered file instead.
 
@@ -25,3 +25,22 @@
 npm run typecheck
 npm test
 ```
+
+## Built-in skills to use while building (Claude Code)
+
+These are Claude Code's built-in slash-command skills. Use them as part of every change, in this order. They are required, not optional; skip one only when its trigger does not apply, and say so in the handoff.
+
+| When | Skill | What it is for here |
+|---|---|---|
+| Once, as soon as `ctxd server` and the CLI can start (M1), and again whenever the build or launch steps change | `/run-skill-generator` | Teaches `/run` and `/verify` how to build and launch ctxd: `npm run build`, a temporary data directory, `ctxd init`, `ctxd server` on loopback, then CLI and MCP calls against it |
+| While developing anything you can observe running (server, CLI, hooks, MCP tools, mirror, skill sync) | `/run` | Launch ctxd and drive it to watch the change live, for example a SessionStart hook printing a brief, or `ctxd tree ctxd://_me` |
+| After the change works, before review | `/simplify` | Remove unnecessary complexity in the changed code; keep behavior and tests unchanged |
+| After `npm run typecheck` and `npm test` pass | `/verify` | Build and run ctxd to confirm the change actually works end to end, not only that tests and types pass. For hooks, replay a conformance fixture through the real `ctxd hook` binary |
+| Before every commit or pull request | `/code-review` | Audit the diff for bugs, logic errors and best practice, and check it against this file's rules (loopback only, hooks exit 0, events as source of truth, default-deny access, footprint budget, no real names) |
+| For iterative checks: repeated property-test runs, watching CI, or re-running verification until a fix holds | `/loop` | Run the check on a cadence until it passes or a limit is reached; stop the loop when done |
+| Whenever code calls the Anthropic API or SDK (none is planned before M6; ctxd's own model features use a local model) | `/claude-api` | Write and integrate that code correctly |
+| When dynamic workflows are enabled and a task splits across agents (for example parallel component work in separate worktrees) | `/workflow-authoring` | Author the multi-agent workflow instead of improvising one |
+
+**Definition of done for a change:** typecheck and tests pass, `/simplify` applied, `/verify` confirms the behavior, `/code-review` finds nothing unresolved, docs and spec references updated, and a handoff written.
+
+Codex and other agents without these skills follow the same steps by hand: run the app to observe the change, simplify, verify end to end, and review the diff against the rules above before committing.

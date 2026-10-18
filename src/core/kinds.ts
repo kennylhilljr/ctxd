@@ -1,4 +1,4 @@
-/** Entry kinds and statuses (PRD-knowledge-model-v1 section 3, SPEC v3 section 4). */
+/** Entry kinds and statuses (PRD-knowledge-model-v3 section 3, SPEC v6 sections 4 and 4.3). */
 export const KINDS = [
   "brief",
   "status",
@@ -10,6 +10,9 @@ export const KINDS = [
   "task",
   "pointer",
   "note",
+  "preference",
+  "skill",
+  "journal",
 ] as const;
 export type Kind = (typeof KINDS)[number];
 
@@ -26,7 +29,7 @@ export const STATUSES = [
 export type Status = (typeof STATUSES)[number];
 
 /** Kinds whose content cannot be updated after creation (SPEC section 4). */
-export const IMMUTABLE_KINDS: ReadonlySet<Kind> = new Set(["decision", "handoff", "pointer"]);
+export const IMMUTABLE_KINDS: ReadonlySet<Kind> = new Set(["decision", "handoff", "pointer", "journal"]);
 
 /** Default status for agent-written entries (SPEC section 6, step 6). */
 export const DEFAULT_AGENT_STATUS: Record<Kind, Status> = {
@@ -40,7 +43,36 @@ export const DEFAULT_AGENT_STATUS: Record<Kind, Status> = {
   task: "active",
   pointer: "active",
   note: "active",
+  preference: "proposed",
+  skill: "proposed",
+  journal: "active",
 };
+
+/** Kinds an agent can never get auto-accepted, whatever the review rules say (SPEC v6 10.4). */
+export const ALWAYS_REVIEWED_KINDS: ReadonlySet<Kind> = new Set(["preference", "skill"]);
+
+/** Journal significance (SPEC v6 4.3). */
+export const SIGNIFICANCES = ["routine", "milestone", "breakthrough", "blocker", "incident", "decision"] as const;
+export type Significance = (typeof SIGNIFICANCES)[number];
+
+/** Typed relations (SPEC v6 4.1). */
+export const RELATION_TYPES = [
+  "supersedes",
+  "implements",
+  "derived_from",
+  "blocks",
+  "relates_to",
+  "points_to",
+  "caused",
+  "resolved",
+] as const;
+export type RelationType = (typeof RELATION_TYPES)[number];
+
+/** Default status for an agent write of this kind, given its significance (SPEC v6 6, step 6). */
+export function defaultAgentStatus(kind: Kind, significance?: Significance): Status {
+  if (kind === "journal" && significance === "decision") return "proposed";
+  return DEFAULT_AGENT_STATUS[kind];
+}
 
 export type Replication = "all" | "home" | "local";
 export type VendorPolicy = "any" | "local-only";
