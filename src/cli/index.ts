@@ -4,6 +4,53 @@
  * Scaffold: commands route to their modules as milestones land.
  */
 import { parseArgs } from "node:util";
+import { run as runInitCommand } from "./init.js";
+import { run as runRebuildCommand } from "./rebuild.js";
+import { run as runClientCommand } from "./client.js";
+import { run as runScopeCommand } from "./scope.js";
+import { run as runPoolCommand } from "./pool.js";
+import { run as runGrantCommand } from "./grant.js";
+import { run as runAccessCommand } from "./access.js";
+import { run as runPersonaCommand } from "./persona.js";
+import { run as runServerCommand } from "./server.js";
+import { run as runMcpCommand } from "./mcp.js";
+import { run as runFlagCommand } from "./flag.js";
+import { run as runPurgeCommand } from "./purge.js";
+import { run as runBriefCommand } from "./brief.js";
+import { run as runHistoryCommand } from "./history.js";
+import { run as runShowCommand } from "./show.js";
+import { run as runStatsCommand } from "./stats.js";
+import { run as runLsCommand } from "./ls.js";
+import { run as runTreeCommand } from "./tree.js";
+import { run as runReadCommand } from "./read.js";
+
+/** Each command's parsed-args entry point, added as its milestone lands. */
+const COMMAND_RUNNERS: Record<string, (argv: string[]) => number | Promise<number>> = {
+  hook: (argv) => {
+    // Hooks must never break a session (SPEC section 9.1): exit 0 silently until M2 lands.
+    parseArgs({ args: argv, allowPositionals: true, strict: false });
+    return 0;
+  },
+  init: runInitCommand,
+  rebuild: runRebuildCommand,
+  client: runClientCommand,
+  scope: runScopeCommand,
+  pool: runPoolCommand,
+  grant: runGrantCommand,
+  access: runAccessCommand,
+  persona: runPersonaCommand,
+  server: runServerCommand,
+  mcp: runMcpCommand,
+  flag: runFlagCommand,
+  purge: runPurgeCommand,
+  brief: runBriefCommand,
+  history: runHistoryCommand,
+  show: runShowCommand,
+  stats: runStatsCommand,
+  ls: runLsCommand,
+  tree: runTreeCommand,
+  read: runReadCommand,
+};
 
 const COMMANDS: Record<string, { milestone: string; summary: string }> = {
   init: { milestone: "M1", summary: "Create config, data dir, node identity, human client" },
@@ -12,6 +59,8 @@ const COMMANDS: Record<string, { milestone: string; summary: string }> = {
   hook: { milestone: "M2", summary: "Hook entry point: ctxd hook <event> --client <name>" },
   scope: { milestone: "M1", summary: "Manage scopes" },
   client: { milestone: "M1", summary: "Manage client tokens" },
+  grant: { milestone: "M1", summary: "Temporary grant: ctxd grant <client> <scope> --level <l> --for <duration>" },
+  access: { milestone: "M1", summary: "Effective access per scope and the reason for each" },
   node: { milestone: "M3", summary: "Manage peers" },
   sync: { milestone: "M3", summary: "Pull from peers now" },
   brief: { milestone: "M1", summary: "Print a brief for a scope" },
@@ -56,7 +105,7 @@ function usage(): string {
   return ["Usage: ctxd <command> [options]", "", "Commands:", ...lines].join("\n");
 }
 
-function main(argv: string[]): number {
+async function main(argv: string[]): Promise<number> {
   const [command, ...rest] = argv;
   if (!command || command === "help" || command === "--help") {
     console.log(usage());
@@ -71,13 +120,18 @@ function main(argv: string[]): number {
     console.error(`Unknown command: ${command}\n\n${usage()}`);
     return 2;
   }
-  if (command === "hook") {
-    // Hooks must never break a session (SPEC section 9.1): exit 0 silently until M2 lands.
-    parseArgs({ args: rest, allowPositionals: true, strict: false });
-    return 0;
-  }
+  const runner = COMMAND_RUNNERS[command];
+  if (runner) return await runner(rest);
   console.error(`ctxd ${command}: not implemented yet (planned for ${entry.milestone}).`);
   return 1;
 }
 
-process.exitCode = main(process.argv.slice(2));
+main(process.argv.slice(2)).then(
+  (code) => {
+    process.exitCode = code;
+  },
+  (err: unknown) => {
+    console.error(err instanceof Error ? err.message : String(err));
+    process.exitCode = 1;
+  },
+);
