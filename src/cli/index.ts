@@ -6,6 +6,12 @@
 import { parseArgs } from "node:util";
 import { run as runInitCommand } from "./init.js";
 import { run as runRebuildCommand } from "./rebuild.js";
+import { run as runClientCommand } from "./client.js";
+import { run as runScopeCommand } from "./scope.js";
+import { run as runPoolCommand } from "./pool.js";
+import { run as runGrantCommand } from "./grant.js";
+import { run as runAccessCommand } from "./access.js";
+import { run as runPersonaCommand } from "./persona.js";
 
 /** Each command's parsed-args entry point, added as its milestone lands. */
 const COMMAND_RUNNERS: Record<string, (argv: string[]) => number> = {
@@ -16,6 +22,12 @@ const COMMAND_RUNNERS: Record<string, (argv: string[]) => number> = {
   },
   init: runInitCommand,
   rebuild: runRebuildCommand,
+  client: runClientCommand,
+  scope: runScopeCommand,
+  pool: runPoolCommand,
+  grant: runGrantCommand,
+  access: runAccessCommand,
+  persona: runPersonaCommand,
 };
 
 const COMMANDS: Record<string, { milestone: string; summary: string }> = {
@@ -25,6 +37,8 @@ const COMMANDS: Record<string, { milestone: string; summary: string }> = {
   hook: { milestone: "M2", summary: "Hook entry point: ctxd hook <event> --client <name>" },
   scope: { milestone: "M1", summary: "Manage scopes" },
   client: { milestone: "M1", summary: "Manage client tokens" },
+  grant: { milestone: "M1", summary: "Temporary grant: ctxd grant <client> <scope> --level <l> --for <duration>" },
+  access: { milestone: "M1", summary: "Effective access per scope and the reason for each" },
   node: { milestone: "M3", summary: "Manage peers" },
   sync: { milestone: "M3", summary: "Pull from peers now" },
   brief: { milestone: "M1", summary: "Print a brief for a scope" },

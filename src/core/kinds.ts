@@ -75,10 +75,15 @@ export function defaultAgentStatus(kind: Kind, significance?: Significance): Sta
 }
 
 export type Replication = "all" | "home" | "local";
+export const REPLICATIONS: readonly Replication[] = ["all", "home", "local"];
 export type VendorPolicy = "any" | "local-only";
+export const VENDOR_POLICIES: readonly VendorPolicy[] = ["any", "local-only"];
 export type Vendor = "anthropic" | "openai" | "google" | "local" | "human" | "other";
+export const VENDORS: readonly Vendor[] = ["anthropic", "openai", "google", "local", "human", "other"];
 export type NodeRole = "home" | "roaming";
 export type AccessLevel = "none" | "read" | "propose" | "write";
+/** Levels a grant or pool can hold (excludes "none", which means no grant at all). */
+export const GRANT_LEVELS: readonly Exclude<AccessLevel, "none">[] = ["read", "propose", "write"];
 export type ScopeKind = "project" | "me" | "profile" | "hold";
 export const FLAG_PROBLEMS = ["wrong", "stale", "duplicate", "unsafe"] as const;
 export type FlagProblem = (typeof FLAG_PROBLEMS)[number];

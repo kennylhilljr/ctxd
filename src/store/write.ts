@@ -4,6 +4,7 @@ import type { contextWriteInput } from "../tools/schemas.js";
 import { accessLevel, atLeast, decideWrite, effectiveVendorPolicy, type ClientInfo } from "../access/level.js";
 import { makeRev, newId, revVersion } from "../core/ids.js";
 import type { HlcClock } from "../core/hlc.js";
+import { nowIso } from "../core/time.js";
 import { ALWAYS_REVIEWED_KINDS, defaultAgentStatus, IMMUTABLE_KINDS, type Kind, type Status } from "../core/kinds.js";
 import { CtxdError } from "../core/errors.js";
 import { sanitizeAgentText } from "../security/redact.js";
@@ -35,10 +36,6 @@ export type WriteResult =
 
 type Input = z.infer<typeof contextWriteInput>;
 
-function now(): string {
-  return new Date().toISOString();
-}
-
 function nextOriginSeq(db: Database.Database, nodeId: string): number {
   const row = db.prepare("SELECT COALESCE(MAX(origin_seq), 0) + 1 AS next FROM events WHERE origin_node = ?").get(nodeId) as {
     next: number;
@@ -52,7 +49,7 @@ function recordRejection(
 ): void {
   db.prepare(
     "INSERT INTO rejections (rejection_id, client_id, scope_id, entry_id, tool, code, detail, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-  ).run(newId(), args.clientId, args.scopeId ?? null, args.entryId ?? null, args.tool, args.code, args.detail ?? null, now());
+  ).run(newId(), args.clientId, args.scopeId ?? null, args.entryId ?? null, args.tool, args.code, args.detail ?? null, nowIso());
 }
 
 /** Reject with `err`, first recording a metadata-only rejection row (SPEC v6 section 6). */
@@ -444,7 +441,7 @@ function insertEvent(
     reqHash,
     canonicalJson(spec.payload),
     spec.prev ? canonicalJson(spec.prev) : null,
-    now(),
+    nowIso(),
   );
 }
 
@@ -464,7 +461,7 @@ function performHeldWrite(
       const holdingId = newId();
       db.prepare(
         "INSERT INTO scopes (scope_id, name, kind, owner, replication, vendor_policy, created_at) VALUES (?, ?, 'hold', ?, 'home', 'any', ?)",
-      ).run(holdingId, holdingName, client.id, now());
+      ).run(holdingId, holdingName, client.id, nowIso());
       holding = loadScopeByName(db, holdingName)!;
     }
 
@@ -492,7 +489,7 @@ function performHeldWrite(
         const entries = JSON.parse(openRequest.held_entries) as string[];
         entries.push(heldWrite.ref);
         db.prepare("UPDATE access_requests SET attempts = attempts + 1, last_at = ?, held_entries = ? WHERE request_id = ?").run(
-          now(),
+          nowIso(),
           JSON.stringify(entries),
           openRequest.request_id,
         );
@@ -501,7 +498,7 @@ function performHeldWrite(
         requestId = newId();
         db.prepare(
           "INSERT INTO access_requests (request_id, client_id, scope_id, pool_ids, held_entries, attempts, first_at, last_at, state) VALUES (?, ?, ?, ?, ?, 1, ?, ?, 'open')",
-        ).run(requestId, client.id, targetScope.id, JSON.stringify(poolIds), JSON.stringify([heldWrite.ref]), now(), now());
+        ).run(requestId, client.id, targetScope.id, JSON.stringify(poolIds), JSON.stringify([heldWrite.ref]), nowIso(), nowIso());
       }
     }
 
