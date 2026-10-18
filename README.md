@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <img alt="Status: M1 in progress" src="https://img.shields.io/badge/status-M1%20in%20progress-0ea5e9">
+  <img alt="Status: M3 next" src="https://img.shields.io/badge/status-M3%20next-0ea5e9">
   <img alt="Node 24" src="https://img.shields.io/badge/node-24-339933?logo=nodedotjs&logoColor=white">
   <img alt="TypeScript strict" src="https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white">
   <img alt="MCP: 7 tools" src="https://img.shields.io/badge/MCP-7%20tools-6366f1">
@@ -163,9 +163,9 @@ ctxd://
 | Milestone | Scope | Status |
 |---|---|---|
 | M0 | PRD, spec, ADRs, scaffold | ✅ Done |
-| M1 | Single-node core: event log, MCP tools, search, persona pools, redaction, flag and purge | 🚧 Core modules in place, server next |
-| M2 | Hooks for Claude Code and Codex, claims, cleanup, journal from hooks, open signals, skill catalog | Planned |
-| M3 | Replication between Macs over Tailscale | Planned |
+| M1 | Single-node core: event log, MCP tools, search, persona pools, redaction, flag and purge | ✅ Done |
+| M2 | Hooks for Claude Code and Codex, claims, cleanup, journal from hooks, open signals, skill catalog | ✅ Done |
+| M3 | Feature flags, then replication between Macs over Tailscale | 🚧 Next |
 | M4 | Hub deployment: launchd, backups, phone SSH, status line | Planned |
 | M5 | Semantic search, Desktop chats, rollback, tidy, importance ranking, digests, native skill sync | Planned |
 | M6 | Signed events, Markdown mirror and export, Mac Studio with a local model, sealed pools | Planned |
@@ -176,7 +176,7 @@ The PRD is a parent document plus component PRDs that reference each other. Each
 
 | Document | Purpose |
 |---|---|
-| [PRD v6](docs/prd/PRD-v6.md) (parent) | Vision, goals, scope, requirements, milestones, risks, and the index of component PRDs |
+| [PRD v7](docs/prd/PRD-v7.md) (parent) | Vision, goals, scope, requirements, milestones, risks, and the index of component PRDs |
 | [Knowledge model](docs/prd/components/PRD-knowledge-model-v3.md) | What is stored: kinds, statuses, versioned parts, references and paths, relationships, history |
 | [Persona pools and access](docs/prd/components/PRD-pools-access-v2.md) | Who sees and writes what: personas, tokens, sealed pools, holding scopes, access requests |
 | [Hooks and agent lifecycle](docs/prd/components/PRD-hooks-v5.md) | **When agents read and write**: hooks, the Stop-hook nudge, per-client behavior, crash sweep |
@@ -188,6 +188,7 @@ The PRD is a parent document plus component PRDs that reference each other. Each
 | [Filesystem view](docs/prd/components/PRD-filesystem-view-v1.md) | `ctxd://` paths, folder summaries, browsing, the Markdown mirror |
 | [Skills](docs/prd/components/PRD-skills-v1.md) | Shared, approved, versioned procedures for every agent |
 | [Memory and journal](docs/prd/components/PRD-memory-journal-v1.md) | Preferences, the journal, digests, open signals, importance |
+| [Feature flags](docs/prd/components/PRD-feature-flags-v1.md) | Switching any optional behavior off per machine, live, without losing data |
 | [Spec v7](docs/spec/SPEC-v7.md) | Architecture, data model, MCP tools, hooks, sync, access, cleanup, security, operations |
 | [Prior art v4](docs/research/prior-art-v4.md) | Related projects and what was adopted |
 | [ADRs](docs/adr/) | Key decisions |
