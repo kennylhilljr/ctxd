@@ -29,9 +29,12 @@ import type { RequestContext } from "../server/context.js";
  *   lands in M2. This brief neither reads nor writes `sessions`.
  * - Claim overlaps/drift/lost-claim notices depend on context_claim (M1 slice 6) and the drift
  *   audit (M2); only a plain proposed/conflicted count is surfaced here.
- * - Open signals (section 3) and open claims (section 7) read their tables correctly, but nothing
- *   writes `signals` yet (no code calls journal/signals.ts's computeSignals from the write path)
- *   and `leases` has no writer until slice 6 -- both sections will be empty until then.
+ * - Open signals (section 3) is already live: store/write.ts calls journal/sync.ts's
+ *   syncSignalsForScope on every touched scope, so a journal entry with significance blocker or
+ *   incident, or a task with a blocks link, opens a real signal as soon as it's written -- it
+ *   just has no MCP tool to create one through yet (that's context_write, this slice).
+ * - Open claims (section 7) reads `leases` correctly, but nothing writes to it until
+ *   context_claim lands (M1 slice 6), so that half of the section is empty until then.
  * - Spec gives a concrete total budget (session_start_max_chars, default 9,500) only for the
  *   *hook-injected* brief, not for a plain context_brief tool call. The BASE_CHARS constants below
  *   are this file's own reasonable choice, not a spec number.

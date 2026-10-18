@@ -116,4 +116,22 @@ describe("assembleBrief (SPEC v6 section 11.1)", () => {
     expect(result.text).toMatch(/1 proposed entry awaiting review/);
     expect(result.text).not.toContain("Proposed decision");
   });
+
+  it("surfaces an open signal from a blocker journal entry (store/write.ts syncs signals on every write)", () => {
+    const f = setup();
+    const created = writeEntry(writeCtx(f, f.humanId), {
+      scope: "notes",
+      kind: "journal",
+      significance: "blocker",
+      title: "Blocked on fixture",
+      body: "Waiting on the test fixture for sealed pools.",
+      request_id: newId(),
+    } as never);
+    if ("held" in created) throw new Error("unexpected hold");
+
+    const result = assembleBrief(requestCtx(f, f.humanId, "human"), { scope: "notes", size: "normal" }) as { text: string };
+    expect(result.text).toContain("Open signals:");
+    expect(result.text).toContain("BLOCKER");
+    expect(result.text).toContain(created.ref);
+  });
 });
