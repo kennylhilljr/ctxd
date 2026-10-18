@@ -12,8 +12,9 @@ const kind = z.enum(KINDS);
 const requestId = z.string().min(8).max(64).describe("Unique id for idempotent retries");
 const session = z.string().max(64).optional().describe("Session value from your brief");
 
+/** Typed relation (SPEC v3 section 4.1). points_to targets are file:, commit: or url: references. */
 const link = z.object({
-  type: z.enum(["file", "commit", "url", "entry"]),
+  type: z.enum(["supersedes", "implements", "derived_from", "blocks", "relates_to", "points_to"]),
   ref: z.string().min(1).max(500),
   note: z.string().max(200).optional(),
 });
@@ -24,16 +25,17 @@ export const contextBriefInput = z.object({
 });
 
 export const contextSearchInput = z.object({
-  scope,
+  scope: z.string().min(1).max(80).describe('Scope name, or "*" for all readable scopes'),
   query: z.string().min(1).max(500),
-  kinds: z.array(kind).max(9).optional(),
+  kinds: z.array(kind).max(10).optional(),
   limit: z.number().int().min(1).max(20).default(8),
   max_tokens: z.number().int().min(200).max(4000).default(1000),
   include_proposed: z.boolean().default(true),
 });
 
 export const contextGetInput = z.object({
-  ids: z.array(z.string().min(1)).min(1).max(10),
+  ids: z.array(z.string().min(1)).min(1).max(10).describe("Entry ids or ctxd: references"),
+  related: z.boolean().default(false).describe("Include one-hop related entries"),
   max_tokens: z.number().int().min(500).max(8000).default(3000),
 });
 
@@ -42,6 +44,7 @@ export const contextWriteInput = z.object({
   kind,
   title: z.string().min(1).max(200),
   body: z.string().min(1).max(20000),
+  summary: z.string().min(1).max(200).optional().describe("One line; defaults to first sentence"),
   tags: z.array(z.string().min(1).max(40)).max(10).optional(),
   links: z.array(link).max(20).optional(),
   id: z.string().optional().describe("Entry id to update; omit to create"),

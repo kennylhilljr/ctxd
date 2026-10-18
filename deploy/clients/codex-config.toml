@@ -1,4 +1,5 @@
-# Merge into ~/.codex/config.toml (SPEC section 9.5).
+# Merge into ~/.codex/config.toml (SPEC v3 section 9.5). Requires Codex rust-v0.145.0 or later for SessionEnd.
+# Codex clamps hook timeouts to 3 seconds; ctxd hands slow work to a detached worker.
 # New or changed hooks must be approved once in Codex's /hooks browser.
 
 [mcp_servers.ctxd]
@@ -9,29 +10,41 @@ bearer_token_env_var = "CTXD_CODEX_TOKEN"
 [[hooks.SessionStart.hooks]]
 type = "command"
 command = "ctxd hook session-start --client codex"
-timeout = 5
+timeout = 3
 
 [[hooks.Stop]]
 [[hooks.Stop.hooks]]
 type = "command"
 command = "ctxd hook stop --client codex"
-timeout = 5
+timeout = 3
 
 [[hooks.PreCompact]]
 [[hooks.PreCompact.hooks]]
 type = "command"
 command = "ctxd hook pre-compact --client codex"
-timeout = 5
+timeout = 3
 
 [[hooks.PostCompact]]
 [[hooks.PostCompact.hooks]]
 type = "command"
 command = "ctxd hook post-compact --client codex"
-timeout = 5
+timeout = 3
 
 [[hooks.PostToolUse]]
 matcher = "^Bash$"
 [[hooks.PostToolUse.hooks]]
 type = "command"
 command = "ctxd hook post-tool-use --client codex"
-timeout = 5
+timeout = 3
+
+[[hooks.PreToolUse]]
+[[hooks.PreToolUse.hooks]]
+type = "command"
+command = "ctxd hook pre-tool-use --client codex"
+timeout = 3
+
+[[hooks.SessionEnd]]
+[[hooks.SessionEnd.hooks]]
+type = "command"
+command = "ctxd hook session-end --client codex"
+timeout = 3

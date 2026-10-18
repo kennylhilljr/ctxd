@@ -18,14 +18,15 @@ The PRD is a parent document plus component PRDs that reference each other. Each
 
 | Document | Purpose |
 |---|---|
-| [PRD v2](docs/prd/PRD-v2.md) (parent) | Vision, goals, scope, cross-cutting requirements, milestones, risks, and the index of component PRDs |
-| [Hooks and agent lifecycle](docs/prd/components/PRD-hooks-v1.md) | **When agents read and write**: hooks, the Stop-hook nudge, per-client behavior, adapters |
-| [Claims and write intent](docs/prd/components/PRD-claims-v1.md) | Task claims, write intent, overlap, drift, stale-claim takeover |
-| [Trust and safety](docs/prd/components/PRD-trust-safety-v1.md) | Redaction, provenance, review queue, tokens and access, network exposure |
-| [Replication and offline work](docs/prd/components/PRD-replication-v1.md) | Per-machine replicas, sync over Tailscale, conflicts |
-| [Briefs and search](docs/prd/components/PRD-briefs-search-v1.md) | What agents receive when they read |
-| [Spec v2](docs/spec/SPEC-v2.md) | Architecture, data model, MCP tools, hooks, sync, security, operations; traceability to the component PRDs |
-| [Prior art v2](docs/research/prior-art-v2.md) | Survey of related projects, including coordinate-agents and OpenWork, and what was adopted |
+| [PRD v3](docs/prd/PRD-v3.md) (parent) | Vision, goals, scope, cross-cutting requirements, milestones, risks, and the index of component PRDs |
+| [Knowledge model](docs/prd/components/PRD-knowledge-model-v1.md) | What is stored: kinds, versioned parts, references, relationships, history |
+| [Hooks and agent lifecycle](docs/prd/components/PRD-hooks-v2.md) | **When agents read and write**: hooks, the Stop-hook nudge, per-client behavior, crash sweep, bypass |
+| [Claims and write intent](docs/prd/components/PRD-claims-v2.md) | Task claims, write intent, overlap, drift, stale-claim takeover |
+| [Trust and safety](docs/prd/components/PRD-trust-safety-v2.md) | Redaction, capture filters, path guard, provenance, review queue, tokens and access |
+| [Replication and offline work](docs/prd/components/PRD-replication-v2.md) | Per-machine replicas, sync over Tailscale, per-part conflicts |
+| [Briefs and search](docs/prd/components/PRD-briefs-search-v2.md) | What agents receive when they read: detail tiers, lessons, caps |
+| [Spec v3](docs/spec/SPEC-v3.md) | Architecture, data model, MCP tools, hooks, sync, security, operations; traceability to the component PRDs |
+| [Prior art v3](docs/research/prior-art-v3.md) | Survey of related projects, including coordinate-agents, OpenWork, OpenViking and DataHub, and what was adopted |
 | [ADRs](docs/adr/) | Key decisions |
 
 ## Development
@@ -45,7 +46,8 @@ src/core     HLC clock, ids, errors, token estimates, kinds
 src/tools    MCP tool contracts and server instructions
 src/security sanitization pipeline, detectors, network and vendor policies
 src/claims   write-intent normalization, overlap test, drift
-src/hooks    nudge state machine and scope resolution
+src/model    entry references (relations and history in M1)
+src/hooks    nudge state machine, scope resolution from git origin, bypass
 src/store    schema and write path
 src/sync     pull protocol and event apply
 src/brief    brief assembly

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * ctxd command-line entry point (SPEC section 13).
+ * ctxd command-line entry point (SPEC v3 section 13).
  * Scaffold: commands route to their modules as milestones land.
  */
 import { parseArgs } from "node:util";
@@ -22,6 +22,12 @@ const COMMANDS: Record<string, { milestone: string; summary: string }> = {
   rebuild: { milestone: "M1", summary: "Rebuild state and FTS from the event log" },
   doctor: { milestone: "M4", summary: "Diagnostics" },
   "install-hooks": { milestone: "M2", summary: "Write hook and MCP config for a client" },
+  claims: { milestone: "M2", summary: "List claims with state, paths, overlaps and drift" },
+  history: { milestone: "M1", summary: "Show every change to an entry" },
+  show: { milestone: "M1", summary: "Show an entry, optionally as of a time" },
+  status: { milestone: "M4", summary: "Health, scope, claims and sync" },
+  statusline: { milestone: "M4", summary: "One-line status for the Claude Code status line" },
+  worker: { milestone: "M2", summary: "Internal: detached hook work" },
 };
 
 function usage(): string {

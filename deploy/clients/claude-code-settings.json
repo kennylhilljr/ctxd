@@ -1,10 +1,126 @@
 {
   "hooks": {
-    "SessionStart": [{ "hooks": [{ "type": "command", "command": "ctxd", "args": ["hook", "session-start", "--client", "claude-code"], "timeout": 5 }] }],
-    "SubagentStart": [{ "hooks": [{ "type": "command", "command": "ctxd", "args": ["hook", "subagent-start", "--client", "claude-code"], "timeout": 5 }] }],
-    "PreCompact": [{ "hooks": [{ "type": "command", "command": "ctxd", "args": ["hook", "pre-compact", "--client", "claude-code"], "timeout": 5 }] }],
-    "Stop": [{ "hooks": [{ "type": "command", "command": "ctxd", "args": ["hook", "stop", "--client", "claude-code"], "timeout": 5 }] }],
-    "SessionEnd": [{ "hooks": [{ "type": "command", "command": "ctxd", "args": ["hook", "session-end", "--client", "claude-code"], "timeout": 2 }] }],
-    "PostToolUse": [{ "matcher": "Bash", "hooks": [{ "type": "command", "command": "ctxd", "args": ["hook", "post-tool-use", "--client", "claude-code"], "timeout": 5, "async": true }] }]
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ctxd",
+            "args": [
+              "hook",
+              "session-start",
+              "--client",
+              "claude-code"
+            ],
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ctxd",
+            "args": [
+              "hook",
+              "subagent-start",
+              "--client",
+              "claude-code"
+            ],
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ctxd",
+            "args": [
+              "hook",
+              "pre-compact",
+              "--client",
+              "claude-code"
+            ],
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ctxd",
+            "args": [
+              "hook",
+              "stop",
+              "--client",
+              "claude-code"
+            ],
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ctxd",
+            "args": [
+              "hook",
+              "session-end",
+              "--client",
+              "claude-code"
+            ],
+            "timeout": 2
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ctxd",
+            "args": [
+              "hook",
+              "post-tool-use",
+              "--client",
+              "claude-code"
+            ],
+            "timeout": 5,
+            "async": true
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Read|Edit|Write|MultiEdit|Glob|Grep|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ctxd",
+            "args": [
+              "hook",
+              "pre-tool-use",
+              "--client",
+              "claude-code"
+            ],
+            "timeout": 3
+          }
+        ]
+      }
+    ]
   }
 }

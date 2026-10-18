@@ -1,10 +1,11 @@
-/** Entry kinds and statuses (PRD section 5, SPEC section 4). */
+/** Entry kinds and statuses (PRD-knowledge-model-v1 section 3, SPEC v3 section 4). */
 export const KINDS = [
   "brief",
   "status",
   "decision",
   "convention",
   "fact",
+  "lesson",
   "handoff",
   "task",
   "pointer",
@@ -25,6 +26,7 @@ export const DEFAULT_AGENT_STATUS: Record<Kind, Status> = {
   decision: "proposed",
   convention: "proposed",
   fact: "proposed",
+  lesson: "proposed",
   handoff: "active",
   task: "active",
   pointer: "active",
