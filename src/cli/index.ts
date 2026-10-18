@@ -16,6 +16,13 @@ import { run as runServerCommand } from "./server.js";
 import { run as runMcpCommand } from "./mcp.js";
 import { run as runFlagCommand } from "./flag.js";
 import { run as runPurgeCommand } from "./purge.js";
+import { run as runBriefCommand } from "./brief.js";
+import { run as runHistoryCommand } from "./history.js";
+import { run as runShowCommand } from "./show.js";
+import { run as runStatsCommand } from "./stats.js";
+import { run as runLsCommand } from "./ls.js";
+import { run as runTreeCommand } from "./tree.js";
+import { run as runReadCommand } from "./read.js";
 
 /** Each command's parsed-args entry point, added as its milestone lands. */
 const COMMAND_RUNNERS: Record<string, (argv: string[]) => number | Promise<number>> = {
@@ -36,6 +43,13 @@ const COMMAND_RUNNERS: Record<string, (argv: string[]) => number | Promise<numbe
   mcp: runMcpCommand,
   flag: runFlagCommand,
   purge: runPurgeCommand,
+  brief: runBriefCommand,
+  history: runHistoryCommand,
+  show: runShowCommand,
+  stats: runStatsCommand,
+  ls: runLsCommand,
+  tree: runTreeCommand,
+  read: runReadCommand,
 };
 
 const COMMANDS: Record<string, { milestone: string; summary: string }> = {
