@@ -304,6 +304,122 @@ describe("writeEntry (SPEC v6 section 6)", () => {
     expect(relation.type).toBe("supersedes");
     expect(relation.target).toBe(original.ref);
   });
+
+  it("refuses to supersede an entry in a scope the client has no access to (regression: access-control bypass)", () => {
+    const f = setup();
+    const privateEntry = writeEntry(ctxFor(f, f.humanId), {
+      scope: "private-a",
+      kind: "decision",
+      title: "Private decision",
+      body: "Only the human and pool-private can see this.",
+      request_id: requestId(),
+    } as never);
+    if ("held" in privateEntry) throw new Error("unexpected hold");
+
+    try {
+      writeEntry(ctxFor(f, f.agentId), {
+        scope: "notes",
+        kind: "decision",
+        title: "Trying to supersede something I can't see",
+        body: "Body.",
+        supersedes: privateEntry.ref,
+        request_id: requestId(),
+      } as never);
+      expect.fail("expected SCOPE_FORBIDDEN");
+    } catch (err) {
+      expect((err as CtxdError).code).toBe("SCOPE_FORBIDDEN");
+    }
+    const row = f.db.prepare("SELECT status FROM entries WHERE entry_id = ?").get(privateEntry.id) as { status: string };
+    expect(row.status).toBe("active");
+  });
+
+  it("rejects superseding an entry that's already superseded by someone else", () => {
+    const f = setup();
+    const original = writeEntry(ctxFor(f, f.humanId), {
+      scope: "notes",
+      kind: "decision",
+      title: "Original",
+      body: "Body.",
+      request_id: requestId(),
+    } as never);
+    if ("held" in original) throw new Error("unexpected hold");
+    writeEntry(ctxFor(f, f.humanId), {
+      scope: "notes",
+      kind: "decision",
+      title: "First replacement",
+      body: "Body.",
+      supersedes: original.ref,
+      request_id: requestId(),
+    } as never);
+
+    try {
+      writeEntry(ctxFor(f, f.humanId), {
+        scope: "notes",
+        kind: "decision",
+        title: "Second replacement",
+        body: "Body.",
+        supersedes: original.ref,
+        request_id: requestId(),
+      } as never);
+      expect.fail("expected VALIDATION");
+    } catch (err) {
+      expect((err as CtxdError).code).toBe("VALIDATION");
+    }
+  });
+
+  it("preserves the existing body on an update that only changes the title (regression: omitted body wiped it)", () => {
+    const f = setup();
+    const created = writeEntry(ctxFor(f, f.humanId), {
+      scope: "notes",
+      kind: "note",
+      title: "Original title",
+      body: "Body that must survive.",
+      request_id: requestId(),
+    } as never);
+    if ("held" in created) throw new Error("unexpected hold");
+
+    writeEntry(ctxFor(f, f.humanId), {
+      scope: "notes",
+      kind: "note",
+      title: "New title",
+      id: created.id,
+      expected_rev: created.rev,
+      request_id: requestId(),
+    } as never);
+
+    const row = f.db.prepare("SELECT title, body FROM entries WHERE entry_id = ?").get(created.id) as { title: string; body: string };
+    expect(row.title).toBe("New title");
+    expect(row.body).toBe("Body that must survive.");
+  });
+
+  it("persists skill_name from the SKILL.md frontmatter (regression: parseSkill's result was discarded)", () => {
+    const f = setup();
+    const body = "---\nname: deploy-runbook\ndescription: How to deploy.\n---\nSteps here.";
+    const result = writeEntry(ctxFor(f, f.humanId), {
+      scope: "notes",
+      kind: "skill",
+      title: "deploy-runbook",
+      body,
+      request_id: requestId(),
+    } as never);
+    if ("held" in result) throw new Error("unexpected hold");
+    const row = f.db.prepare("SELECT skill_name FROM entries WHERE entry_id = ?").get(result.id) as { skill_name: string };
+    expect(row.skill_name).toBe("deploy-runbook");
+  });
+
+  it("a human write of an always-reviewed kind is still active (regression: agent-only rule applied to human writes)", () => {
+    const f = setup();
+    const result = writeEntry(ctxFor(f, f.humanId), {
+      scope: "notes",
+      kind: "preference",
+      title: "Always use pnpm",
+      body: "Prefer pnpm over npm.",
+      request_id: requestId(),
+    } as never);
+    expect("held" in result).toBe(false);
+    if ("held" in result) return;
+    expect(result.status).toBe("active");
+  });
 });
 
 function dumpHash(db: Database.Database): string {

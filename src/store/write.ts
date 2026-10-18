@@ -1,7 +1,7 @@
 import type Database from "better-sqlite3";
 import type { z } from "zod";
 import type { contextWriteInput } from "../tools/schemas.js";
-import { accessLevel, decideWrite, effectiveVendorPolicy } from "../access/level.js";
+import { accessLevel, atLeast, decideWrite, effectiveVendorPolicy, type ClientInfo } from "../access/level.js";
 import { makeRev, newId, revVersion } from "../core/ids.js";
 import type { HlcClock } from "../core/hlc.js";
 import { ALWAYS_REVIEWED_KINDS, defaultAgentStatus, IMMUTABLE_KINDS, type Kind, type Status } from "../core/kinds.js";
@@ -159,7 +159,7 @@ function replayResult(db: Database.Database, clientId: string, entryId: string, 
 
 function performDirectWrite(
   ctx: WriteContext,
-  client: { id: string; vendor: string },
+  client: ClientInfo,
   scope: { id: string; name: string },
   input: Input,
   forceProposed: boolean,
@@ -187,13 +187,27 @@ function performDirectWrite(
     existing = row;
   }
 
-  if (input.kind === "skill") parseSkill(input.title, input.body ?? "");
+  // Body is required except for journal (SPEC v6 section 6 step 3) -- only on create: an update
+  // that omits body means "leave it unchanged", not "clear it".
+  if (!existing && input.kind !== "journal" && input.body === undefined) {
+    reject(db, ctx.clientId, scope.id, input.id, new CtxdError("VALIDATION", "body is required except for journal", {}, "body"));
+  }
+  let skillName: string | undefined;
+  if (input.kind === "skill" && input.body !== undefined) {
+    skillName = parseSkill(input.title, input.body).name;
+  }
 
   const failures = new Set<string>();
   const title = sanitizeField(input.title, failures);
-  const body = input.body !== undefined ? sanitizeField(input.body, failures) : "";
-  const tags = (input.tags ?? []).map((t) => sanitizeField(t, failures));
-  const summary = sanitizeField(input.summary ?? deriveSummary(body || title), failures);
+  // undefined means "not provided": an update leaves that field unchanged rather than clearing it.
+  const bodySan = input.body !== undefined ? sanitizeField(input.body, failures) : undefined;
+  const tagsSan = input.tags !== undefined ? input.tags.map((t) => sanitizeField(t, failures)) : undefined;
+  const summarySan =
+    input.summary !== undefined
+      ? sanitizeField(input.summary, failures)
+      : bodySan !== undefined
+        ? sanitizeField(deriveSummary(bodySan), failures)
+        : undefined;
   const links = (input.links ?? []).map((l) => ({ ...l, note: l.note !== undefined ? sanitizeField(l.note, failures) : undefined }));
   if (failures.size > 0) {
     reject(db, ctx.clientId, scope.id, input.id, new CtxdError("REDACTED_SECRET", "Content matched a secret detector", { detectors: [...failures] }));
@@ -204,13 +218,17 @@ function performDirectWrite(
     throw new CtxdError("REV_CONFLICT", "Entry changed since you read it", { current_rev: existing.content_rev }, "expected_rev");
   }
 
+  // The human-client override takes precedence over the agent-only "always reviewed" rule
+  // (ALWAYS_REVIEWED_KINDS and the access-forced "propose" are both agent-specific restrictions;
+  // SPEC v6 section 6 step 6's table lists "written by the human client (CLI): active" above
+  // the per-kind defaults it otherwise governs).
   let status: Status;
   if (existing) {
     status = existing.status; // a content update never changes status.
-  } else if (forceProposed || ALWAYS_REVIEWED_KINDS.has(input.kind)) {
-    status = "proposed";
   } else if (client.vendor === "human") {
     status = "active";
+  } else if (forceProposed || ALWAYS_REVIEWED_KINDS.has(input.kind)) {
+    status = "proposed";
   } else {
     status = reviewedStatus(db, scope.id, input, loadClientName(db, client.id)) ?? defaultAgentStatus(input.kind, input.significance);
   }
@@ -226,7 +244,10 @@ function performDirectWrite(
       const eventId = newId();
       const hlc = ctx.clock.tick();
       contentRev = makeRev(revVersion(existing.content_rev) + 1, eventId);
-      const payload: Record<string, unknown> = { title, body, summary, tags };
+      const payload: Record<string, unknown> = { title };
+      if (bodySan !== undefined) payload.body = bodySan;
+      if (summarySan !== undefined) payload.summary = summarySan;
+      if (tagsSan !== undefined) payload.tags = tagsSan;
       appendPrimaryEvent(db, ctx, input, hash, allocSeq, { scopeId: scope.id, entryId, op: "update", part: "content", rev: contentRev, parentRevs: [existing.content_rev], payload, eventId, hlc });
       applyEvent(db, { eventId, scopeId: scope.id, entryId, op: "update", part: "content", rev: contentRev, clientId: ctx.clientId, hlc, payload, prev: null });
     } else {
@@ -242,18 +263,30 @@ function performDirectWrite(
         if (!supersedesTarget || supersedesTarget.kind !== input.kind) {
           throw new CtxdError("VALIDATION", "supersedes target not found or a different kind", {}, "supersedes");
         }
+        if (supersedesTarget.status === "superseded") {
+          throw new CtxdError("VALIDATION", "supersedes target is already superseded by another entry", {}, "supersedes");
+        }
+        // Access is default deny (AGENTS.md): resolving an entry by id bypasses the normal
+        // scope lookup, so superseding it must not become a way to write into a scope this
+        // client was never granted (even read) access to.
+        const targetScopeInfo = loadScopeById(db, supersedesTarget.scopeId);
+        const targetLevel = targetScopeInfo ? accessLevel(client, targetScopeInfo, loadAccessSnapshot(db), Date.now(), ctx.assumedPools) : "none";
+        if (!atLeast(targetLevel, "propose")) {
+          throw new CtxdError("SCOPE_FORBIDDEN", "Cannot supersede an entry outside your access", {}, "supersedes");
+        }
       }
       const payload: Record<string, unknown> = {
         kind: input.kind,
         slug,
         title,
-        body,
-        summary,
-        tags,
+        body: bodySan ?? "",
+        summary: summarySan ?? title,
+        tags: tagsSan ?? [],
         status,
         significance: input.significance ?? null,
         confirmed_by_user: input.confirmed_by_user ?? false,
         supersedes: supersedesTarget ? formatRef(supersedesTarget.scopeName, supersedesTarget.id) : null,
+        skill_name: skillName ?? null,
       };
       appendPrimaryEvent(db, ctx, input, hash, allocSeq, { scopeId: scope.id, entryId, op: "create", part: "content", rev: contentRev, parentRevs: [], payload, eventId, hlc });
       applyEvent(db, { eventId, scopeId: scope.id, entryId, op: "create", part: "content", rev: contentRev, clientId: ctx.clientId, hlc, payload, prev: null });
@@ -273,7 +306,7 @@ function performDirectWrite(
 function markSuperseded(db: Database.Database, ctx: WriteContext, target: NonNullable<ReturnType<typeof resolveEntry>>, allocSeq: () => number, touchedScopes: Set<string>): void {
   const eventId = newId();
   const hlc = ctx.clock.tick();
-  const rev = makeRev(1, eventId);
+  const rev = makeRev(revVersion(target.statusRev) + 1, eventId);
   const payload = { status: "superseded" };
   const prev = { status: target.status };
   appendSideEvent(db, ctx, allocSeq, { scopeId: target.scopeId, entryId: target.id, op: "status", part: "status", rev, parentRevs: [target.statusRev], payload, prev, eventId, hlc });
@@ -292,7 +325,10 @@ function addRelation(
 ): void {
   const eventId = newId();
   const hlc = ctx.clock.tick();
-  const rev = makeRev(1, eventId);
+  // Each relate event bumps relations_rev from whatever it currently is, so multiple links on
+  // one entry (several addRelation calls in a row) don't all collide on version 1.
+  const current = db.prepare("SELECT relations_rev FROM entries WHERE entry_id = ?").get(entryId) as { relations_rev: string };
+  const rev = makeRev(revVersion(current.relations_rev) + 1, eventId);
   const linkId = newId();
   const payload = { type: link.type, ref: link.ref, note: link.note ?? null, link_id: linkId };
   appendSideEvent(db, ctx, allocSeq, { scopeId, entryId, op: "relate", part: "relations", rev, parentRevs: [], payload, prev: null, eventId, hlc });
@@ -414,7 +450,7 @@ function insertEvent(
 
 function performHeldWrite(
   ctx: WriteContext,
-  client: { id: string; vendor: string },
+  client: ClientInfo,
   targetScope: { id: string; name: string },
   input: Input,
   hash: string,

@@ -3,10 +3,9 @@
  * Format: ctxd:<scope name>/<entry ULID>. The ULID identifies the entry; the scope is for readability.
  */
 
+import { SCOPE_RE as SCOPE } from "../fsview/paths.js";
+
 const ULID = /^[0-9A-HJKMNP-TV-Z]{26}$/;
-// Matches fsview/paths.ts's SCOPE_RE: a leading underscore covers the reserved namespaces
-// (_me, _me.<pool>, _hold.<client>, _system), and "@" covers client names like codex@laptop.
-const SCOPE = /^[a-z0-9_][a-z0-9._@-]{0,99}$/;
 
 export interface EntryRef {
   scope: string;

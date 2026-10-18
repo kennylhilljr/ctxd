@@ -28,9 +28,10 @@ const RETIRED: ReadonlySet<Status> = new Set(["superseded", "archived", "quarant
 
 function toSignalEntry(row: EntryRow, scopeId: string): SignalEntry {
   const activeHlc =
-    row.status === "active" || row.status === "superseded"
+    row.status === "active"
       ? row.created_hlc
-      : row.status === "flagged"
+      // superseded only became live if it was active beforehand, same as flagged.
+      : row.status === "flagged" || row.status === "superseded"
         ? row.status_before === "active"
           ? row.created_hlc
           : null
@@ -49,6 +50,7 @@ export function syncSignalsForScope(db: Database.Database, scopeId: string): voi
     .all(scopeId) as EntryRow[];
   const entries = entryRows.map((r) => toSignalEntry(r, scopeId));
   const entryIds = entryRows.map((r) => r.entry_id);
+  const entryById = new Map(entryRows.map((r) => [r.entry_id, r]));
 
   const relations: SignalRelation[] = entryIds.length
     ? (
@@ -74,7 +76,7 @@ export function syncSignalsForScope(db: Database.Database, scopeId: string): voi
           )
           .all(...entryIds) as { entry_id: string; flagged_hlc: string; resolved: string | null }[]
       ).map((f) => {
-        const entry = entryRows.find((e) => e.entry_id === f.entry_id);
+        const entry = entryById.get(f.entry_id);
         return { entry: f.entry_id, flaggedHlc: f.flagged_hlc, resolvedHlc: f.resolved !== null ? entry?.updated_hlc ?? null : null };
       })
     : [];

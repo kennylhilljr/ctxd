@@ -36,7 +36,7 @@ const KIND_BY_FOLDER: Readonly<Record<string, Kind>> = {
 
 export const ENTRY_FOLDERS: readonly string[] = Object.keys(KIND_BY_FOLDER);
 
-const SCOPE_RE = /^[a-z0-9_][a-z0-9._@-]{0,99}$/;
+export const SCOPE_RE = /^[a-z0-9_][a-z0-9._@-]{0,99}$/;
 const SLUG_RE = SKILL_NAME_RE; // same grammar: lowercase words joined by single hyphens
 const SLUG_MAX = 48;
 
