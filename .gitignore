@@ -8,3 +8,6 @@ coverage/
 .env
 .env.*
 .DS_Store
+
+# Local agent tooling session logs
+.harnesskit/
