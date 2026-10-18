@@ -4,6 +4,7 @@
  * Scaffold: commands route to their modules as milestones land.
  */
 import { run as runHookCommand } from "./hook.js";
+import "../hooks/handlers.js"; // registers HOOK_HANDLERS entries (path guard, and later M2 slices) before any hook dispatches
 import { run as runInitCommand } from "./init.js";
 import { run as runRebuildCommand } from "./rebuild.js";
 import { run as runClientCommand } from "./client.js";

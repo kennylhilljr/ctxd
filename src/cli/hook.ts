@@ -32,6 +32,8 @@ export interface HookContext {
   scope: string | null;
   scopeNotice: string | null;
   input: Record<string, unknown>;
+  dataDir: string;
+  config: CtxdConfig | undefined;
 }
 
 export type HookResult = { text?: string; block?: { reason: string } } | undefined;
@@ -101,6 +103,8 @@ export async function dispatchWithDb(
   processCwd: string,
   input: Record<string, unknown>,
   scopeMap: Record<string, string>,
+  dataDir = "",
+  config: CtxdConfig | undefined = undefined,
 ): Promise<HookResult> {
   const client = db.prepare("SELECT client_id FROM clients WHERE name = ?").get(clientName) as { client_id: string } | undefined;
   const node = db.prepare("SELECT node_id FROM nodes LIMIT 1").get() as { node_id: string } | undefined;
@@ -142,6 +146,8 @@ export async function dispatchWithDb(
     scope: scopeResult.scope,
     scopeNotice: "notice" in scopeResult ? scopeResult.notice : null,
     input,
+    dataDir,
+    config,
   };
   return await handler(ctx);
 }
@@ -163,7 +169,7 @@ async function dispatch(
     return undefined; // no ctxd data yet (e.g. before `ctxd init`): nothing to do, never breaks the session
   }
   try {
-    return await dispatchWithDb(db, event, adapter, clientName, args.scope, processCwd, input, config?.scope_map ?? {});
+    return await dispatchWithDb(db, event, adapter, clientName, args.scope, processCwd, input, config?.scope_map ?? {}, dataDir, config);
   } finally {
     db.close();
   }
