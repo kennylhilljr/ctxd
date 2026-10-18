@@ -396,12 +396,13 @@ CREATE TABLE read_stats (              -- local only, never replicated
 );
 
 CREATE TABLE signals (                 -- materialized from entries, relations and flags (11.4)
-  entry_id     TEXT PRIMARY KEY,       -- the blocker or incident journal entry, blocking task, or flagged entry
+  entry_id     TEXT NOT NULL,          -- the blocker or incident journal entry, blocking task, or flagged entry
   scope_id     TEXT NOT NULL,
   source       TEXT NOT NULL CHECK (source IN ('journal','task','flag')),
   opened_hlc   TEXT NOT NULL,
   resolved_hlc TEXT,                   -- NULL while open
-  resolved_by  TEXT                    -- reference of the resolving entry, or the flag resolution
+  resolved_by  TEXT,                   -- reference of the resolving entry, or retired, unblocked or flag
+  PRIMARY KEY (entry_id, source)       -- a flagged blocker has both a journal row and a flag row
 );
 CREATE INDEX signals_open ON signals(scope_id) WHERE resolved_hlc IS NULL;
 
@@ -554,7 +555,7 @@ Implements [Filesystem view](../prd/components/PRD-filesystem-view-v1.md) sectio
 | `skill` | `skills/<skill name>/SKILL.md` |
 | `journal` | `journal/<YYYY>/<MM>/<DD>.md#<slug>`; the day file holds that day's entries in time order |
 
-Journal dates use the local date of the node rendering the view. The view is not replicated, so a traveling node in another time zone may group a late entry under a different day; the entries themselves are unaffected.
+Journal dates use the local date of the node rendering the view, and day files must be real dates (`02/31.md` is rejected). Facts live in `profile/` only in `_me` and `_me.<pool>` scopes and in `facts/` only elsewhere, so each fact has exactly one path. A `#` fragment is allowed only on a journal day file. The view is not replicated, so a traveling node in another time zone may group a late entry under a different day; the entries themselves are unaffected.
 
 **Slug.** Computed once when the entry is created:
 
@@ -924,7 +925,7 @@ All tools return JSON text. Descriptions are kept terse; the total `tools/list` 
 | Tool | Input (zod summary) | Output |
 |---|---|---|
 | `context_brief` | `scope: string`, `size?: "micro"\|"normal"\|"full"` (default `normal`) | `{scope, as_of, node, sync, session, brief: string, notices: string[]}` |
-| `context_search` | `scope?: string` (a scope name, or `"*"` for every readable scope; required unless `path` is given), `query: string`, `path?: string` (a `ctxd://` folder prefix, 4.2; its scope is used), `kinds?: Kind[]`, `since?`, `until?: string` (an ISO date or time, or a relative age such as `7d`, `2w` or `12h`; filters on creation time for `journal`, last update otherwise), `limit?: 1..20` (default 8), `max_tokens?: 200..4000` (default 1000), `include_proposed?: boolean` (default true) | `{results: [{ref, path, scope, kind, title, summary, status, rev, by, updated, snippet, significance?}], truncated, hint?}`. Searching a single scope also searches `_me`. A query of `*` with `since` lists entries by time instead of relevance |
+| `context_search` | `scope?: string` (a scope name, or `"*"` for every readable scope; required unless `path` is given), `query: string`, `path?: string` (a `ctxd://` folder prefix, 4.2; its scope is used), `kinds?: Kind[]`, `since?`, `until?: string` (an ISO date or time, or a relative age such as `7d`, `2w` or `12h`; dates and times without a zone are read in the node's time zone, and a date alone as `until` includes that whole day; filters on creation time for `journal`, last update otherwise), `limit?: 1..20` (default 8), `max_tokens?: 200..4000` (default 1000), `include_proposed?: boolean` (default true) | `{results: [{ref, path, scope, kind, title, summary, status, rev, by, updated, snippet, significance?}], truncated, hint?}`. Searching a single scope also searches `_me`. A query of `*` with `since` lists entries by time instead of relevance |
 | `context_get` | `ids: string[1..10]` (ULIDs, references, `ctxd://` paths or `skill:<name>`), `related?: boolean` (default false; adds one-hop related entries as summaries), `max_tokens?: 500..8000` (default 3000) | `{entries: [{ref, path, scope, kind, title, summary, body, tags, links, status, rev, by, created, updated, significance?, superseded_by?, siblings?}], folders?: [{path, abstract, overview, children}], related?: [{ref, type, direction, kind, title, summary, status}], truncated, hint?}` |
 | `context_write` | `scope`, `kind`, `title (1..200)`, `body? (1..20000 chars; required except for journal, 4.3)`, `summary? (1..200)`, `significance?` (journal only, 4.3), `tags?`, `links?: [{type: supersedes\|implements\|derived_from\|blocks\|relates_to\|points_to\|caused\|resolved, ref, note?}]` (4.1), `id?`, `expected_rev?` (required with `id`; the content revision), `supersedes?`, `confirmed_by_user?`, `session?`, `request_id` | `{id, ref, rev, status}` or error |
 | `context_handoff` | `scope`, `action: "write"\|"latest"`, `done?`, `next?`, `open_questions?`, `session?`, `request_id?` (required for write) | write: `{id, rev}`; latest: `{handoffs: [...]}` (latest per client, up to 3) |
@@ -1478,11 +1479,14 @@ Implements [Memory and journal](../prd/components/PRD-memory-journal-v1.md) sect
 
 | Source | Opens when | Closes when |
 |---|---|---|
-| `journal` | A `journal` entry with significance `blocker` or `incident` becomes `active` | An `active` entry holds a `resolved` link to it, or it is archived, superseded, quarantined or purged |
-| `task` | An `active` task has a `blocks` link to another `active` task | It gets a `resolved` link from an `active` entry, or it or the blocked task is archived, superseded or deleted |
+| `journal` | A `journal` entry with significance `blocker` or `incident` becomes `active` | A `resolved` link to it counts (below), or it is archived, superseded, quarantined, deleted or purged |
+| `task` | An `active` task first has a `blocks` link to a task that has become `active` (at the earliest such link) | A `resolved` link to it counts, it leaves the live states, or every task it blocks has left them or been unlinked |
 | `flag` | An entry gets its first open flag | All its flags are resolved (7.6.1) |
 
-- **Proposed entries do not close signals.** A `resolved` link from a proposed entry counts only once that entry is approved.
+- **One row per entry and source.** A flagged blocker has both a `journal` row and a `flag` row.
+- **Flagged and conflicted entries stay live.** Flagging a blocker does not close its signal; only the rules above do.
+- **When a resolved link counts.** From the later of the link and the approval of the entry holding it, so a proposed fix closes nothing until approved. Once counted, a resolution stands: archiving the fix later, or removing the link afterwards, does not reopen the signal.
+- **Removed links close, never erase.** Removing a `blocks` link closes the task signal at the removal, so time to resolve is kept.
 - **Time to resolve.** `resolved_hlc` minus `opened_hlc`, reported by the weekly digest.
 - **Briefs.** Open signals for the session's working set appear in section 3 of every brief, with their age, for example `BLOCKER (2d): waiting on the test fixture for sealed pools, ctxd:ctxd/01JAB...`. Signals in scopes the session cannot read are never shown (10.7).
 
@@ -1490,8 +1494,8 @@ Implements [Memory and journal](../prd/components/PRD-memory-journal-v1.md) sect
 
 Implements [Memory and journal](../prd/components/PRD-memory-journal-v1.md) section 3.
 
-- **Who writes it.** Only the node named in `journal.digest_node` writes digests, as the `human` client, on `journal.digest_weekday` after 18:00 local time, for each scope with at least one new event that week. A node that was offline catches up on its next start.
-- **Idempotent.** The `request_id` is `digest:<scope_id>:<ISO week, e.g. 2026-W42>`, so retries and restarts never duplicate a digest.
+- **Who writes it.** Only the node named in `journal.digest_node` writes digests, as the `human` client, on `journal.digest_weekday` after 18:00 in that node's time zone, for each scope with at least one new event that week. A node that was offline catches up on its next start.
+- **Idempotent.** The `request_id` is `digest:<scope_id>:<ISO week, e.g. 2026-W42>`, with the week taken from the digest node's local date (not UTC, which would move a Sunday evening run into the next week), so retries and restarts never duplicate a digest.
 - **Contents.** Assembled without a model: counts of new entries by kind; milestones and breakthroughs (titles); blockers and incidents opened and resolved, with time to resolve; decisions made; lessons, preferences and skills added; and sessions and commits from `auto` journal entries.
 - **Shape.** A `journal` entry, significance `routine`, tags `digest` and the ISO week, at most 1,000 characters of body; longer lists end with a folder path.
 - **Optional summary.** A local model may add a prose summary in M6, labeled as machine-written.

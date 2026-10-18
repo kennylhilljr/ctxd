@@ -227,12 +227,13 @@ CREATE TABLE read_stats (              -- local only, never replicated
 );
 
 CREATE TABLE signals (                 -- materialized from entries, relations and flags (11.4)
-  entry_id     TEXT PRIMARY KEY,       -- the blocker or incident journal entry, blocking task, or flagged entry
+  entry_id     TEXT NOT NULL,          -- the blocker or incident journal entry, blocking task, or flagged entry
   scope_id     TEXT NOT NULL,
   source       TEXT NOT NULL CHECK (source IN ('journal','task','flag')),
   opened_hlc   TEXT NOT NULL,
   resolved_hlc TEXT,                   -- NULL while open
-  resolved_by  TEXT                    -- reference of the resolving entry, or the flag resolution
+  resolved_by  TEXT,                   -- reference of the resolving entry, or retired, unblocked or flag
+  PRIMARY KEY (entry_id, source)       -- a flagged blocker has both a journal row and a flag row
 );
 CREATE INDEX signals_open ON signals(scope_id) WHERE resolved_hlc IS NULL;
 

@@ -25,37 +25,42 @@ function invalid(message: string, field = "body"): CtxdError {
 }
 
 function splitFrontmatter(body: string): { frontmatter: string; rest: string } {
-  const text = body.replace(/^﻿/, "").replace(/\r\n/g, "\n");
-  if (!text.startsWith("---\n")) throw invalid("must start with a --- frontmatter line");
-  const end = text.indexOf("\n---", 3);
-  if (end < 0) throw invalid("frontmatter is not closed with ---");
-  const after = text.indexOf("\n", end + 4);
-  return { frontmatter: text.slice(4, end), rest: after < 0 ? "" : text.slice(after + 1) };
+  const lines = body.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").split("\n");
+  if (lines[0]?.trimEnd() !== "---") throw invalid("must start with a --- frontmatter line");
+  const close = lines.findIndex((l, i) => i > 0 && l.trimEnd() === "---");
+  if (close < 0) throw invalid("frontmatter is not closed with ---");
+  return { frontmatter: lines.slice(1, close).join("\n"), rest: lines.slice(close + 1).join("\n") };
 }
 
-function unquote(v: string): string {
+/** A top-level key line: `key: value`, with the key optionally quoted. */
+const KEY_RE = /^(["']?)([A-Za-z0-9_-]+)\1\s*:(?:\s+(.*))?$/;
+const BLOCK_RE = /^[>|][+-]?\d?$/;
+const isContinuation = (l: string | undefined): boolean => l !== undefined && (/^\s+\S/.test(l) || l.trim() === "");
+
+function scalar(v: string): string {
   const t = v.trim();
   if (t.length >= 2 && ((t.startsWith('"') && t.endsWith('"')) || (t.startsWith("'") && t.endsWith("'")))) {
     return t.slice(1, -1);
   }
-  return t;
+  return t.replace(/\s+#.*$/, ""); // a plain scalar ends at a comment
 }
 
-/** Read top-level scalar keys, including `>` and `|` block scalars. */
+/** Read top-level scalar keys, including `>` and `|` block scalars and multi-line plain scalars. */
 function readKeys(frontmatter: string): Map<string, string> {
   const out = new Map<string, string>();
   const lines = frontmatter.split("\n");
   for (let i = 0; i < lines.length; i++) {
-    const m = /^([A-Za-z0-9_-]+):(.*)$/.exec(lines[i] as string);
+    const m = KEY_RE.exec(lines[i] as string);
     if (!m) continue;
-    const key = m[1] as string;
-    const raw = (m[2] as string).trim();
-    if (raw === ">" || raw === "|" || raw === ">-" || raw === "|-" || raw === "") {
-      const block: string[] = [];
-      while (i + 1 < lines.length && /^\s+\S/.test(lines[i + 1] as string)) block.push((lines[++i] as string).trim());
-      out.set(key, raw.startsWith("|") ? block.join("\n") : block.join(" "));
+    const key = m[2] as string;
+    const raw = (m[3] ?? "").trim();
+    const more: string[] = [];
+    while (isContinuation(lines[i + 1])) more.push((lines[++i] as string).trim());
+    while (more.length && more[more.length - 1] === "") more.pop();
+    if (BLOCK_RE.test(raw)) {
+      out.set(key, raw.startsWith("|") ? more.join("\n") : more.filter(Boolean).join(" "));
     } else {
-      out.set(key, unquote(raw));
+      out.set(key, [scalar(raw), ...more.filter(Boolean)].filter(Boolean).join(" "));
     }
   }
   return out;
@@ -111,8 +116,9 @@ export function renderSyncedSkill(body: string, ref: string, keepAllowedTools = 
     const lines = fm.split("\n");
     const out: string[] = [];
     for (let i = 0; i < lines.length; i++) {
-      if (/^allowed-tools:/.test(lines[i] as string)) {
-        while (i + 1 < lines.length && /^(\s+\S|\s*-\s)/.test(lines[i + 1] as string)) i++;
+      if (/^["']?allowed-tools["']?\s*:/i.test(lines[i] as string)) {
+        // Drop the key and everything until the next top-level line.
+        while (isContinuation(lines[i + 1])) i++;
         continue;
       }
       out.push(lines[i] as string);

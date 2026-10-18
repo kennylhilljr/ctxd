@@ -45,5 +45,9 @@ describe("schema (SPEC v6 section 4)", () => {
     expect(() => rel.run("l1", "resolved")).not.toThrow();
     expect(() => rel.run("l2", "caused")).not.toThrow();
     expect(() => rel.run("l3", "fixes")).toThrow();
+    const sig = db.prepare("INSERT INTO signals (entry_id, scope_id, source, opened_hlc) VALUES ('j1', 's1', ?, 'h')");
+    expect(() => sig.run("journal")).not.toThrow();
+    expect(() => sig.run("flag")).not.toThrow();
+    expect(() => sig.run("flag")).toThrow();
   });
 });

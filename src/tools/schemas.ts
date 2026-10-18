@@ -59,6 +59,17 @@ export const contextWriteInput = z.object({
   confirmed_by_user: z.boolean().optional(),
   session,
   request_id: requestId,
+}).superRefine((v, ctx) => {
+  // Kind rules from SPEC v6 4.3 and 6, step 3. Refinements do not appear in tool definitions.
+  if (v.kind !== "journal" && v.body === undefined) {
+    ctx.addIssue({ code: "custom", path: ["body"], message: "body is required except for journal" });
+  }
+  if (v.kind !== "journal" && v.significance !== undefined) {
+    ctx.addIssue({ code: "custom", path: ["significance"], message: "significance is only for journal" });
+  }
+  if (v.kind === "journal" && v.body !== undefined && v.body.length > 1000) {
+    ctx.addIssue({ code: "custom", path: ["body"], message: "journal body is at most 1,000 characters" });
+  }
 });
 
 export const contextHandoffInput = z.object({
@@ -97,7 +108,7 @@ export const contextFlagInput = z.object({
 export interface ToolContract {
   name: string;
   description: string;
-  input: z.ZodObject<z.ZodRawShape>;
+  input: z.ZodType<Record<string, unknown>>;
 }
 
 export const TOOLS: readonly ToolContract[] = [

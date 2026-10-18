@@ -66,3 +66,31 @@ describe("catalog and sync (SPEC v6 11.1, 12.2)", () => {
     expect(renderSyncedSkill(BODY, "r", true)).toContain("allowed-tools");
   });
 });
+
+describe("SKILL.md edge cases (review findings)", () => {
+  it("closes frontmatter only on an exact --- line", () => {
+    expect(() => parseSkill("a", "---\nname: a\ndescription: d\n---more\n")).toThrow(/not closed/);
+  });
+
+  it("handles block scalar modifiers, plain continuations and comments", () => {
+    expect(parseSkill("a", "---\nname: a\ndescription: >+\n  folded\n  text\n---\n").description).toBe("folded text");
+    expect(parseSkill("a", "---\nname: a\ndescription: starts here\n  and continues\n---\n").description).toBe(
+      "starts here and continues",
+    );
+    expect(parseSkill("a", "---\nname: a # the name\ndescription: d\n---\n").name).toBe("a");
+    expect(parseSkill("a", '---\nname: a\ndescription: "keeps # inside quotes"\n---\n').description).toBe(
+      "keeps # inside quotes",
+    );
+  });
+
+  it.each([
+    '---\nname: a\ndescription: d\n"allowed-tools": Bash(rm:*)\n---\nx',
+    "---\nname: a\ndescription: d\nallowed-tools : Bash\n---\nx",
+    "---\nname: a\nallowed-tools:\n  - Bash\n\n  - Read\ndescription: d\n---\nx",
+  ])("strips every form of allowed-tools: %#", (body) => {
+    const out = renderSyncedSkill(body, "r");
+    expect(out.toLowerCase()).not.toContain("allowed-tools");
+    expect(out).not.toMatch(/Bash|Read/);
+    expect(parseSkill("a", out).description).toBe("d");
+  });
+});

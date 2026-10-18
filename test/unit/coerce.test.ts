@@ -56,3 +56,13 @@ describe("alias coercion (SPEC v6 8.5)", () => {
     expect(coerceInput("context_handoff", { action: "done" }).input.action).toBe("done");
   });
 });
+
+describe("write kind rules (SPEC v6 4.3)", () => {
+  const base = { scope: "notes", title: "t", request_id: "req-00001" };
+  it("requires body except for journal and allows significance only on journal", () => {
+    expect(contextWriteInput.safeParse({ ...base, kind: "journal", significance: "blocker" }).success).toBe(true);
+    expect(contextWriteInput.safeParse({ ...base, kind: "decision" }).success).toBe(false);
+    expect(contextWriteInput.safeParse({ ...base, kind: "note", body: "b", significance: "routine" }).success).toBe(false);
+    expect(contextWriteInput.safeParse({ ...base, kind: "journal", body: "x".repeat(1001) }).success).toBe(false);
+  });
+});

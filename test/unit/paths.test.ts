@@ -42,13 +42,15 @@ describe("paths (SPEC v6 4.2)", () => {
     fc.assert(
       fc.property(
         fc.constantFrom(...plain),
-        fc.constantFrom("project", "me", "profile") as fc.Arbitrary<"project" | "me" | "profile">,
+        fc.constantFrom(["project", "notes"], ["me", "_me"], ["profile", "_me.pool-notes"]) as fc.Arbitrary<
+          ["project" | "me" | "profile", string]
+        >,
         fc.string({ maxLength: 80 }),
         fc.stringMatching(/^[0-9A-HJKMNP-TV-Z]{26}$/),
-        (kind, scopeKind, title, id) => {
+        (kind, [scopeKind, scope], title, id) => {
           const slug = slugify(title, id, kind);
-          const p = parsePath(entryPath({ scope: "notes", scopeKind, kind, slug }));
-          expect(p).toMatchObject({ type: "entry", scope: "notes", kind, slug });
+          const p = parsePath(entryPath({ scope, scopeKind, kind, slug }));
+          expect(p).toMatchObject({ type: "entry", scope, kind, slug });
         },
       ),
       { numRuns: 500 },
@@ -59,7 +61,14 @@ describe("paths (SPEC v6 4.2)", () => {
     expect(parsePath("ctxd://")).toEqual({ type: "root" });
     expect(parsePath("ctxd://_me.pool-notes/")).toEqual({ type: "scope", scope: "_me.pool-notes" });
     expect(parsePath("ctxd://notes/decisions/")).toEqual({ type: "folder", scope: "notes", folder: "decisions", kind: "decision" });
-    expect(parsePath("ctxd://notes/lessons/.overview")).toMatchObject({ type: "meta", folder: "lessons", file: ".overview" });
+    expect(parsePath("ctxd://notes/lessons/.overview")).toMatchObject({
+      type: "summary", of: { at: "kind", folder: "lessons" }, file: ".overview",
+    });
+    expect(parsePath("ctxd://.abstract")).toEqual({ type: "summary", of: { at: "root" }, file: ".abstract" });
+    expect(parsePath("ctxd://notes/skills/foo/.abstract")).toMatchObject({ of: { at: "skill", name: "foo" } });
+    expect(parsePath("ctxd://notes/journal/2026/.overview")).toMatchObject({ of: { at: "journal", year: "2026" } });
+    expect(parsePath("ctxd://notes/journal/2026/10/.abstract")).toMatchObject({ of: { at: "journal", month: "10" } });
+    expect(parsePath("ctxd://_me/profile/")).toMatchObject({ type: "folder", kind: "fact" });
     expect(parsePath("ctxd://notes/skills/release-checklist/SKILL.md")).toEqual({
       type: "skill", scope: "notes", name: "release-checklist", file: true,
     });
@@ -80,6 +89,12 @@ describe("paths (SPEC v6 4.2)", () => {
     "ctxd://notes/skills/Bad_Name/SKILL.md",
     "ctxd://notes/journal/2026/13",
     "ctxd://notes/decisions/x-1.md#frag",
+    "ctxd://notes/journal/2026#abc",
+    "ctxd://notes/journal/2026/02/31.md",
+    "ctxd://notes/journal/2026/10/18.md/extra",
+    "ctxd://notes/profile/x-1.md",
+    "ctxd://_me/facts/x-1.md",
+    "ctxd://notes/skills/.abstract",
   ])("rejects %s", (p) => {
     expect(() => parsePath(p)).toThrow(/Invalid ctxd path/);
   });

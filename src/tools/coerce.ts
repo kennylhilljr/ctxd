@@ -14,7 +14,7 @@ export interface Coercion {
 type AliasTable = Readonly<Record<string, string>>;
 
 const kindAliases: AliasTable = {
-  ...Object.fromEntries(KINDS.map((k) => [`${k}s`, k])),
+  ...Object.fromEntries(KINDS.filter((k) => k !== "status").map((k) => [`${k}s`, k])),
   statuses: "status",
   pref: "preference",
   prefs: "preference",
