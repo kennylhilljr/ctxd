@@ -4,6 +4,17 @@
  * Scaffold: commands route to their modules as milestones land.
  */
 import { parseArgs } from "node:util";
+import { run as runInitCommand } from "./init.js";
+
+/** Each command's parsed-args entry point, added as its milestone lands. */
+const COMMAND_RUNNERS: Record<string, (argv: string[]) => number> = {
+  hook: (argv) => {
+    // Hooks must never break a session (SPEC section 9.1): exit 0 silently until M2 lands.
+    parseArgs({ args: argv, allowPositionals: true, strict: false });
+    return 0;
+  },
+  init: runInitCommand,
+};
 
 const COMMANDS: Record<string, { milestone: string; summary: string }> = {
   init: { milestone: "M1", summary: "Create config, data dir, node identity, human client" },
@@ -71,11 +82,8 @@ function main(argv: string[]): number {
     console.error(`Unknown command: ${command}\n\n${usage()}`);
     return 2;
   }
-  if (command === "hook") {
-    // Hooks must never break a session (SPEC section 9.1): exit 0 silently until M2 lands.
-    parseArgs({ args: rest, allowPositionals: true, strict: false });
-    return 0;
-  }
+  const runner = COMMAND_RUNNERS[command];
+  if (runner) return runner(rest);
   console.error(`ctxd ${command}: not implemented yet (planned for ${entry.milestone}).`);
   return 1;
 }
