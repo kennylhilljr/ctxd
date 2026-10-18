@@ -34,6 +34,7 @@ export interface HookAdapter {
     cwd: string;
     source?: string;
     trigger?: string;
+    prompt?: string;
     lastAssistantMessage?: string;
     stopHookActive?: string;
     toolName?: string;
@@ -71,6 +72,7 @@ export const CLAUDE_CODE_ADAPTER: HookAdapter = {
     stopHookActive: "stop_hook_active",
     toolName: "tool_name",
     toolInput: "tool_input",
+    prompt: "prompt",
   },
   limits: {
     defaultTimeoutMs: 600_000,
@@ -101,6 +103,7 @@ export const CODEX_ADAPTER: HookAdapter = {
     lastAssistantMessage: "last_assistant_message",
     toolName: "tool_name",
     toolInput: "tool_input",
+    prompt: "prompt",
   },
   limits: {
     defaultTimeoutMs: 1000,

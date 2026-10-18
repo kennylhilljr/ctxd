@@ -27,9 +27,13 @@ beforeAll(() => {
   run(["client", "add", "codex", "--vendor", "openai", "--config", configPath, "--data-dir", dataDir]);
 }, 30_000);
 
-function run(args: string[], stdin = ""): { stdout: string; stderr: string; status: number } {
+function run(args: string[], stdin = "", env: Record<string, string> = {}): { stdout: string; stderr: string; status: number } {
   const result = spawnSync("npx", ["tsx", "src/cli/index.ts", ...args], {
     cwd: REPO_ROOT,
+    // CTXD_BYPASS unset explicitly: the ambient shell may set it (a sandbox safety default for
+    // this repo), which would make every fixture below exit 0 with no output regardless of the
+    // flag under test, and silently pass for the wrong reason.
+    env: { ...process.env, CTXD_BYPASS: "", ...env },
     input: stdin,
     encoding: "utf8",
     timeout: 10_000,
@@ -37,9 +41,9 @@ function run(args: string[], stdin = ""): { stdout: string; stderr: string; stat
   return { stdout: result.stdout ?? "", stderr: result.stderr ?? "", status: result.status ?? -1 };
 }
 
-function runHook(event: string, client: string, stdin: Record<string, unknown>): { stdout: string; stderr: string; status: number } {
+function runHook(event: string, client: string, stdin: Record<string, unknown>, env: Record<string, string> = {}): { stdout: string; stderr: string; status: number } {
   const substituted = JSON.stringify(stdin).replaceAll("GUARDED_DATA_DIR", dataDir);
-  return run(["hook", event, "--client", client, "--config", configPath, "--data-dir", dataDir], substituted);
+  return run(["hook", event, "--client", client, "--config", configPath, "--data-dir", dataDir], substituted, env);
 }
 
 describe("conformance: descriptor cross-checks (SPEC v6 9.7)", () => {
@@ -91,5 +95,36 @@ describe("conformance: a non-blocking event never exits non-zero", () => {
         expect(fixture.expected.exitCode, `${fixture.client}/${fixture.event}/${fixture.variant}`).toBe(0);
       }
     }
+  });
+});
+
+describe("conformance: feature flags (PRD-feature-flags-v1), against the real ctxd hook CLI", () => {
+  it("CTXD_FEATURE_HOOKS=0: SessionStart exits 0 with no output at all (the master switch)", () => {
+    const result = runHook("session-start", "claude-code", { session_id: "cc-flags-1", cwd: "/scratch/sample-app", source: "startup" }, { CTXD_FEATURE_HOOKS: "0" });
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe("");
+  });
+
+  it("CTXD_FEATURE_HOOKS_PATH_GUARD=0: a guarded-path tool call is no longer blocked", () => {
+    const result = runHook(
+      "pre-tool-use",
+      "claude-code",
+      { session_id: "cc-flags-2", cwd: "/scratch/sample-app", tool_name: "Read", tool_input: { file_path: "GUARDED_DATA_DIR/ctxd.db" } },
+      { CTXD_FEATURE_HOOKS_PATH_GUARD: "0" },
+    );
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe("");
+  });
+
+  it("turning CTXD_FEATURE_HOOKS_PATH_GUARD back on resumes blocking", () => {
+    const result = runHook(
+      "pre-tool-use",
+      "claude-code",
+      { session_id: "cc-flags-3", cwd: "/scratch/sample-app", tool_name: "Read", tool_input: { file_path: "GUARDED_DATA_DIR/ctxd.db" } },
+      { CTXD_FEATURE_HOOKS_PATH_GUARD: "1" },
+    );
+    expect(result.status).toBe(0);
+    const parsed = JSON.parse(result.stdout) as { decision: string };
+    expect(parsed.decision).toBe("block");
   });
 });

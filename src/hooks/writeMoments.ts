@@ -27,6 +27,7 @@
 import { join } from "node:path";
 import { decodeHlc, HlcClock } from "../core/hlc.js";
 import { newId } from "../core/ids.js";
+import { isFlagOn } from "../config/flags.js";
 import { handleClaim } from "../store/claim.js";
 import { resolveAssumedPools } from "../store/snapshot.js";
 import { writeEntry, type WriteContext } from "../store/write.js";
@@ -48,7 +49,14 @@ function sessionFilePath(ctx: HookContext, suffix: string): string {
 }
 
 function writeCtxOf(ctx: HookContext): WriteContext {
-  return { db: ctx.db, clock: new HlcClock(ctx.nodeId), nodeId: ctx.nodeId, clientId: ctx.clientId, assumedPools: resolveAssumedPools(ctx.db, ctx.clientId) };
+  return {
+    db: ctx.db,
+    clock: new HlcClock(ctx.nodeId),
+    nodeId: ctx.nodeId,
+    clientId: ctx.clientId,
+    assumedPools: resolveAssumedPools(ctx.db, ctx.clientId),
+    flags: ctx.flags,
+  };
 }
 
 function cwdOf(ctx: HookContext): string {
@@ -73,7 +81,7 @@ async function writeCheckpoint(ctx: HookContext, cwd: string): Promise<void> {
 
 /** W2: a mechanical checkpoint before compaction. Never blocks (SPEC 9.2). */
 export async function preCompactHandler(ctx: HookContext): Promise<HookResult> {
-  await writeCheckpoint(ctx, cwdOf(ctx));
+  if (isFlagOn(ctx.flags, "hooks.checkpoint")) await writeCheckpoint(ctx, cwdOf(ctx));
   return undefined;
 }
 
@@ -102,6 +110,7 @@ export async function stopHandler(ctx: HookContext): Promise<HookResult> {
   const cwd = cwdOf(ctx);
   await writeCheckpoint(ctx, cwd);
   if (!ctx.scope) return undefined; // nothing to nudge about without a scope
+  if (!isFlagOn(ctx.flags, "hooks.nudge")) return undefined; // never blocks; the checkpoint above still ran
 
   const config: NudgeConfig = {
     enabled: ctx.config?.nudge.enabled ?? true,
@@ -167,7 +176,9 @@ export function sessionEndHandler(ctx: HookContext): HookResult {
     // A failed mechanical record is not worth breaking SessionEnd over.
   }
 
-  releaseCommittedLeases(ctx, scopeId, head, changedFiles.length === 0);
+  if (isFlagOn(ctx.flags, "claims.mechanical_release")) {
+    releaseCommittedLeases(ctx, scopeId, head, changedFiles.length === 0);
+  }
   return undefined;
 }
 

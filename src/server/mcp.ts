@@ -1,9 +1,12 @@
 import { createServer as createHttpServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { statSync } from "node:fs";
 import type Database from "better-sqlite3";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { assertLoopback } from "../security/policy.js";
+import { loadConfig } from "../config/config.js";
+import { isFlagOn, resolveFlags } from "../config/flags.js";
 import { toolDefinitions } from "../tools/list.js";
 import { TOOLS } from "../tools/schemas.js";
 import { coerceInput } from "../tools/coerce.js";
@@ -27,6 +30,8 @@ export interface StartServerOptions {
   nodeId: string;
   /** "host:port"; refused unless loopback (ADR 0003). */
   listen: string;
+  /** Reloaded fresh per request for live flag reload (PRD-feature-flags-v1 section 2); omitted means every flag uses its registry default. */
+  configPath?: string;
 }
 
 export interface RunningServer {
@@ -45,7 +50,7 @@ export async function startServer(opts: StartServerOptions): Promise<RunningServ
   const clock = new HlcClock(opts.nodeId);
 
   const httpServer = createHttpServer((req, res) => {
-    handleHttpRequest(req, res, opts.db, opts.nodeId, clock).catch((err) => {
+    handleHttpRequest(req, res, opts.db, opts.nodeId, clock, opts.configPath).catch((err) => {
       if (!res.headersSent) res.writeHead(500, { "content-type": "application/json" });
       res.end(JSON.stringify({ error: { code: "VALIDATION", message: (err as Error).message } }));
     });
@@ -59,12 +64,42 @@ export async function startServer(opts: StartServerOptions): Promise<RunningServ
   return { close: () => new Promise((resolve) => httpServer.close(() => resolve())) };
 }
 
+/**
+ * Live reload without a restart (PRD-feature-flags-v1 section 2), at the cost of one `stat` per
+ * request rather than a full config parse and schema validation: re-reads and re-validates
+ * config.toml only when its mtime has actually changed since the last request, so a flag flip
+ * still takes effect on the very next call.
+ */
+let flagsCache: { configPath: string; mtimeMs: number; flags: Map<string, boolean> } | undefined;
+
+function currentFlags(configPath: string | undefined): Map<string, boolean> {
+  if (!configPath) return resolveFlags(undefined);
+  let mtimeMs: number;
+  try {
+    mtimeMs = statSync(configPath).mtimeMs;
+  } catch {
+    return resolveFlags(undefined); // no config file yet: every flag at its registry default
+  }
+  if (flagsCache?.configPath === configPath && flagsCache.mtimeMs === mtimeMs) return flagsCache.flags;
+
+  let config;
+  try {
+    config = loadConfig(configPath);
+  } catch {
+    config = undefined;
+  }
+  const flags = resolveFlags(config);
+  flagsCache = { configPath, mtimeMs, flags };
+  return flags;
+}
+
 async function handleHttpRequest(
   req: IncomingMessage,
   res: ServerResponse,
   db: Database.Database,
   nodeId: string,
   clock: HlcClock,
+  configPath?: string,
 ): Promise<void> {
   if (req.method === "GET" && req.url === "/healthz") {
     res.writeHead(200, { "content-type": "text/plain" }).end("ok");
@@ -93,6 +128,7 @@ async function handleHttpRequest(
     clientName: auth.clientName,
     vendor: auth.vendor,
     assumedPools: auth.assumedPools,
+    flags: currentFlags(configPath),
   };
 
   let body: unknown;
@@ -185,6 +221,7 @@ function scopeIdFor(db: Database.Database, scopeName: string): string | null {
 }
 
 function recordMetrics(ctx: RequestContext, tool: string, scopeId: string | null, text: string, truncated: boolean): void {
+  if (!isFlagOn(ctx.flags, "metering")) return; // metering off (PRD-feature-flags-v1 section 4): response sizes are not recorded
   ctx.db
     .prepare("INSERT INTO tool_metrics (at, client_id, tool, scope_id, chars, est_tokens, truncated) VALUES (?, ?, ?, ?, ?, ?, ?)")
     .run(nowIso(), ctx.clientId, tool, scopeId, text.length, estimateTokens(text), truncated ? 1 : 0);

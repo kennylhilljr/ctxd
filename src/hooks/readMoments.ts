@@ -10,8 +10,9 @@
  *   cursor that nothing writes yet. `assembleBrief`'s `micro` size (used here for resume, fork,
  *   compact and clear) is otherwise exactly what R2 to R4 ask for, including the latest handoff
  *   (R3): its own section 5 includes that regardless of size, with no extra wiring needed here.
- * - R7 (prompt-time hints on UserPromptSubmit) is off by default and needs a per-scope enable
- *   flag with no config surface yet; it has no handler in this slice.
+ * - R7 (prompt-time hints on UserPromptSubmit) now has a handler (`promptSearchHandler`, below),
+ *   gated by the `hooks.prompt_search` flag (M3 slice 1, PRD-feature-flags-v1); the flag is the
+ *   per-machine enable switch, still off by default since it costs tokens on every turn.
  *
  * assumedPools is resolved from the client's own issued persona token (store/snapshot.ts's
  * resolveAssumedPools), not hardcoded to []: a hook call presents no bearer token to resolve by
@@ -22,6 +23,7 @@
  */
 import { HlcClock } from "../core/hlc.js";
 import { assembleBrief, type BriefInput } from "../brief/assemble.js";
+import { runSearch } from "../search/fts.js";
 import { resolveAssumedPools } from "../store/snapshot.js";
 import type { RequestContext } from "../server/context.js";
 import type { Vendor } from "../core/kinds.js";
@@ -78,6 +80,28 @@ export function subagentStartBrief(ctx: HookContext): HookResult {
   try {
     const result = assembleBrief(requestContextOf(ctx), { scope: ctx.scope, size: "micro" }) as { brief: string };
     return result.brief ? { text: result.brief } : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** A raw prompt turned into a safe FTS5 query: word tokens OR'd together, capped so a long prompt stays cheap. */
+function ftsQueryFromPrompt(prompt: string): string | null {
+  const words = prompt.match(/[\p{L}\p{N}_]+/gu)?.slice(0, 8) ?? [];
+  if (words.length === 0) return null;
+  return words.map((w) => `"${w.replace(/"/g, '""')}"`).join(" OR ");
+}
+
+/** R7: up to 3 matching entry titles as a search hint on each prompt (PRD-hooks-v5 section 7.2), gated by `hooks.prompt_search`. Skips silently (its own stated fallback) on anything short of a match. */
+export function promptSearchHandler(ctx: HookContext): HookResult {
+  if (!ctx.scope) return undefined;
+  const promptField = ctx.adapter.fields.prompt ? ctx.input[ctx.adapter.fields.prompt] : undefined;
+  const query = typeof promptField === "string" ? ftsQueryFromPrompt(promptField) : null;
+  if (!query) return undefined;
+  try {
+    const result = runSearch(requestContextOf(ctx), { scope: ctx.scope, query, limit: 3, max_tokens: 200, include_proposed: false });
+    if (result.results.length === 0) return undefined;
+    return { text: result.results.map((r) => `${r.ref} ${r.title}`).join("\n") };
   } catch {
     return undefined;
   }

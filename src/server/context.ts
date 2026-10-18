@@ -15,4 +15,11 @@ export interface RequestContext {
   vendor: Vendor;
   /** The session persona's pools; [] means _me-only (SPEC v6 section 8.4). */
   assumedPools: readonly string[];
+  /**
+   * Effective feature flags, reloaded from config.toml and the environment per request
+   * (PRD-feature-flags-v1). Optional so the many existing test fixtures that build a
+   * RequestContext literal keep compiling; isFlagOn(undefined-safe call sites) treats a missing
+   * map as "every flag on", matching the pre-M3 behavior those fixtures exercise.
+   */
+  flags?: Map<string, boolean>;
 }

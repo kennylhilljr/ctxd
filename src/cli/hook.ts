@@ -16,6 +16,7 @@ import { join } from "node:path";
 import type Database from "better-sqlite3";
 import { resolveConfigPath, resolveDataDir } from "./common.js";
 import { loadConfig, type CtxdConfig } from "../config/config.js";
+import { isFlagOn, resolveFlags } from "../config/flags.js";
 import { openDatabase } from "../store/db.js";
 import { ADAPTERS, CTXD_HOOK_EVENTS, type CtxdHookEvent, type HookAdapter } from "../hooks/adapters.js";
 import { isBypassed, resolveScope } from "../hooks/scope.js";
@@ -35,6 +36,8 @@ export interface HookContext {
   input: Record<string, unknown>;
   dataDir: string;
   config: CtxdConfig | undefined;
+  /** Optional so pre-M3 test fixtures that build a HookContext literal without one keep working: isFlagOn treats a missing map as "every flag on". */
+  flags?: Map<string, boolean>;
 }
 
 export type HookResult = { text?: string; block?: { reason: string } } | undefined;
@@ -106,6 +109,7 @@ export async function dispatchWithDb(
   scopeMap: Record<string, string>,
   dataDir = "",
   config: CtxdConfig | undefined = undefined,
+  flags: Map<string, boolean> = resolveFlags(config),
 ): Promise<HookResult> {
   const client = db.prepare("SELECT client_id FROM clients WHERE name = ?").get(clientName) as { client_id: string } | undefined;
   const node = db.prepare("SELECT node_id FROM nodes LIMIT 1").get() as { node_id: string } | undefined;
@@ -154,6 +158,7 @@ export async function dispatchWithDb(
     input,
     dataDir,
     config,
+    flags,
   };
   return await handler(ctx);
 }
@@ -175,6 +180,8 @@ async function dispatch(
     return undefined; // no ctxd data yet (e.g. before `ctxd init`): nothing to do, never breaks the session
   }
   try {
+    // dispatchWithDb derives flags from config itself (its own default parameter); config is
+    // already the single source dispatch needs to pass down, so flags is not threaded separately.
     return await dispatchWithDb(db, event, adapter, clientName, args.scope, processCwd, input, config?.scope_map ?? {}, dataDir, config);
   } finally {
     db.close();
@@ -199,6 +206,11 @@ export async function run(argv: string[]): Promise<number> {
     config = undefined; // no config yet (e.g. before `ctxd init`): bypass still works with no patterns configured
   }
   if (isBypassed(cwd, config?.hooks.bypass_patterns ?? [])) return 0;
+
+  // The master flag (FF-4's top of the `hooks.*` tree): off means every hook exits 0 at once,
+  // before the database even opens, same as bypass above (PRD-feature-flags-v1 section 4).
+  const flags = resolveFlags(config);
+  if (!isFlagOn(flags, "hooks")) return 0;
 
   if (!eventArg || !(CTXD_HOOK_EVENTS as readonly string[]).includes(eventArg)) return 0; // unknown event: never break the client
   const event = eventArg as CtxdHookEvent;

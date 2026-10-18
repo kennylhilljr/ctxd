@@ -25,7 +25,7 @@ export async function run(argv: string[]): Promise<number> {
     return 1;
   }
 
-  const server = await startServer({ db, nodeId: node.node_id, listen: config.mcp.listen });
+  const server = await startServer({ db, nodeId: node.node_id, listen: config.mcp.listen, configPath });
   console.log(`ctxd server listening on ${config.mcp.listen}`);
 
   let stopping = false;
