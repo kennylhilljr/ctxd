@@ -7,6 +7,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprot
 import { assertLoopback } from "../security/policy.js";
 import { loadConfig } from "../config/config.js";
 import { isFlagOn, resolveFlags } from "../config/flags.js";
+import { extractBearerToken, parseListen, readJsonBody } from "./http.js";
 import { toolDefinitions } from "../tools/list.js";
 import { TOOLS } from "../tools/schemas.js";
 import { coerceInput } from "../tools/coerce.js";
@@ -44,9 +45,7 @@ const TOOLS_BY_NAME = new Map(TOOLS.map((t) => [t.name, t]));
 
 export async function startServer(opts: StartServerOptions): Promise<RunningServer> {
   assertLoopback(opts.listen);
-  const colon = opts.listen.lastIndexOf(":");
-  const host = opts.listen.slice(0, colon);
-  const port = Number(opts.listen.slice(colon + 1));
+  const { host, port } = parseListen(opts.listen);
   const clock = new HlcClock(opts.nodeId);
 
   const httpServer = createHttpServer((req, res) => {
@@ -110,8 +109,7 @@ async function handleHttpRequest(
     return;
   }
 
-  const authHeader = req.headers.authorization;
-  const token = authHeader?.startsWith("Bearer ") ? authHeader.slice("Bearer ".length) : undefined;
+  const token = extractBearerToken(req);
   const auth = token ? resolveBearerAuth(db, token) : null;
   if (!auth) {
     const envelope: ErrorEnvelope = {
@@ -148,21 +146,6 @@ async function handleHttpRequest(
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
   await server.connect(transport);
   await transport.handleRequest(req, res, body);
-}
-
-function readJsonBody(req: IncomingMessage): Promise<unknown> {
-  return new Promise((resolve, reject) => {
-    let data = "";
-    req.on("data", (chunk: Buffer | string) => (data += chunk));
-    req.on("end", () => {
-      try {
-        resolve(data ? JSON.parse(data) : undefined);
-      } catch (err) {
-        reject(err);
-      }
-    });
-    req.on("error", reject);
-  });
 }
 
 async function handleToolCall(ctx: RequestContext, toolName: string, rawArgs: Record<string, unknown>): Promise<ToolResult> {

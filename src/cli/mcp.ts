@@ -18,6 +18,7 @@ import { resolveConfigPath, resolveDataDir, tokensDir } from "./common.js";
 import { loadConfig } from "../config/config.js";
 import { openDatabase } from "../store/db.js";
 import { readSecret } from "../access/keychain.js";
+import { parseListen } from "../server/http.js";
 
 const SERVICE = "ctxd";
 
@@ -108,9 +109,7 @@ function parseSseMessages(raw: string): string[] {
 /** Forward one line (a JSON-RPC message) to the server; returns the response line, or null for a notification. */
 function proxyLine(listen: string, token: string, line: string): Promise<string | null> {
   return new Promise((resolve, reject) => {
-    const colon = listen.lastIndexOf(":");
-    const host = listen.slice(0, colon);
-    const port = Number(listen.slice(colon + 1));
+    const { host, port } = parseListen(listen);
     const req = httpRequest(
       {
         host,

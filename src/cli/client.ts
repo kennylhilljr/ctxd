@@ -1,6 +1,5 @@
 /** `ctxd client add|revoke|tag`: manage client tokens (SPEC v6 section 13). */
 import { parseArgs } from "node:util";
-import { createHash, randomBytes } from "node:crypto";
 import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type Database from "better-sqlite3";
@@ -8,6 +7,7 @@ import { resolveConfigPath, resolveDataDir, tokensDir } from "./common.js";
 import { openDatabase } from "../store/db.js";
 import { newId } from "../core/ids.js";
 import { nowIso } from "../core/time.js";
+import { newToken } from "../core/hash.js";
 import { VENDORS, type Vendor } from "../core/kinds.js";
 import { deleteSecret, type KeychainOptions } from "../access/keychain.js";
 
@@ -21,8 +21,7 @@ export function addClient(db: Database.Database, name: string, vendor: Vendor, c
     console.error("ctxd client: no node identity found; run ctxd init first.");
     return 1;
   }
-  const raw = randomBytes(32).toString("hex");
-  const hash = createHash("sha256").update(raw).digest("hex");
+  const { raw, hash } = newToken();
   db.prepare("INSERT INTO clients (client_id, name, vendor, node_id, token_hash, created_at) VALUES (?, ?, ?, ?, ?, ?)").run(
     newId(),
     name,
