@@ -18,6 +18,7 @@ Earlier changes are listed in [Spec v6](SPEC-v6.md), [v5](SPEC-v5.md), [v4](SPEC
 | 4.3 | `skill:<name>` lookup's scope priority restated for the case where no session scope is known yet |
 | 6 | Step 1: a held write now always opens, or bumps, an access request, even when the target scope belongs to no pool (`pool_ids` is then the JSON empty array `[]`) |
 | 7.5 | New section 7.5.6: commit facts recorded in the local `commits` table by the PostToolUse hook |
+| 4, 7.6.2, 9.10 | Added during M2 and synced here at integration: `suspend` and `resume` event ops and `leases.suspended_at` (quarantine suspends a claim), and `sessions.ended_by` (`sweep` when the crash sweep finalized a session) |
 | 7.6.6 | The purge event's payload now also carries `scope_id`, `kind` and `slug`; applying it is an upsert, so a rebuild reconstructs the purged entry's stub row exactly, whatever order its events replay in |
 | 8.4 | The macOS Keychain, reached via the `security` binary, is confirmed as the secret store rather than a placeholder pending a cross-platform decision |
 | 10.4 | Review policy wording cross-referenced against the now-fixed schema default |
@@ -213,7 +214,7 @@ CREATE TABLE events (
   hlc          TEXT NOT NULL,
   scope_id     TEXT NOT NULL,
   entry_id     TEXT NOT NULL,
-  op           TEXT NOT NULL CHECK (op IN ('create','update','status','delete','resolve','claim','release','relate','unrelate','flag','unflag','quarantine','unquarantine','revert','purge','acl')),
+  op           TEXT NOT NULL CHECK (op IN ('create','update','status','delete','resolve','claim','release','relate','unrelate','flag','unflag','quarantine','unquarantine','revert','purge','acl','suspend','resume')),
   part         TEXT NOT NULL CHECK (part IN ('content','status','relations','claim','meta')),
   parent_revs  TEXT NOT NULL DEFAULT '[]',
   rev          TEXT NOT NULL,
@@ -348,7 +349,7 @@ CREATE TABLE access_requests (
   request_id   TEXT PRIMARY KEY,
   client_id    TEXT NOT NULL,
   scope_id     TEXT NOT NULL,
-  pool_ids     TEXT NOT NULL,          -- JSON: pools that contain the scope; '[]' if the scope belongs to none (6, step 1)
+  pool_ids     TEXT NOT NULL,          -- JSON: pools that contain the scope
   held_entries TEXT NOT NULL DEFAULT '[]', -- JSON: references of entries held in the client's holding scope
   attempts     INTEGER NOT NULL DEFAULT 1,
   first_at     TEXT NOT NULL,
@@ -465,7 +466,8 @@ CREATE TABLE leases (
   changed_files TEXT,                -- JSON array, recorded on release
   drift        TEXT,                 -- JSON array of changed files outside paths
   taken_over_by TEXT,
-  lost_by      TEXT
+  lost_by      TEXT,
+  suspended_at TEXT                  -- non-NULL: quarantine suspended this claim (7.6.2); overlaps and blocking ignore it
 );
 CREATE INDEX leases_scope_state ON leases(scope_id, state);
 
@@ -487,7 +489,8 @@ CREATE TABLE sessions (
   started_at   TEXT NOT NULL,
   last_seen_hlc TEXT NOT NULL,
   head         TEXT,                  -- latest observed git HEAD
-  recovery     TEXT                   -- JSON: {task_id?, phase, last_request_summary}; no transcript content
+  recovery     TEXT,                  -- JSON: {task_id?, phase, last_request_summary}; no transcript content
+  ended_by     TEXT                   -- NULL for a real client end hook; 'sweep' when the crash sweep finalized it (9.10)
 );
 CREATE INDEX sessions_client_state ON sessions(client_id, state);
 
@@ -502,12 +505,12 @@ CREATE VIRTUAL TABLE entries_fts USING fts5(
   title, body, tags, content='entries', content_rowid='rowid'
 );
 
-CREATE TABLE commits (                 -- local facts recorded by the PostToolUse hook (7.5.6)
+CREATE TABLE commits (                 -- local facts recorded by the PostToolUse hook (SPEC v7 7.5)
   sha          TEXT NOT NULL,
   scope_id     TEXT NOT NULL,
   session_ref  TEXT,
   subject      TEXT NOT NULL,
-  changed_files TEXT NOT NULL,        -- JSON array of paths
+  changed_files TEXT NOT NULL,         -- JSON array of paths
   client_id    TEXT NOT NULL,
   at           TEXT NOT NULL,
   PRIMARY KEY (sha, scope_id)
