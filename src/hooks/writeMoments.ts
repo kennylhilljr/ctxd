@@ -18,12 +18,18 @@
  * - The crash sweep's own mechanical release (src/hooks/crashSweep.ts, for a session that never
  *   reaches SessionEnd at all) still can't do this: a crashed session has no live `cwd` to check
  *   "working tree clean" against, which is exactly what SessionEnd has and the sweep does not.
+ *
+ * Every write here goes through writeCtxOf's assumedPools, resolved from the client's own issued
+ * persona token (store/snapshot.ts's resolveAssumedPools, same reasoning as src/hooks/readMoments.ts),
+ * so a mechanical write respects exactly the pools the client was actually given, not every pool
+ * it happens to be a member of.
  */
 import { join } from "node:path";
 import { decodeHlc, HlcClock } from "../core/hlc.js";
 import { newId } from "../core/ids.js";
 import { isFlagOn } from "../config/flags.js";
 import { handleClaim } from "../store/claim.js";
+import { resolveAssumedPools } from "../store/snapshot.js";
 import { writeEntry, type WriteContext } from "../store/write.js";
 import type { HookContext, HookResult } from "../cli/hook.js";
 import { readStateFile, writeStateFileLocked } from "./stateFile.js";
@@ -43,7 +49,14 @@ function sessionFilePath(ctx: HookContext, suffix: string): string {
 }
 
 function writeCtxOf(ctx: HookContext): WriteContext {
-  return { db: ctx.db, clock: new HlcClock(ctx.nodeId), nodeId: ctx.nodeId, clientId: ctx.clientId, flags: ctx.flags };
+  return {
+    db: ctx.db,
+    clock: new HlcClock(ctx.nodeId),
+    nodeId: ctx.nodeId,
+    clientId: ctx.clientId,
+    assumedPools: resolveAssumedPools(ctx.db, ctx.clientId),
+    flags: ctx.flags,
+  };
 }
 
 function cwdOf(ctx: HookContext): string {

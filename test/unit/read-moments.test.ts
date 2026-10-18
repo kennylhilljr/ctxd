@@ -44,11 +44,11 @@ function setup(): Fixture {
     now(),
   );
   // Access is default deny (AGENTS.md): a non-human, non-local client needs an explicit grant to
-  // read or write a "project"-kind scope like "notes". A hook session has no persona token (SPEC
-  // v6 10.5: "assumedPools is []" for a plain token), so a pool grant would need an assumed pool
-  // it doesn't have; the `client_grants` temporary grant (what `ctxd grant` writes) is checked
-  // unconditionally regardless of assumed pools, which is the realistic path for a single client
-  // bound directly to a scope without setting up a pool.
+  // read or write a "project"-kind scope like "notes". This fixture uses a `client_grants`
+  // temporary grant (what `ctxd grant` writes), which is checked unconditionally regardless of
+  // assumed pools; the pool-grant path (what `ctxd pool grant` plus `ctxd persona issue` writes)
+  // is covered separately below, since it depends on resolveAssumedPools reading a real persona
+  // token rather than just an access grant.
   db.prepare("INSERT INTO client_grants (client_id, scope_id, level, expires_at, granted_by) VALUES (?, ?, 'write', ?, 'human')").run(
     clientId,
     scopeId,
@@ -180,5 +180,32 @@ describe("wired end to end via dispatchWithDb", () => {
     );
 
     expect(result?.text).toContain("On track.");
+  });
+});
+
+describe("regression: a pool-granted scope is reachable via the client's issued persona token", () => {
+  it("resolves assumedPools from persona_tokens, not an empty array, so a pool-only grant works", () => {
+    // Found live: `ctxd pool grant <pool> <scope> --level write` plus `ctxd persona issue
+    // <client> <pool>` (the real onboarding path for a client, not just `ctxd grant`) left every
+    // hook-driven brief throwing SCOPE_FORBIDDEN, since assumedPools was hardcoded to []
+    // regardless of any persona token the client had actually been issued.
+    const f = setup();
+    const poolScopeId = newId();
+    f.db.prepare("INSERT INTO scopes (scope_id, name, created_at) VALUES (?, 'pool-notes', ?)").run(poolScopeId, now());
+    f.db.prepare("INSERT INTO pools (pool_id, name, created_at) VALUES ('pool-dev', 'pool-dev', ?)").run(now());
+    f.db.prepare("INSERT INTO pool_members (pool_id, principal) VALUES ('pool-dev', ?)").run(`client:${f.clientId}`);
+    f.db.prepare("INSERT INTO pool_grants (pool_id, scope_id, level) VALUES ('pool-dev', ?, 'write')").run(poolScopeId);
+    f.db
+      .prepare("INSERT INTO persona_tokens (token_hash, client_id, pools, node_id, created_at) VALUES (?, ?, '[\"pool-dev\"]', ?, ?)")
+      .run(newId(), f.clientId, f.nodeId, now());
+
+    writeEntry(
+      { db: f.db, clock: new HlcClock(f.nodeId), nodeId: f.nodeId, clientId: f.clientId, assumedPools: ["pool-dev"] },
+      { scope: "pool-notes", kind: "status", title: "Status", body: "Pool access works.", request_id: newId() } as never,
+    );
+
+    const result = sessionStartBrief(baseCtx(f, { scope: "pool-notes", input: { source: "startup" } }));
+    expect(result?.text).toContain("Pool access works.");
+    expect(result?.text).not.toContain("ctxd unavailable");
   });
 });

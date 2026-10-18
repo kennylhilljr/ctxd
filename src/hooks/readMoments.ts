@@ -13,10 +13,18 @@
  * - R7 (prompt-time hints on UserPromptSubmit) now has a handler (`promptSearchHandler`, below),
  *   gated by the `hooks.prompt_search` flag (M3 slice 1, PRD-feature-flags-v1); the flag is the
  *   per-machine enable switch, still off by default since it costs tokens on every turn.
+ *
+ * assumedPools is resolved from the client's own issued persona token (store/snapshot.ts's
+ * resolveAssumedPools), not hardcoded to []: a hook call presents no bearer token to resolve by
+ * hash the way the MCP server's auth.ts does, but `ctxd persona issue <client> <pool>` is exactly
+ * how a client is meant to be given pool-granted scopes in the first place, hooks included. A
+ * client nobody has issued a persona for falls back to [] (SPEC v6 section 3: _me-only), matching
+ * a plain token with no persona.
  */
 import { HlcClock } from "../core/hlc.js";
 import { assembleBrief, type BriefInput } from "../brief/assemble.js";
 import { runSearch } from "../search/fts.js";
+import { resolveAssumedPools } from "../store/snapshot.js";
 import type { RequestContext } from "../server/context.js";
 import type { Vendor } from "../core/kinds.js";
 import type { HookContext, HookResult } from "../cli/hook.js";
@@ -33,7 +41,7 @@ function requestContextOf(ctx: HookContext): RequestContext {
     clientId: ctx.clientId,
     clientName: ctx.clientName,
     vendor: row?.vendor ?? "other",
-    assumedPools: [], // a hook call carries the client's plain token, no persona (SPEC v6 section 3)
+    assumedPools: resolveAssumedPools(ctx.db, ctx.clientId),
   };
 }
 

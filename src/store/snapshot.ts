@@ -26,6 +26,19 @@ export function loadClientName(db: Database.Database, clientId: string): string 
   return (db.prepare("SELECT name FROM clients WHERE client_id = ?").get(clientId) as { name: string }).name;
 }
 
+/**
+ * The client's currently issued, unrevoked persona token's pools, or `[]` if it has none (SPEC
+ * v6 section 3: no persona means _me-only). Used by the hook CLI, which identifies a client by
+ * `--client <name>` and presents no token of its own to resolve by hash the way the MCP server's
+ * auth.ts does; this is the same "assumed pools" fact, looked up by client instead.
+ */
+export function resolveAssumedPools(db: Database.Database, clientId: string): string[] {
+  const row = db
+    .prepare("SELECT pools FROM persona_tokens WHERE client_id = ? AND revoked_at IS NULL ORDER BY created_at DESC LIMIT 1")
+    .get(clientId) as { pools: string } | undefined;
+  return row ? (JSON.parse(row.pools) as string[]) : [];
+}
+
 interface ScopeRow {
   scope_id: string;
   name: string;
