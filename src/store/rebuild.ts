@@ -25,7 +25,7 @@ export function rebuild(db: Database.Database): void {
 
     const touchedScopes = new Set<string>();
     for (const e of events) {
-      if (e.part !== "content" && e.part !== "status" && e.part !== "relations" && e.part !== "claim") continue; // "meta" lands with its own M1/M2 slice
+      if (e.part !== "content" && e.part !== "status" && e.part !== "relations" && e.part !== "claim" && e.part !== "meta") continue;
       applyEvent(db, {
         eventId: e.event_id,
         scopeId: e.scope_id,

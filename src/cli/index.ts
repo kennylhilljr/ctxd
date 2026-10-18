@@ -14,6 +14,8 @@ import { run as runAccessCommand } from "./access.js";
 import { run as runPersonaCommand } from "./persona.js";
 import { run as runServerCommand } from "./server.js";
 import { run as runMcpCommand } from "./mcp.js";
+import { run as runFlagCommand } from "./flag.js";
+import { run as runPurgeCommand } from "./purge.js";
 
 /** Each command's parsed-args entry point, added as its milestone lands. */
 const COMMAND_RUNNERS: Record<string, (argv: string[]) => number | Promise<number>> = {
@@ -32,6 +34,8 @@ const COMMAND_RUNNERS: Record<string, (argv: string[]) => number | Promise<numbe
   persona: runPersonaCommand,
   server: runServerCommand,
   mcp: runMcpCommand,
+  flag: runFlagCommand,
+  purge: runPurgeCommand,
 };
 
 const COMMANDS: Record<string, { milestone: string; summary: string }> = {

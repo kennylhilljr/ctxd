@@ -42,6 +42,16 @@ export interface ApplyEventOptions {
 }
 
 export function applyEvent(db: Database.Database, e: EventForMaterialize, { skipFts = false }: ApplyEventOptions = {}): void {
+  // Purge rewrites every OTHER stored event for the entry to {"purged": true} (SPEC 7.6.6 step
+  // 2); replaying one of those neutered events (e.g. a rebuild after a purge) must not try to
+  // materialize a create/update/etc with no real payload. The purge event's own payload is never
+  // rewritten, so this never short-circuits the purge handler below it.
+  // Known M1 gap (SPEC-v7): this means a rebuild after a purge leaves the entry absent from
+  // `entries` rather than present with placeholder content, since the create event that would
+  // normally insert the row is one of the neutered ones. Flagged rather than engineering a
+  // self-sufficient purge-reconstructs-a-stub-row path under this session's time budget.
+  if ((e.payload as { purged?: boolean }).purged === true) return;
+
   if (e.part === "content" && e.op === "create") {
     const p = e.payload as unknown as CreatePayload;
     db.prepare(
@@ -92,6 +102,8 @@ export function applyEvent(db: Database.Database, e: EventForMaterialize, { skip
       "UPDATE entries SET title = ?, summary = ?, body = ?, tags = ?, content_rev = ?, content_version = ?, updated_by = ?, updated_hlc = ? WHERE entry_id = ?",
     ).run(merged.title, merged.summary, merged.body, merged.tags, e.rev, revVersion(e.rev), e.clientId, e.hlc, e.entryId);
     if (!skipFts) syncFtsRow(db, e.entryId, current);
+    // "Edit... also close[s] open flags with that action as the resolution" (SPEC 7.6.1).
+    closeOpenFlags(db, e.entryId, "edit");
     return;
   }
 
@@ -105,6 +117,8 @@ export function applyEvent(db: Database.Database, e: EventForMaterialize, { skip
       e.hlc,
       e.entryId,
     );
+    // "...supersede, archive and purge also close open flags with that action as the resolution" (SPEC 7.6.1).
+    if (p.status === "superseded" || p.status === "archived") closeOpenFlags(db, e.entryId, p.status === "superseded" ? "supersede" : "archive");
     return;
   }
 
@@ -192,7 +206,54 @@ export function applyEvent(db: Database.Database, e: EventForMaterialize, { skip
     return;
   }
 
+  if (e.part === "status" && e.op === "unflag") {
+    const current = db.prepare("SELECT status_before FROM entries WHERE entry_id = ?").get(e.entryId) as { status_before: string | null };
+    // status_before should always be set once an entry is flagged; the fallback only guards
+    // against replaying a malformed or hand-crafted event, never a real unflag of a live entry.
+    const restored = current.status_before ?? "active";
+    db.prepare("UPDATE entries SET status = ?, status_before = NULL, status_rev = ?, updated_hlc = ? WHERE entry_id = ?").run(
+      restored,
+      e.rev,
+      e.hlc,
+      e.entryId,
+    );
+    closeOpenFlags(db, e.entryId, "unflagged");
+    return;
+  }
+
+  if (e.part === "meta" && e.op === "purge") {
+    const before = db.prepare("SELECT rowid, title, body, tags FROM entries WHERE entry_id = ?").get(e.entryId) as
+      | { rowid: number; title: string; body: string; tags: string }
+      | undefined;
+    db.prepare(
+      "UPDATE entries SET title = '[purged]', summary = '', body = '', tags = '[]', purged_at = ?, purge_fingerprint = ? WHERE entry_id = ?",
+    ).run(e.hlc, (e.payload as { fingerprint: string }).fingerprint, e.entryId);
+    // entries_fts is an external-content table: a plain DELETE does nothing (and can corrupt the
+    // index); it needs the 'delete' command with the row's prior values, same as syncFtsRow.
+    if (!skipFts && before) {
+      db.prepare("INSERT INTO entries_fts(entries_fts, rowid, title, body, tags) VALUES ('delete', ?, ?, ?, ?)").run(
+        before.rowid,
+        before.title,
+        before.body,
+        ftsTags(before.tags),
+      );
+    }
+    db.prepare("DELETE FROM relations WHERE entry_id = ?").run(e.entryId);
+    db.prepare("UPDATE relations SET target = '[purged]' WHERE target LIKE ?").run(`%/${e.entryId}`);
+    closeOpenFlags(db, e.entryId, "purge");
+    // "Erase history": every stored event for this entry is rewritten in place (the only
+    // operation that rewrites events, ADR-0002's own carve-out) -- but not this purge event
+    // itself, whose own payload is exactly what records the fingerprint that blocks reinsertion.
+    db.prepare("UPDATE events SET payload = '{\"purged\":true}', prev = NULL WHERE entry_id = ? AND event_id != ?").run(e.entryId, e.eventId);
+    return;
+  }
+
   throw new Error(`materialize: no handler yet for op=${e.op} part=${e.part} (lands with its own M1 slice)`);
+}
+
+/** Close every open flag on an entry with the given resolution (SPEC v6 section 7.6.1). */
+function closeOpenFlags(db: Database.Database, entryId: string, resolution: string): void {
+  db.prepare("UPDATE flags SET resolved = ? WHERE entry_id = ? AND resolved IS NULL").run(resolution, entryId);
 }
 
 /** Sync the FTS5 external-content row for an entry after it changes (SPEC v6 section 4). */

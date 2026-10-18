@@ -7,7 +7,7 @@ import { HlcClock } from "../../src/core/hlc.js";
 import { newId } from "../../src/core/ids.js";
 import { openDatabase } from "../../src/store/db.js";
 import { writeEntry, type WriteContext } from "../../src/store/write.js";
-import { flagEntry } from "../../src/store/flag.js";
+import { flagEntry, unflagEntry } from "../../src/store/flag.js";
 import { CtxdError } from "../../src/core/errors.js";
 
 function freshDb(): Database.Database {
@@ -142,5 +142,68 @@ describe("flagEntry (SPEC v6 section 7.6.1)", () => {
     };
     expect(row.problem).toBe("unsafe");
     expect(row.resolved).toBeNull();
+  });
+});
+
+describe("unflagEntry (SPEC v6 section 7.6.1)", () => {
+  it("restores status_before and closes all open flags, human only", () => {
+    const f = setup();
+    const created = writeEntry(writeCtx(f, f.humanId), { scope: "notes", kind: "note", title: "N", body: "Body.", request_id: newId() } as never);
+    if ("held" in created) throw new Error("unexpected hold");
+    flagEntry(writeCtx(f, f.humanId), { ref: created.ref, problem: "stale", reason: "First.", request_id: newId() });
+    flagEntry(writeCtx(f, f.humanId), { ref: created.ref, problem: "wrong", reason: "Second.", request_id: newId() });
+
+    const result = unflagEntry(writeCtx(f, f.humanId), created.ref);
+    expect(result.status).toBe("active");
+    expect(result.flags_closed).toBe(2);
+    const row = f.db.prepare("SELECT status, status_before FROM entries WHERE entry_id = ?").get(created.id) as {
+      status: string;
+      status_before: string | null;
+    };
+    expect(row.status).toBe("active");
+    expect(row.status_before).toBeNull();
+    const openCount = (f.db.prepare("SELECT COUNT(*) AS n FROM flags WHERE entry_id = ? AND resolved IS NULL").get(created.id) as { n: number }).n;
+    expect(openCount).toBe(0);
+    const resolutions = (f.db.prepare("SELECT resolved FROM flags WHERE entry_id = ?").all(created.id) as { resolved: string }[]).map((r) => r.resolved);
+    expect(resolutions).toEqual(["unflagged", "unflagged"]);
+  });
+
+  it("rejects unflag from a non-human client", () => {
+    const f = setup();
+    const created = writeEntry(writeCtx(f, f.humanId), { scope: "notes", kind: "note", title: "N", body: "Body.", request_id: newId() } as never);
+    if ("held" in created) throw new Error("unexpected hold");
+    flagEntry({ ...writeCtx(f, f.agentId), assumedPools: ["pool-dev"] }, { ref: created.ref, problem: "stale", reason: "x", request_id: newId() });
+    expect(() => unflagEntry(writeCtx(f, f.agentId), created.ref)).toThrow(CtxdError);
+  });
+
+  it("rejects unflag on an entry that isn't currently flagged", () => {
+    const f = setup();
+    const created = writeEntry(writeCtx(f, f.humanId), { scope: "notes", kind: "note", title: "N", body: "Body.", request_id: newId() } as never);
+    if ("held" in created) throw new Error("unexpected hold");
+    expect(() => unflagEntry(writeCtx(f, f.humanId), created.ref)).toThrow(CtxdError);
+  });
+
+  it("closes open flags automatically when the entry is edited (regression: SPEC 7.6.1's edit-closes-flags rule)", () => {
+    const f = setup();
+    const created = writeEntry(writeCtx(f, f.humanId), { scope: "notes", kind: "note", title: "N", body: "Body.", request_id: newId() } as never);
+    if ("held" in created) throw new Error("unexpected hold");
+    flagEntry(writeCtx(f, f.humanId), { ref: created.ref, problem: "stale", reason: "x", request_id: newId() });
+
+    writeEntry(writeCtx(f, f.humanId), { scope: "notes", kind: "note", title: "N", body: "Updated body.", id: created.id, expected_rev: created.rev, request_id: newId() } as never);
+
+    const row = f.db.prepare("SELECT resolved FROM flags WHERE entry_id = ?").get(created.id) as { resolved: string | null };
+    expect(row.resolved).toBe("edit");
+  });
+
+  it("closes open flags automatically when the entry is superseded", () => {
+    const f = setup();
+    const original = writeEntry(writeCtx(f, f.humanId), { scope: "notes", kind: "decision", title: "Old", body: "x", request_id: newId() } as never);
+    if ("held" in original) throw new Error("unexpected hold");
+    flagEntry(writeCtx(f, f.humanId), { ref: original.ref, problem: "stale", reason: "x", request_id: newId() });
+
+    writeEntry(writeCtx(f, f.humanId), { scope: "notes", kind: "decision", title: "New", body: "y", supersedes: original.ref, request_id: newId() } as never);
+
+    const row = f.db.prepare("SELECT resolved FROM flags WHERE entry_id = ?").get(original.id) as { resolved: string | null };
+    expect(row.resolved).toBe("supersede");
   });
 });

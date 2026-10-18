@@ -102,3 +102,44 @@ function flagResult(db: Database.Database, entryId: string, ref: string): FlagRe
   const count = (db.prepare("SELECT COUNT(*) AS n FROM flags WHERE entry_id = ?").get(entryId) as { n: number }).n;
   return { ref, status: "flagged", flags: count };
 }
+
+export interface UnflagResult {
+  ref: string;
+  status: string;
+  flags_closed: number;
+}
+
+/** `ctxd flag <ref> --unflag` (SPEC v6 section 7.6.1): human only. Restores status_before and closes every open flag. */
+export function unflagEntry(ctx: WriteContext, ref: string): UnflagResult {
+  const { db } = ctx;
+  const client = loadClient(db, ctx.clientId);
+  if (!client) throw new CtxdError("UNAUTHORIZED", "Unknown or revoked client");
+  if (client.vendor !== "human") throw new CtxdError("NOT_ALLOWED", "unflag is human only");
+
+  const parsed = parseRef(ref);
+  const id = parsed ? parsed.id : ref;
+  const row = db.prepare("SELECT entry_id, scope_id, status, status_rev FROM entries WHERE entry_id = ?").get(id) as
+    | { entry_id: string; scope_id: string; status: string; status_rev: string }
+    | undefined;
+  if (!row) throw new CtxdError("NOT_FOUND", `Entry not found: ${ref}`, {}, "ref");
+  if (row.status !== "flagged") throw new CtxdError("VALIDATION", "Entry is not currently flagged", {}, "ref");
+
+  const openCount = (db.prepare("SELECT COUNT(*) AS n FROM flags WHERE entry_id = ? AND resolved IS NULL").get(row.entry_id) as { n: number }).n;
+  const eventId = newId();
+  const hlc = ctx.clock.tick();
+  const rev = makeRev(revVersion(row.status_rev) + 1, eventId);
+  const nextOriginSeq = (
+    db.prepare("SELECT COALESCE(MAX(origin_seq), 0) + 1 AS next FROM events WHERE origin_node = ?").get(ctx.nodeId) as { next: number }
+  ).next;
+
+  db.transaction(() => {
+    db.prepare(
+      `INSERT INTO events (event_id, origin_node, origin_seq, hlc, scope_id, entry_id, op, part, parent_revs, rev, client_id, session_ref, request_id, request_hash, payload, prev, received_at)
+       VALUES (?, ?, ?, ?, ?, ?, 'unflag', 'status', ?, ?, ?, NULL, NULL, NULL, '{}', NULL, ?)`,
+    ).run(eventId, ctx.nodeId, nextOriginSeq, hlc, row.scope_id, row.entry_id, canonicalJson([row.status_rev]), rev, ctx.clientId, nowIso());
+    applyEvent(db, { eventId, scopeId: row.scope_id, entryId: row.entry_id, op: "unflag", part: "status", rev, clientId: ctx.clientId, hlc, payload: {}, prev: null });
+  })();
+
+  const updated = db.prepare("SELECT status FROM entries WHERE entry_id = ?").get(row.entry_id) as { status: string };
+  return { ref, status: updated.status, flags_closed: openCount };
+}

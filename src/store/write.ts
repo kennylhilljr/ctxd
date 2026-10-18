@@ -210,6 +210,15 @@ function performDirectWrite(
     reject(db, ctx.clientId, scope.id, input.id, new CtxdError("REDACTED_SECRET", "Content matched a secret detector", { detectors: [...failures] }));
   }
 
+  // "Block reinsertion" (SPEC v6 section 7.6.6 step 4): a create whose content fingerprint
+  // matches a recorded purge is refused, so purged content can't simply be written back.
+  if (!existing) {
+    const fingerprint = requestHash({ title, body: bodySan ?? "" });
+    if (db.prepare("SELECT 1 FROM entries WHERE purge_fingerprint = ?").get(fingerprint)) {
+      reject(db, ctx.clientId, scope.id, input.id, new CtxdError("VALIDATION", "This content was purged", {}, "body"));
+    }
+  }
+
   if (existing && input.expected_rev !== existing.content_rev) {
     recordRejection(db, { clientId: ctx.clientId, scopeId: scope.id, entryId: existing.entry_id, tool: "context_write", code: "REV_CONFLICT" });
     throw new CtxdError("REV_CONFLICT", "Entry changed since you read it", { current_rev: existing.content_rev }, "expected_rev");

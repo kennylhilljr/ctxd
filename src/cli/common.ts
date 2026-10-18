@@ -1,5 +1,8 @@
 import { dirname, join } from "node:path";
+import type Database from "better-sqlite3";
 import { DEFAULT_CONFIG_PATH, expandHome, loadConfig } from "../config/config.js";
+import { HlcClock } from "../core/hlc.js";
+import type { WriteContext } from "../store/write.js";
 
 export interface DataDirOptions {
   configPath?: string;
@@ -21,4 +24,13 @@ export function resolveConfigPath(opts: Pick<DataDirOptions, "configPath"> = {})
 /** `~/.config/ctxd/tokens/`, alongside the config file (SPEC v6 section 3). */
 export function tokensDir(configPath: string): string {
   return join(dirname(configPath), "tokens");
+}
+
+/** A WriteContext for the human client, for CLI commands (flag --unflag, purge) that write through the event path. */
+export function resolveHumanWriteContext(db: Database.Database): WriteContext {
+  const node = db.prepare("SELECT node_id FROM nodes LIMIT 1").get() as { node_id: string } | undefined;
+  if (!node) throw new Error("no node identity found; run ctxd init first");
+  const human = db.prepare("SELECT client_id FROM clients WHERE name = 'human'").get() as { client_id: string } | undefined;
+  if (!human) throw new Error("no human client found; run ctxd init first");
+  return { db, clock: new HlcClock(node.node_id), nodeId: node.node_id, clientId: human.client_id };
 }
