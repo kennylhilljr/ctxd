@@ -1,8 +1,10 @@
 /**
- * Database schema (SPEC v6 section 4). Keep in sync with the spec.
- * The event log is the source of truth; everything else is materialized. Sealed pools use the same schema in their own encrypted file (SPEC v6 10.6).
+ * Database schema (SPEC v7 section 4). Keep in sync with the spec.
+ * The event log is the source of truth; everything else is materialized. Sealed pools use the same schema in their own encrypted file (SPEC v7 10.6).
+ * Bumped to 7 for SPEC-v7's resolutions: review_policy defaults to '[]' (10.4), and the new
+ * commits table (7.5) for commit facts recorded by a later M2 slice's PostToolUse hook.
  */
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
 
 export const SCHEMA_SQL = `
 CREATE TABLE nodes (
@@ -33,7 +35,7 @@ CREATE TABLE scopes (
   description   TEXT NOT NULL DEFAULT '',
   replication   TEXT NOT NULL DEFAULT 'all' CHECK (replication IN ('all','home','local')),
   vendor_policy TEXT NOT NULL DEFAULT 'any' CHECK (vendor_policy IN ('any','local-only')),
-  review_policy TEXT NOT NULL DEFAULT '{}',
+  review_policy TEXT NOT NULL DEFAULT '[]',
   intent_policy TEXT NOT NULL DEFAULT 'warn' CHECK (intent_policy IN ('observe','warn','strict')),
   created_at    TEXT NOT NULL
 );
@@ -46,7 +48,7 @@ CREATE TABLE events (
   hlc          TEXT NOT NULL,
   scope_id     TEXT NOT NULL,
   entry_id     TEXT NOT NULL,
-  op           TEXT NOT NULL CHECK (op IN ('create','update','status','delete','resolve','claim','release','relate','unrelate','flag','unflag','quarantine','unquarantine','revert','purge','acl')),
+  op           TEXT NOT NULL CHECK (op IN ('create','update','status','delete','resolve','claim','release','relate','unrelate','flag','unflag','quarantine','unquarantine','revert','purge','acl','suspend','resume')),
   part         TEXT NOT NULL CHECK (part IN ('content','status','relations','claim','meta')),
   parent_revs  TEXT NOT NULL DEFAULT '[]',
   rev          TEXT NOT NULL,
@@ -298,7 +300,8 @@ CREATE TABLE leases (
   changed_files TEXT,                -- JSON array, recorded on release
   drift        TEXT,                 -- JSON array of changed files outside paths
   taken_over_by TEXT,
-  lost_by      TEXT
+  lost_by      TEXT,
+  suspended_at TEXT                  -- non-NULL: quarantine suspended this claim (7.6.2); overlaps and blocking ignore it
 );
 CREATE INDEX leases_scope_state ON leases(scope_id, state);
 
@@ -320,7 +323,8 @@ CREATE TABLE sessions (
   started_at   TEXT NOT NULL,
   last_seen_hlc TEXT NOT NULL,
   head         TEXT,                  -- latest observed git HEAD
-  recovery     TEXT                   -- JSON: {task_id?, phase, last_request_summary}; no transcript content
+  recovery     TEXT,                  -- JSON: {task_id?, phase, last_request_summary}; no transcript content
+  ended_by     TEXT                   -- NULL for a real client end hook; 'sweep' when the crash sweep finalized it (9.10)
 );
 CREATE INDEX sessions_client_state ON sessions(client_id, state);
 
@@ -333,5 +337,16 @@ CREATE TABLE sync_state (
 
 CREATE VIRTUAL TABLE entries_fts USING fts5(
   title, body, tags, content='entries', content_rowid='rowid'
+);
+
+CREATE TABLE commits (                 -- local facts recorded by the PostToolUse hook (SPEC v7 7.5)
+  sha          TEXT NOT NULL,
+  scope_id     TEXT NOT NULL,
+  session_ref  TEXT,
+  subject      TEXT NOT NULL,
+  changed_files TEXT NOT NULL,         -- JSON array of paths
+  client_id    TEXT NOT NULL,
+  at           TEXT NOT NULL,
+  PRIMARY KEY (sha, scope_id)
 );
 `;

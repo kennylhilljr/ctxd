@@ -1,6 +1,8 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
+import type Database from "better-sqlite3";
 import { patternToRegex } from "../claims/intent.js";
+import { expandHome } from "../config/config.js";
 
 /**
  * Scope resolution helpers (SPEC v3 section 3; PRD-hooks-v2 section 2.1).
@@ -101,7 +103,60 @@ export function isBypassed(cwd: string, patterns: readonly string[], env: NodeJS
   });
 }
 
-/** Full resolution (SPEC v3 section 3) needs the store's scope_repos; implemented in M2. */
-export function resolveScope(_cwd: string): string | null {
-  throw new Error("resolveScope is not implemented yet (planned for M2).");
+/** A resolved scope, or the "not bound" case with the notice text a SessionStart brief should show. */
+export type ScopeResolution = { scope: string } | { scope: null; notice: string };
+
+function normalizePathForMatch(path: string): string {
+  return resolve(expandHome(path)).replace(/\/+$/, "");
+}
+
+/** Does `pathBase` equal, or sit under, the directory named by a `scope_map` path key? */
+function matchesPathPrefix(key: string, pathBase: string): boolean {
+  const k = normalizePathForMatch(key);
+  const p = normalizePathForMatch(pathBase);
+  return p === k || p.startsWith(`${k}/`);
+}
+
+/** Does `repo` equal, or sit under, the remote named by a `scope_map` remote key (e.g. an org-level entry)? */
+function matchesRemotePrefix(key: string, repo: string): boolean {
+  const k = key.trim().replace(/\/+$/, "").toLowerCase();
+  return repo === k || repo.startsWith(`${k}/`);
+}
+
+/** A `scope_map` key is a filesystem path (starts with `/` or `~`) or a normalized remote string otherwise. */
+function isPathKey(key: string): boolean {
+  return key.startsWith("/") || key.startsWith("~");
+}
+
+/** The longest-matching `scope_map` entry against `pathBase` (paths) or `repo` (remotes), or null. */
+function matchScopeMap(scopeMap: Record<string, string>, pathBase: string, repo: string | null): string | null {
+  let best: { key: string; value: string } | null = null;
+  for (const [key, value] of Object.entries(scopeMap)) {
+    const matched = isPathKey(key) ? matchesPathPrefix(key, pathBase) : repo !== null && matchesRemotePrefix(key, repo);
+    if (matched && (!best || key.length > best.key.length)) best = { key, value };
+  }
+  return best ? best.value : null;
+}
+
+/**
+ * Full scope resolution (SPEC v6 section 3): repository identity first, then a `scope_map`
+ * path or remote match, then the "not bound" notice for the SessionStart brief.
+ */
+export function resolveScope(db: Database.Database, cwd: string, scopeMap: Record<string, string>): ScopeResolution {
+  const repo = repoIdentity(cwd);
+  if (repo) {
+    const row = db
+      .prepare(
+        "SELECT scopes.name AS name FROM scope_repos JOIN scopes ON scopes.scope_id = scope_repos.scope_id WHERE scope_repos.repo = ?",
+      )
+      .get(repo) as { name: string } | undefined;
+    if (row) return { scope: row.name };
+  }
+  const pathBase = findGitDir(cwd)?.root ?? resolve(cwd);
+  const mapped = matchScopeMap(scopeMap, pathBase, repo);
+  if (mapped) return { scope: mapped };
+  const notice = repo
+    ? `This repository is not bound to a ctxd scope. Bind it with: ctxd scope bind <scope> --repo ${repo}`
+    : "This directory is not bound to a ctxd scope and has no git remote to bind. Add a scope_map entry for this path, or bind a repository with a remote origin.";
+  return { scope: null, notice };
 }

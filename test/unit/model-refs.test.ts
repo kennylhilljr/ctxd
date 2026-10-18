@@ -12,6 +12,12 @@ describe("entry references (SPEC v3 4.1)", () => {
     expect(formatRef("_me", ID)).toBe(`ctxd:_me/${ID}`);
   });
 
+  it("accepts reserved-namespace and @-containing scope names (regression: holding scopes and client-named scopes were rejected)", () => {
+    expect(formatRef("_me.pool-dev", ID)).toBe(`ctxd:_me.pool-dev/${ID}`);
+    expect(formatRef("_hold.codex@laptop", ID)).toBe(`ctxd:_hold.codex@laptop/${ID}`);
+    expect(parseRef(`ctxd:_hold.codex@laptop/${ID}`)).toEqual({ scope: "_hold.codex@laptop", id: ID });
+  });
+
   it("rejects malformed references", () => {
     expect(parseRef("ctxd:Bad Scope/" + ID)).toBeNull();
     expect(parseRef("ctxd:ctxd/notaulid")).toBeNull();

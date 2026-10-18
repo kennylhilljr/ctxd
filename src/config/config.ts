@@ -46,6 +46,19 @@ export const configSchema = z.object({
   backup: z
     .object({ age_recipient: z.string().default(""), copy_to: z.string().default("") })
     .default({ age_recipient: "", copy_to: "" }),
+  hooks: z
+    .object({
+      bypass_patterns: z.array(z.string()).default([]),
+      session_start_max_chars: z.number().int().min(1).default(9500),
+      crash_grace_minutes: z.number().int().min(1).default(30),
+    })
+    .default({ bypass_patterns: [], session_start_max_chars: 9500, crash_grace_minutes: 30 }),
+  mirror: z
+    .object({
+      enabled: z.boolean().default(false),
+      dir: z.string().default("~/Library/Application Support/ctxd/mirror"),
+    })
+    .default({ enabled: false, dir: "~/Library/Application Support/ctxd/mirror" }),
 });
 
 export type CtxdConfig = z.infer<typeof configSchema>;

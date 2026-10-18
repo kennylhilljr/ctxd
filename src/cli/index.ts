@@ -3,7 +3,67 @@
  * ctxd command-line entry point (SPEC v6 section 13).
  * Scaffold: commands route to their modules as milestones land.
  */
-import { parseArgs } from "node:util";
+import { run as runHookCommand } from "./hook.js";
+import "../hooks/handlers.js"; // registers HOOK_HANDLERS entries (path guard, and later M2 slices) before any hook dispatches
+import { run as runInitCommand } from "./init.js";
+import { run as runRebuildCommand } from "./rebuild.js";
+import { run as runClientCommand } from "./client.js";
+import { run as runScopeCommand } from "./scope.js";
+import { run as runPoolCommand } from "./pool.js";
+import { run as runGrantCommand } from "./grant.js";
+import { run as runAccessCommand } from "./access.js";
+import { run as runPersonaCommand } from "./persona.js";
+import { run as runServerCommand } from "./server.js";
+import { run as runMcpCommand } from "./mcp.js";
+import { run as runFlagCommand } from "./flag.js";
+import { run as runPurgeCommand } from "./purge.js";
+import { run as runQuarantineCommand } from "./quarantine.js";
+import { run as runBatchCommand } from "./batch.js";
+import { run as runBriefCommand } from "./brief.js";
+import { run as runHistoryCommand } from "./history.js";
+import { run as runShowCommand } from "./show.js";
+import { run as runStatsCommand } from "./stats.js";
+import { run as runLsCommand } from "./ls.js";
+import { run as runTreeCommand } from "./tree.js";
+import { run as runReadCommand } from "./read.js";
+import { run as runReviewCommand } from "./review.js";
+import { run as runRememberCommand } from "./remember.js";
+import { run as runLogCommand } from "./log.js";
+import { run as runJournalCommand } from "./journal.js";
+import { run as runSignalsCommand } from "./signals.js";
+import { run as runInstallHooksCommand } from "./install-hooks.js";
+
+/** Each command's parsed-args entry point, added as its milestone lands. */
+const COMMAND_RUNNERS: Record<string, (argv: string[]) => number | Promise<number>> = {
+  hook: runHookCommand,
+  init: runInitCommand,
+  rebuild: runRebuildCommand,
+  client: runClientCommand,
+  scope: runScopeCommand,
+  pool: runPoolCommand,
+  grant: runGrantCommand,
+  access: runAccessCommand,
+  persona: runPersonaCommand,
+  server: runServerCommand,
+  mcp: runMcpCommand,
+  flag: runFlagCommand,
+  purge: runPurgeCommand,
+  quarantine: runQuarantineCommand,
+  batch: runBatchCommand,
+  brief: runBriefCommand,
+  history: runHistoryCommand,
+  show: runShowCommand,
+  stats: runStatsCommand,
+  ls: runLsCommand,
+  tree: runTreeCommand,
+  read: runReadCommand,
+  review: runReviewCommand,
+  remember: runRememberCommand,
+  log: runLogCommand,
+  journal: runJournalCommand,
+  signals: runSignalsCommand,
+  "install-hooks": runInstallHooksCommand,
+};
 
 const COMMANDS: Record<string, { milestone: string; summary: string }> = {
   init: { milestone: "M1", summary: "Create config, data dir, node identity, human client" },
@@ -12,6 +72,8 @@ const COMMANDS: Record<string, { milestone: string; summary: string }> = {
   hook: { milestone: "M2", summary: "Hook entry point: ctxd hook <event> --client <name>" },
   scope: { milestone: "M1", summary: "Manage scopes" },
   client: { milestone: "M1", summary: "Manage client tokens" },
+  grant: { milestone: "M1", summary: "Temporary grant: ctxd grant <client> <scope> --level <l> --for <duration>" },
+  access: { milestone: "M1", summary: "Effective access per scope and the reason for each" },
   node: { milestone: "M3", summary: "Manage peers" },
   sync: { milestone: "M3", summary: "Pull from peers now" },
   brief: { milestone: "M1", summary: "Print a brief for a scope" },
@@ -33,6 +95,7 @@ const COMMANDS: Record<string, { milestone: string; summary: string }> = {
   pool: { milestone: "M1", summary: "Persona pools: create, grant, members, seal, enroll, lock" },
   flag: { milestone: "M1", summary: "Flag or unflag an entry" },
   quarantine: { milestone: "M2", summary: "Quarantine a source's writes; then revert or release" },
+  batch: { milestone: "M2", summary: "Show, revert or release a quarantine batch" },
   purge: { milestone: "M1", summary: "Erase an entry's content everywhere" },
   tidy: { milestone: "M5", summary: "Interactive cleanup suggestions" },
   ls: { milestone: "M2", summary: "List a ctxd:// folder with summary lines" },
@@ -56,7 +119,7 @@ function usage(): string {
   return ["Usage: ctxd <command> [options]", "", "Commands:", ...lines].join("\n");
 }
 
-function main(argv: string[]): number {
+async function main(argv: string[]): Promise<number> {
   const [command, ...rest] = argv;
   if (!command || command === "help" || command === "--help") {
     console.log(usage());
@@ -71,13 +134,18 @@ function main(argv: string[]): number {
     console.error(`Unknown command: ${command}\n\n${usage()}`);
     return 2;
   }
-  if (command === "hook") {
-    // Hooks must never break a session (SPEC section 9.1): exit 0 silently until M2 lands.
-    parseArgs({ args: rest, allowPositionals: true, strict: false });
-    return 0;
-  }
+  const runner = COMMAND_RUNNERS[command];
+  if (runner) return await runner(rest);
   console.error(`ctxd ${command}: not implemented yet (planned for ${entry.milestone}).`);
   return 1;
 }
 
-process.exitCode = main(process.argv.slice(2));
+main(process.argv.slice(2)).then(
+  (code) => {
+    process.exitCode = code;
+  },
+  (err: unknown) => {
+    console.error(err instanceof Error ? err.message : String(err));
+    process.exitCode = 1;
+  },
+);

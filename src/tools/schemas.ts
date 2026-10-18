@@ -95,6 +95,7 @@ export const contextClaimInput = z.object({
   take_over: z.boolean().optional().describe("Take over a stale claim after checking its facts"),
   changed_files: z.array(z.string().min(1).max(512)).max(500).optional().describe("On release"),
   ttl_minutes: z.number().int().min(15).max(1440).default(120),
+  session,
   request_id: requestId.optional(),
 });
 
