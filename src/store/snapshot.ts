@@ -22,6 +22,10 @@ export function loadClient(db: Database.Database, clientId: string): ClientInfo 
   return { id: row.client_id, vendor: row.vendor, tags: JSON.parse(row.tags) as string[] };
 }
 
+export function loadClientName(db: Database.Database, clientId: string): string {
+  return (db.prepare("SELECT name FROM clients WHERE client_id = ?").get(clientId) as { name: string }).name;
+}
+
 interface ScopeRow {
   scope_id: string;
   name: string;

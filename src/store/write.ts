@@ -12,7 +12,7 @@ import { slugify } from "../fsview/paths.js";
 import { formatRef, parseRef } from "../model/refs.js";
 import { canonicalJson, requestHash } from "./idempotency.js";
 import { applyEvent } from "./materialize.js";
-import { loadAccessSnapshot, loadClient, loadScopeByName, loadScopeById } from "./snapshot.js";
+import { loadAccessSnapshot, loadClient, loadClientName, loadScopeByName, loadScopeById } from "./snapshot.js";
 import { syncSignalsForScope } from "../journal/sync.js";
 
 /**
@@ -165,7 +165,6 @@ function performDirectWrite(
   hash: string,
 ): WriteResult {
   const { db } = ctx;
-  const clientName = (db.prepare("SELECT name FROM clients WHERE client_id = ?").get(client.id) as { name: string }).name;
 
   let existing: { entry_id: string; kind: Kind; content_rev: string; status: Status } | null = null;
   if (input.id) {
@@ -212,7 +211,7 @@ function performDirectWrite(
   } else if (client.vendor === "human") {
     status = "active";
   } else {
-    status = reviewedStatus(db, scope.id, input, clientName) ?? defaultAgentStatus(input.kind, input.significance);
+    status = reviewedStatus(db, scope.id, input, loadClientName(db, client.id)) ?? defaultAgentStatus(input.kind, input.significance);
   }
 
   const result = db.transaction(() => {
@@ -411,8 +410,7 @@ function performHeldWrite(
   hash: string,
 ): WriteResult {
   const { db } = ctx;
-  const clientRow = db.prepare("SELECT name FROM clients WHERE client_id = ?").get(client.id) as { name: string };
-  const holdingName = `_hold.${clientRow.name}`;
+  const holdingName = `_hold.${loadClientName(db, client.id)}`;
 
   const result = db.transaction(() => {
     let holding = loadScopeByName(db, holdingName);
