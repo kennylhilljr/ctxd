@@ -12,9 +12,17 @@
  *   (R3): its own section 5 includes that regardless of size, with no extra wiring needed here.
  * - R7 (prompt-time hints on UserPromptSubmit) is off by default and needs a per-scope enable
  *   flag with no config surface yet; it has no handler in this slice.
+ *
+ * assumedPools is resolved from the client's own issued persona token (store/snapshot.ts's
+ * resolveAssumedPools), not hardcoded to []: a hook call presents no bearer token to resolve by
+ * hash the way the MCP server's auth.ts does, but `ctxd persona issue <client> <pool>` is exactly
+ * how a client is meant to be given pool-granted scopes in the first place, hooks included. A
+ * client nobody has issued a persona for falls back to [] (SPEC v6 section 3: _me-only), matching
+ * a plain token with no persona.
  */
 import { HlcClock } from "../core/hlc.js";
 import { assembleBrief, type BriefInput } from "../brief/assemble.js";
+import { resolveAssumedPools } from "../store/snapshot.js";
 import type { RequestContext } from "../server/context.js";
 import type { Vendor } from "../core/kinds.js";
 import type { HookContext, HookResult } from "../cli/hook.js";
@@ -31,7 +39,7 @@ function requestContextOf(ctx: HookContext): RequestContext {
     clientId: ctx.clientId,
     clientName: ctx.clientName,
     vendor: row?.vendor ?? "other",
-    assumedPools: [], // a hook call carries the client's plain token, no persona (SPEC v6 section 3)
+    assumedPools: resolveAssumedPools(ctx.db, ctx.clientId),
   };
 }
 

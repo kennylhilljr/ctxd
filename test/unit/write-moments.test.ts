@@ -257,3 +257,27 @@ describe("postToolUseHandler (W4)", () => {
     expect(after.n).toBe(1);
   });
 });
+
+describe("regression: a pool-granted scope is reachable via the client's issued persona token", () => {
+  it("sessionEndHandler's mechanical journal write applies, not held, for a pool-only grant", () => {
+    // Same root cause as read-moments.test.ts's regression test: writeCtxOf had no assumedPools
+    // lookup, so a client onboarded via `ctxd pool grant` + `ctxd persona issue` (not `ctxd
+    // grant`) silently got its mechanical SessionEnd journal entry held for review instead of
+    // applied, since the pool grant never counted.
+    const f = setup();
+    const repo = initGitRepo();
+    initSession(f, "claude-code:s1");
+    f.db.prepare("DELETE FROM client_grants WHERE client_id = ?").run(f.clientId); // this scope is reachable through the pool grant alone
+    f.db.prepare("INSERT INTO pools (pool_id, name, created_at) VALUES ('pool-dev', 'pool-dev', ?)").run(now());
+    f.db.prepare("INSERT INTO pool_members (pool_id, principal) VALUES ('pool-dev', ?)").run(`client:${f.clientId}`);
+    f.db.prepare("INSERT INTO pool_grants (pool_id, scope_id, level) VALUES ('pool-dev', ?, 'write')").run(f.scopeId);
+    f.db
+      .prepare("INSERT INTO persona_tokens (token_hash, client_id, pools, node_id, created_at) VALUES (?, ?, '[\"pool-dev\"]', ?, ?)")
+      .run(newId(), f.clientId, f.nodeId, now());
+
+    sessionEndHandler(baseCtx(f, { event: "session-end", scope: "notes", input: { cwd: repo } }));
+
+    const row = f.db.prepare("SELECT status FROM entries WHERE scope_id = ? AND kind = 'journal'").get(f.scopeId) as { status: string } | undefined;
+    expect(row?.status).toBe("active"); // "held" or undefined (never applied) would both mean the regression is back
+  });
+});
