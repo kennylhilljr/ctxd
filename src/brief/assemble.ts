@@ -101,10 +101,8 @@ export function assembleBrief(ctx: RequestContext, input: BriefInput): unknown {
 
   const sections: string[] = [];
 
-  // 1. Header
-  sections.push(`Scope: ${input.scope} | as-of ${new Date(now).toISOString()} | node ${ctx.nodeId}`);
-
-  // 2. Notices
+  // 2. Notices (section 1, the header, is the scope/as_of/node/sync/session fields returned
+  // alongside `brief`, per SPEC v6 8.2's context_brief output shape -- not text in the body).
   const notices: string[] = [];
   const proposedCount = (
     db.prepare(`SELECT COUNT(*) AS n FROM entries WHERE scope_id IN (${inList(workingIds)}) AND status = 'proposed'`).get(
@@ -118,7 +116,6 @@ export function assembleBrief(ctx: RequestContext, input: BriefInput): unknown {
     ) as { n: number }
   ).n;
   if (conflictedCount > 0) notices.push(`${conflictedCount} conflicted entr${conflictedCount === 1 ? "y" : "ies"} need resolution.`);
-  if (notices.length) sections.push(`Notices: ${notices.join(" ")}`);
 
   // 3. Open signals (SPEC 11.4)
   const openSignals = db
@@ -337,7 +334,17 @@ export function assembleBrief(ctx: RequestContext, input: BriefInput): unknown {
   }
 
   for (const id of briefed) bumpBriefed(db, id);
-  return { text: sections.join("\n\n") };
+  return {
+    scope: input.scope,
+    as_of: new Date(now).toISOString(),
+    node: ctx.nodeId,
+    // Last-sync age (M3, no replication yet) and the hook-driven session value (M2, SPEC 9.3)
+    // are both out of M1's reach; reporting null is honest, not a silent omission of the field.
+    sync: null,
+    session: null,
+    brief: sections.join("\n\n"),
+    notices,
+  };
 }
 
 function trimSection(text: string, maxChars: number): string {

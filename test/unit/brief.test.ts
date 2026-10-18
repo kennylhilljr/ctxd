@@ -63,13 +63,14 @@ describe("assembleBrief (SPEC v6 section 11.1)", () => {
     writeEntry(writeCtx(f, f.humanId), { scope: "notes", kind: "status", title: "Status", body: "On track.", request_id: newId() } as never);
     writeEntry(writeCtx(f, f.humanId), { scope: "notes", kind: "brief", title: "Brief", body: "Pinned overview.", request_id: newId() } as never);
 
-    const normal = assembleBrief(requestCtx(f, f.humanId, "human"), { scope: "notes", size: "normal" }) as { text: string };
-    expect(normal.text).toContain("On track.");
-    expect(normal.text).toContain("Pinned overview.");
+    const normal = assembleBrief(requestCtx(f, f.humanId, "human"), { scope: "notes", size: "normal" }) as { brief: string; scope: string };
+    expect(normal.scope).toBe("notes");
+    expect(normal.brief).toContain("On track.");
+    expect(normal.brief).toContain("Pinned overview.");
 
-    const micro = assembleBrief(requestCtx(f, f.humanId, "human"), { scope: "notes", size: "micro" }) as { text: string };
-    expect(micro.text).toContain("On track.");
-    expect(micro.text).not.toContain("Pinned overview.");
+    const micro = assembleBrief(requestCtx(f, f.humanId, "human"), { scope: "notes", size: "micro" }) as { brief: string };
+    expect(micro.brief).toContain("On track.");
+    expect(micro.brief).not.toContain("Pinned overview.");
   });
 
   it("excludes a superseded decision and shows only its replacement", () => {
@@ -85,9 +86,9 @@ describe("assembleBrief (SPEC v6 section 11.1)", () => {
       request_id: newId(),
     } as never);
 
-    const result = assembleBrief(requestCtx(f, f.humanId, "human"), { scope: "notes", size: "normal" }) as { text: string };
-    expect(result.text).toContain("New");
-    expect(result.text).not.toContain("Old:");
+    const result = assembleBrief(requestCtx(f, f.humanId, "human"), { scope: "notes", size: "normal" }) as { brief: string };
+    expect(result.brief).toContain("New");
+    expect(result.brief).not.toContain("Old:");
   });
 
   it("bumps read_stats.briefed for entries included in the brief", () => {
@@ -112,9 +113,9 @@ describe("assembleBrief (SPEC v6 section 11.1)", () => {
     // The human client always writes active (SPEC 10.4); flip it to proposed directly to test this notice in isolation.
     f.db.prepare(`UPDATE entries SET status = 'proposed' WHERE scope_id = ? AND title = 'Proposed decision'`).run(f.notesScopeId);
 
-    const result = assembleBrief(requestCtx(f, f.humanId, "human"), { scope: "notes", size: "normal" }) as { text: string };
-    expect(result.text).toMatch(/1 proposed entry awaiting review/);
-    expect(result.text).not.toContain("Proposed decision");
+    const result = assembleBrief(requestCtx(f, f.humanId, "human"), { scope: "notes", size: "normal" }) as { brief: string; notices: string[] };
+    expect(result.notices).toEqual(["1 proposed entry awaiting review."]);
+    expect(result.brief).not.toContain("Proposed decision");
   });
 
   it("surfaces an open signal from a blocker journal entry (store/write.ts syncs signals on every write)", () => {
@@ -129,9 +130,9 @@ describe("assembleBrief (SPEC v6 section 11.1)", () => {
     } as never);
     if ("held" in created) throw new Error("unexpected hold");
 
-    const result = assembleBrief(requestCtx(f, f.humanId, "human"), { scope: "notes", size: "normal" }) as { text: string };
-    expect(result.text).toContain("Open signals:");
-    expect(result.text).toContain("BLOCKER");
-    expect(result.text).toContain(created.ref);
+    const result = assembleBrief(requestCtx(f, f.humanId, "human"), { scope: "notes", size: "normal" }) as { brief: string };
+    expect(result.brief).toContain("Open signals:");
+    expect(result.brief).toContain("BLOCKER");
+    expect(result.brief).toContain(created.ref);
   });
 });
