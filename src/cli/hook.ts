@@ -19,7 +19,8 @@ import { loadConfig, type CtxdConfig } from "../config/config.js";
 import { openDatabase } from "../store/db.js";
 import { ADAPTERS, CTXD_HOOK_EVENTS, type CtxdHookEvent, type HookAdapter } from "../hooks/adapters.js";
 import { isBypassed, resolveScope } from "../hooks/scope.js";
-import { upsertSession } from "../hooks/sessions.js";
+import { eventTouchesSessionState, upsertSession } from "../hooks/sessions.js";
+import { gitHead } from "../hooks/gitFacts.js";
 
 export interface HookContext {
   db: Database.Database;
@@ -124,6 +125,10 @@ export async function dispatchWithDb(
   const triggerField = adapter.fields.trigger ? input[adapter.fields.trigger] : undefined;
   const clearRecovery = event === "session-start" && (sourceField === "startup" || triggerField === "startup" || (sourceField === undefined && triggerField === undefined));
 
+  // Only shell out for HEAD on events that actually update the sessions row (SPEC 9.2); PreToolUse
+  // and PostToolUse fire once per tool call and must stay cheap.
+  const head = eventTouchesSessionState(event) ? gitHead(cwd) : undefined;
+
   upsertSession(db, {
     sessionRef,
     clientId: client.client_id,
@@ -131,6 +136,7 @@ export async function dispatchWithDb(
     event,
     nodeId: node.node_id,
     clearRecovery,
+    head,
   });
 
   const handler = HOOK_HANDLERS[event];

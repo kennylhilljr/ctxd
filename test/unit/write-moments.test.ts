@@ -4,9 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
+import { HlcClock } from "../../src/core/hlc.js";
 import { newId } from "../../src/core/ids.js";
 import { openDatabase } from "../../src/store/db.js";
 import { preCompactHandler, sessionEndHandler, stopHandler, postToolUseHandler } from "../../src/hooks/writeMoments.js";
+import { handleClaim } from "../../src/store/claim.js";
 import type { HookContext } from "../../src/cli/hook.js";
 import { CLAUDE_CODE_ADAPTER } from "../../src/hooks/adapters.js";
 
@@ -162,6 +164,56 @@ describe("sessionEndHandler (W3)", () => {
   it("does nothing without a bound scope", () => {
     const f = setup();
     expect(sessionEndHandler(baseCtx(f, { event: "session-end", scope: null }))).toBeUndefined();
+  });
+});
+
+describe("sessionEndHandler's mechanical claim release (M2 slice 9)", () => {
+  function claimWithBaseHead(f: Fixture, sessionRef: string, head: string): string {
+    f.db
+      .prepare("INSERT INTO sessions (session_ref, client_id, scope_id, state, started_at, last_seen_hlc, head) VALUES (?, ?, ?, 'active', ?, ?, ?)")
+      .run(sessionRef, f.clientId, f.scopeId, now(), now(), head);
+    const result = handleClaim(
+      { db: f.db, clock: new HlcClock(f.nodeId), nodeId: f.nodeId, clientId: f.clientId },
+      { scope: "notes", action: "claim", title: "Task", ttl_minutes: 120, session: sessionRef } as never,
+    ) as { lease: { task_id: string } };
+    return result.lease.task_id;
+  }
+
+  function leaseState(f: Fixture, taskId: string): string {
+    return (f.db.prepare("SELECT state FROM leases WHERE task_id = ?").get(taskId) as { state: string }).state;
+  }
+
+  it("releases a lease whose work is committed and the tree is clean", () => {
+    const f = setup();
+    const repo = initGitRepo();
+    const taskId = claimWithBaseHead(f, "claude-code:s1", execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf8" }).trim());
+
+    execFileSync("git", ["commit", "--allow-empty", "-m", "more work", "-q"], { cwd: repo });
+    sessionEndHandler(baseCtx(f, { event: "session-end", scope: "notes", input: { cwd: repo } }));
+
+    expect(leaseState(f, taskId)).toBe("released");
+  });
+
+  it("leaves a lease active when the working tree is still dirty", () => {
+    const f = setup();
+    const repo = initGitRepo();
+    const taskId = claimWithBaseHead(f, "claude-code:s1", execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf8" }).trim());
+
+    execFileSync("git", ["commit", "--allow-empty", "-m", "more work", "-q"], { cwd: repo });
+    writeFileSync(join(repo, "dirty.txt"), "uncommitted");
+    sessionEndHandler(baseCtx(f, { event: "session-end", scope: "notes", input: { cwd: repo } }));
+
+    expect(leaseState(f, taskId)).toBe("active");
+  });
+
+  it("leaves a lease active when HEAD has not moved past base_head", () => {
+    const f = setup();
+    const repo = initGitRepo();
+    const taskId = claimWithBaseHead(f, "claude-code:s1", execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf8" }).trim());
+
+    sessionEndHandler(baseCtx(f, { event: "session-end", scope: "notes", input: { cwd: repo } }));
+
+    expect(leaseState(f, taskId)).toBe("active");
   });
 });
 

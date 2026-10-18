@@ -166,16 +166,17 @@ export function applyEvent(db: Database.Database, e: EventForMaterialize, { skip
       paths: string[] | null;
       ttl_minutes: number;
       session_ref: string | null;
+      base_head: string | null;
       taken_over_from: string | null;
     };
     const expiresAt = new Date(decodeHlc(e.hlc).physical + p.ttl_minutes * 60_000).toISOString();
     db.prepare(
-      `INSERT INTO leases (task_id, scope_id, holder, state, paths, claim_event, claim_hlc, session_ref, expires_at, last_activity_hlc, tentative, taken_over_by)
-       VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, 0, ?)
+      `INSERT INTO leases (task_id, scope_id, holder, state, paths, claim_event, claim_hlc, session_ref, base_head, expires_at, last_activity_hlc, tentative, taken_over_by)
+       VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, 0, ?)
        ON CONFLICT (task_id) DO UPDATE SET
          scope_id = excluded.scope_id, holder = excluded.holder, state = 'active', paths = excluded.paths,
          claim_event = excluded.claim_event, claim_hlc = excluded.claim_hlc, session_ref = excluded.session_ref,
-         expires_at = excluded.expires_at, last_activity_hlc = excluded.last_activity_hlc,
+         base_head = excluded.base_head, expires_at = excluded.expires_at, last_activity_hlc = excluded.last_activity_hlc,
          released_at = NULL, changed_files = NULL, drift = NULL, lost_by = NULL, taken_over_by = excluded.taken_over_by`,
     ).run(
       e.entryId,
@@ -185,6 +186,7 @@ export function applyEvent(db: Database.Database, e: EventForMaterialize, { skip
       e.eventId,
       e.hlc,
       p.session_ref,
+      p.base_head,
       expiresAt,
       e.hlc,
       p.taken_over_from,

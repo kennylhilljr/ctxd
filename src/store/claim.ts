@@ -13,20 +13,25 @@ import { writeEntry, type WriteContext } from "./write.js";
 /**
  * context_claim (SPEC v6 section 7.5): claims are events in the task entry's history; `leases`
  * is materialized from them, one row per task_id (overwritten on each claim/release, not a full
- * history -- the event log keeps that).
+ * history; the event log keeps that).
  *
- * M1 scope notes (flagged for SPEC-v7, not silently cut):
- * - `release`'s "derived from git" changed_files path (hook-recorded commit/checkpoint facts,
- *   SPEC 7.5.4) needs hooks, which land in M2. Without `changed_files` supplied by the caller,
- *   this always records it as unknown (null), never computes drift, and never fails.
- * - CLAIM_STALE's `holder_session_state` always reports "unknown" (the `sessions` table has no
- *   writer until the hook lifecycle lands) and `commits_since_claim` is always [] (no
- *   commit-pointer table exists yet in this schema).
- * - Mechanical release on session end and the crash sweep for orphaned ("lost") leases are both
- *   hook/daemon concerns with no M1 equivalent; a lease only ever leaves `active` through an
- *   explicit `claim`/`release` call in this slice.
- * - Quarantine-driven claim suspension (7.6.2) isn't implemented; quarantine itself is out of
- *   scope for M1.
+ * M2 slice 9 ("claims, complete") resolved the M1 gaps this file used to flag at the top:
+ * `session_ref` and `base_head` are now recorded at claim time (from the caller's `session` and
+ * the matching `sessions.head`, itself now written by the hook dispatcher); `holder_session_state`
+ * and `commits_since_claim` read real data; and release derives `changed_files` from recorded
+ * commit pointers when the caller omits them.
+ *
+ * Still open, by design:
+ * - Release's derivation only covers "commit pointers recorded by PostToolUse" (SPEC 7.5.4); the
+ *   other half, "working-tree changes in the latest PreCompact/Stop/SessionEnd checkpoint," needs
+ *   the hook's per-session checkpoint *file*, and neither `WriteContext` nor `RequestContext`
+ *   carries a data directory to find it from an MCP tool call. Wiring that through is a separate,
+ *   broader change, not a one-line addition here.
+ * - Mechanical release for a *crashed* session (the sweep, src/hooks/crashSweep.ts) still can't
+ *   verify "working tree clean," since a crashed session has no live `cwd` to check; SessionEnd's
+ *   own mechanical release (src/hooks/writeMoments.ts) can, because it runs in the real session.
+ * - Quarantine-driven claim suspension (7.6.2) isn't implemented; quarantine itself was out of
+ *   scope for M1 and is a separate M2 slice (hygiene).
  */
 
 export interface ClaimInput {
@@ -39,6 +44,8 @@ export interface ClaimInput {
   changed_files?: string[];
   ttl_minutes: number;
   request_id?: string;
+  /** The calling hook session's reference ("<client>:<session id>"), for session_ref/base_head and the drift audit. */
+  session?: string;
 }
 
 interface LeaseRow {
@@ -48,6 +55,8 @@ interface LeaseRow {
   state: string;
   paths: string | null;
   claim_hlc: string;
+  session_ref: string | null;
+  base_head: string | null;
   expires_at: string;
   changed_files: string | null;
   drift: string | null;
@@ -138,6 +147,12 @@ function nextOriginSeq(db: Database.Database, nodeId: string): number {
     .next;
 }
 
+/** The session's last-observed git HEAD (src/cli/hook.ts writes this on every hook call), or null if unknown. */
+function sessionHead(db: Database.Database, sessionRef: string): string | null {
+  const row = db.prepare("SELECT head FROM sessions WHERE session_ref = ?").get(sessionRef) as { head: string | null } | undefined;
+  return row?.head ?? null;
+}
+
 function claimTask(ctx: WriteContext, input: ClaimInput, scope: { id: string; name: string }, client: ClientInfo): unknown {
   const { db } = ctx;
   const claimHash = (): string =>
@@ -198,19 +213,41 @@ function claimTask(ctx: WriteContext, input: ClaimInput, scope: { id: string; na
 
   const eventId = newId();
   const hlc = ctx.clock.tick();
-  const payload = { holder: ctx.clientId, paths: myPaths ?? null, ttl_minutes: input.ttl_minutes, session_ref: null, taken_over_from: takenOverFrom };
+  const sessionRef = input.session ?? null;
+  const baseHead = sessionRef ? sessionHead(db, sessionRef) : null;
+  const payload = { holder: ctx.clientId, paths: myPaths ?? null, ttl_minutes: input.ttl_minutes, session_ref: sessionRef, base_head: baseHead, taken_over_from: takenOverFrom };
   const rev = makeRev(1, eventId);
 
   db.transaction(() => {
     db.prepare(
       `INSERT INTO events (event_id, origin_node, origin_seq, hlc, scope_id, entry_id, op, part, parent_revs, rev, client_id, session_ref, request_id, request_hash, payload, prev, received_at)
-       VALUES (?, ?, ?, ?, ?, ?, 'claim', 'claim', '[]', ?, ?, NULL, ?, ?, ?, NULL, ?)`,
-    ).run(eventId, ctx.nodeId, nextOriginSeq(db, ctx.nodeId), hlc, scope.id, task.id, rev, ctx.clientId, input.request_id ?? null, input.request_id ? claimHash() : null, canonicalJson(payload), nowIso());
+       VALUES (?, ?, ?, ?, ?, ?, 'claim', 'claim', '[]', ?, ?, ?, ?, ?, ?, NULL, ?)`,
+    ).run(eventId, ctx.nodeId, nextOriginSeq(db, ctx.nodeId), hlc, scope.id, task.id, rev, ctx.clientId, sessionRef, input.request_id ?? null, input.request_id ? claimHash() : null, canonicalJson(payload), nowIso());
     applyEvent(db, { eventId, scopeId: scope.id, entryId: task.id, op: "claim", part: "claim", rev, clientId: ctx.clientId, hlc, payload, prev: null });
   })();
 
   const lease = db.prepare("SELECT * FROM leases WHERE task_id = ?").get(task.id) as LeaseRow;
   return { lease: toLeaseOut(db, scope, lease), overlaps, intent_unknown: intentUnknown };
+}
+
+/** The holder's session state (SPEC 7.5.5), or "unknown" if the claim predates session_ref or the session row is gone. */
+function holderSessionState(db: Database.Database, lease: LeaseRow): string {
+  if (!lease.session_ref) return "unknown";
+  const row = db.prepare("SELECT state FROM sessions WHERE session_ref = ?").get(lease.session_ref) as { state: string } | undefined;
+  return row?.state ?? "unknown";
+}
+
+/** Up to 10 commit pointers (SPEC 7.5.5) journaled by the holder in this scope since the claim, newest first. */
+function commitsSinceClaim(db: Database.Database, lease: LeaseRow): { sha: string; subject: string }[] {
+  const rows = db
+    .prepare(
+      `SELECT e.title AS subject, r.target AS target FROM relations r JOIN entries e ON e.entry_id = r.entry_id
+       WHERE r.type = 'points_to' AND r.target LIKE 'commit:%' AND r.removed_event IS NULL
+         AND e.scope_id = ? AND e.created_by = ? AND e.created_hlc > ?
+       ORDER BY e.created_hlc DESC LIMIT 10`,
+    )
+    .all(lease.scope_id, lease.holder, lease.claim_hlc) as { subject: string; target: string }[];
+  return rows.map((r) => ({ sha: r.target.slice("commit:".length), subject: r.subject }));
 }
 
 function buildClaimStale(db: Database.Database, scope: { name: string }, lease: LeaseRow): CtxdError {
@@ -226,15 +263,34 @@ function buildClaimStale(db: Database.Database, scope: { name: string }, lease: 
       holder: loadClientName(db, lease.holder),
       claimed_at: lease.claim_hlc,
       expired_at: lease.expires_at,
-      // Both depend on hook-recorded facts this M1 build doesn't have yet (see this file's top note).
-      holder_session_state: "unknown",
-      commits_since_claim: [],
+      holder_session_state: holderSessionState(db, lease),
+      commits_since_claim: commitsSinceClaim(db, lease),
       handoffs_since_claim: handoffs.map((h) => ({ id: h.entry_id, title: h.title, at: h.updated_hlc })),
       paths: lease.paths !== null ? (JSON.parse(lease.paths) as string[]) : null,
     },
     undefined,
     "Check whether this work is already done before taking over. Retry with take_over: true to proceed.",
   );
+}
+
+/** Files from journaled commit pointers (W4) by the holder in this scope since the claim, deduped. */
+function commitPointerChangedFiles(db: Database.Database, lease: LeaseRow): string[] {
+  const rows = db
+    .prepare(
+      `SELECT e.body AS body FROM relations r JOIN entries e ON e.entry_id = r.entry_id
+       WHERE r.type = 'points_to' AND r.target LIKE 'commit:%' AND r.removed_event IS NULL
+         AND e.scope_id = ? AND e.created_by = ? AND e.created_hlc > ?`,
+    )
+    .all(lease.scope_id, lease.holder, lease.claim_hlc) as { body: string }[];
+  const files = new Set<string>();
+  for (const row of rows) {
+    if (row.body === "(no file list)") continue;
+    for (const line of row.body.split("\n")) {
+      const trimmed = line.trim();
+      if (trimmed) files.add(trimmed);
+    }
+  }
+  return [...files];
 }
 
 function releaseTask(ctx: WriteContext, input: ClaimInput, scope: { id: string; name: string }, client: ClientInfo): unknown {
@@ -256,23 +312,29 @@ function releaseTask(ctx: WriteContext, input: ClaimInput, scope: { id: string; 
     } catch (err) {
       throw new CtxdError("VALIDATION", (err as IntentError).message, {}, "changed_files");
     }
+  } else {
+    // "Derived from git" (SPEC 7.5.4): the union of files in commit pointers the PostToolUse hook
+    // recorded for the holder in this scope since the claim (src/hooks/writeMoments.ts's W4).
+    // The other half of that derivation, working-tree changes from the latest checkpoint *file*,
+    // is out of reach here (see this file's top note) and is not attempted.
+    const derived = commitPointerChangedFiles(db, lease);
+    changedFiles = derived.length > 0 ? derived : null;
   }
-  // "Derived from git" (SPEC 7.5.4) needs hook-recorded commit/checkpoint facts that don't exist
-  // in M1; without agent-supplied changed_files, this always falls through to "unknown" (null).
 
   const leasePaths = lease.paths !== null ? (JSON.parse(lease.paths) as string[]) : undefined;
   const drift = changedFiles !== null ? (computeDrift(leasePaths, changedFiles) ?? null) : null;
 
   const eventId = newId();
   const hlc = ctx.clock.tick();
+  const sessionRef = input.session ?? null;
   const payload = { changed_files: changedFiles, drift };
   const rev = makeRev(1, eventId);
 
   db.transaction(() => {
     db.prepare(
       `INSERT INTO events (event_id, origin_node, origin_seq, hlc, scope_id, entry_id, op, part, parent_revs, rev, client_id, session_ref, request_id, request_hash, payload, prev, received_at)
-       VALUES (?, ?, ?, ?, ?, ?, 'release', 'claim', ?, ?, ?, NULL, ?, NULL, ?, NULL, ?)`,
-    ).run(eventId, ctx.nodeId, nextOriginSeq(db, ctx.nodeId), hlc, scope.id, taskId, canonicalJson([lease.claim_hlc]), rev, ctx.clientId, input.request_id ?? null, canonicalJson(payload), nowIso());
+       VALUES (?, ?, ?, ?, ?, ?, 'release', 'claim', ?, ?, ?, ?, ?, NULL, ?, NULL, ?)`,
+    ).run(eventId, ctx.nodeId, nextOriginSeq(db, ctx.nodeId), hlc, scope.id, taskId, canonicalJson([lease.claim_hlc]), rev, ctx.clientId, sessionRef, input.request_id ?? null, canonicalJson(payload), nowIso());
     applyEvent(db, { eventId, scopeId: scope.id, entryId: taskId, op: "release", part: "claim", rev, clientId: ctx.clientId, hlc, payload, prev: null });
   })();
 

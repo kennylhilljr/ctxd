@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -185,5 +186,30 @@ describe("withDeadline", () => {
   it("resolves to undefined, not a rejection, when the function throws", async () => {
     const result = await withDeadline(100, () => Promise.reject(new Error("boom")));
     expect(result).toBeUndefined();
+  });
+});
+
+describe("dispatchWithDb records the real git HEAD on sessions (M2 slice 9)", () => {
+  it("sets sessions.head from the hook's cwd on an event that touches session state", async () => {
+    const f = setup();
+    const repo = mkdtempSync(join(tmpdir(), "ctxd-hooks-core-repo-"));
+    execFileSync("git", ["init", "-q"], { cwd: repo });
+    execFileSync("git", ["-c", "user.name=T", "-c", "user.email=t@e.com", "commit", "--allow-empty", "-m", "initial", "-q"], { cwd: repo });
+    const head = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf8" }).trim();
+
+    await dispatchWithDb(f.db, "session-start", CLAUDE_CODE_ADAPTER, "claude-code", undefined, repo, { session_id: "s1", cwd: repo, source: "startup" }, {});
+
+    const row = f.db.prepare("SELECT head FROM sessions WHERE session_ref = ?").get("claude-code:s1") as { head: string | null };
+    expect(row.head).toBe(head);
+  });
+
+  it("leaves head unset for an event that doesn't touch session state, without shelling out", async () => {
+    const f = setup();
+    // A cwd that doesn't exist: if pre-tool-use tried to shell out to git here, it would just get
+    // null back (gitHead swallows the failure), but the point is upsertSession never reaches the
+    // head/eventTouchesSessionState branch at all for this event, so no row is even created.
+    await dispatchWithDb(f.db, "pre-tool-use", CLAUDE_CODE_ADAPTER, "claude-code", undefined, "/nonexistent", { session_id: "s2", cwd: "/nonexistent" }, {});
+    const row = f.db.prepare("SELECT head FROM sessions WHERE session_ref = ?").get("claude-code:s2") as { head: string | null } | undefined;
+    expect(row).toBeUndefined();
   });
 });

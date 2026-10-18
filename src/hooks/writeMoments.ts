@@ -4,11 +4,10 @@
  * moments (the agent itself calls context_write or context_claim) and have no hook handler at
  * all; they are not a gap in this slice, just not hook-driven.
  *
- * Deferred, not silently skipped:
- * - SessionEnd's own row also calls for mechanical claim release "when its work is committed"
- *   (SPEC 7.5.4); that depends on a lease's `session_ref` and `base_head`, which `claimTask`
- *   (src/store/claim.ts) does not populate yet; that's M2 slice 9 (claims, complete), same gap already
- *   flagged in the crash sweep (slice 6).
+ * SessionEnd also attempts the mechanical claim release SPEC 7.5.4/9.2 call for "when its work
+ * is committed": any active lease this session holds (by session_ref, M2 slice 9) is released if
+ * HEAD has moved past the lease's base_head and the working tree is clean. Deferred, not silently
+ * skipped:
  * - SessionEnd's work is specified to run in a detached worker (SPEC 9.7) since its own hook
  *   budget is short (1.5s Claude Code, 3s Codex). No M2 slice has added `ctxd worker` or ticket
  *   files yet, so this runs synchronously within the hook's existing deadline instead; a git
@@ -16,10 +15,14 @@
  * - PreCompact's `recovery` update ("phase and last request summary from the hook input") has no
  *   reliable source: Claude Code and Codex's documented PreCompact payloads carry no such field,
  *   only `session_id`/`cwd`/`trigger`. This only writes the checkpoint file, not a recovery guess.
+ * - The crash sweep's own mechanical release (src/hooks/crashSweep.ts, for a session that never
+ *   reaches SessionEnd at all) still can't do this: a crashed session has no live `cwd` to check
+ *   "working tree clean" against, which is exactly what SessionEnd has and the sweep does not.
  */
 import { join } from "node:path";
 import { decodeHlc, HlcClock } from "../core/hlc.js";
 import { newId } from "../core/ids.js";
+import { handleClaim } from "../store/claim.js";
 import { writeEntry, type WriteContext } from "../store/write.js";
 import type { HookContext, HookResult } from "../cli/hook.js";
 import { readStateFile, writeStateFileLocked } from "./stateFile.js";
@@ -157,7 +160,25 @@ export function sessionEndHandler(ctx: HookContext): HookResult {
   } catch {
     // A failed mechanical record is not worth breaking SessionEnd over.
   }
+
+  releaseCommittedLeases(ctx, scopeId, head, changedFiles.length === 0);
   return undefined;
+}
+
+/** Mechanical release (SPEC 7.5.4/9.2): this session's active leases whose work is committed and clean. */
+function releaseCommittedLeases(ctx: HookContext, scopeId: string, head: string | null, treeClean: boolean): void {
+  if (head === null || !treeClean) return; // unknown HEAD, or uncommitted work: leave the lease active
+  const leases = ctx.db
+    .prepare("SELECT task_id, base_head FROM leases WHERE scope_id = ? AND state = 'active' AND session_ref = ?")
+    .all(scopeId, ctx.sessionRef) as { task_id: string; base_head: string | null }[];
+  for (const lease of leases) {
+    if (lease.base_head === null || lease.base_head === head) continue; // no baseline, or no commits since claim
+    try {
+      handleClaim(writeCtxOf(ctx), { scope: ctx.scope!, action: "release", task_id: lease.task_id, ttl_minutes: 120, session: ctx.sessionRef });
+    } catch {
+      // A failed mechanical release is not worth breaking SessionEnd over; the claim just stays active.
+    }
+  }
 }
 
 const GIT_COMMIT_COMMAND = /^\s*git\s+(?:-C\s+\S+\s+)?commit\b/;

@@ -10,7 +10,7 @@ import { openDatabase } from "../../src/store/db.js";
 import { handleClaim, type ClaimInput } from "../../src/store/claim.js";
 import { flagEntry } from "../../src/store/flag.js";
 import { rebuild } from "../../src/store/rebuild.js";
-import type { WriteContext } from "../../src/store/write.js";
+import { writeEntry, type WriteContext } from "../../src/store/write.js";
 import { CtxdError } from "../../src/core/errors.js";
 
 function freshDb(): Database.Database {
@@ -247,6 +247,104 @@ describe("handleClaim (SPEC v6 section 7.5)", () => {
     expect(() => handleClaim(wctx(f, f.agentBId, ["pool-read"]), claim({ scope: "sample-app", action: "claim", title: "Task" }))).toThrow(CtxdError);
     const listed = handleClaim(wctx(f, f.agentBId, ["pool-read"]), claim({ scope: "sample-app", action: "list" })) as { leases: unknown[] };
     expect(listed.leases).toEqual([]);
+  });
+});
+
+describe("M2 slice 9: session_ref, base_head, holder_session_state, commits_since_claim and release's git-derived changed_files", () => {
+  function journalCommit(f: Fixture, holderId: string, sha: string, subject: string, body: string): void {
+    writeEntry(wctx(f, holderId, ["pool-dev"]), {
+      scope: "sample-app",
+      kind: "journal",
+      title: subject,
+      body,
+      significance: "routine",
+      tags: ["auto"],
+      links: [{ type: "points_to", ref: `commit:${sha}` }],
+      request_id: newId(),
+    } as never);
+  }
+
+  it("records session_ref and base_head (from sessions.head) at claim time", () => {
+    const f = setup();
+    f.db
+      .prepare("INSERT INTO sessions (session_ref, client_id, scope_id, state, started_at, last_seen_hlc, head) VALUES ('agent-a:s1', ?, 'scope-1', 'active', ?, ?, 'abc123')")
+      .run(f.agentAId, now(), now());
+
+    const result = handleClaim(
+      wctx(f, f.agentAId, ["pool-dev"]),
+      claim({ scope: "sample-app", action: "claim", title: "Task", session: "agent-a:s1" }),
+    ) as { lease: { task_id: string } };
+
+    const row = f.db.prepare("SELECT session_ref, base_head FROM leases WHERE task_id = ?").get(result.lease.task_id) as {
+      session_ref: string | null;
+      base_head: string | null;
+    };
+    expect(row.session_ref).toBe("agent-a:s1");
+    expect(row.base_head).toBe("abc123");
+  });
+
+  it("reports the real holder session state and recent commit pointers in CLAIM_STALE", () => {
+    const f = setup();
+    f.db
+      .prepare("INSERT INTO sessions (session_ref, client_id, scope_id, state, started_at, last_seen_hlc, head) VALUES ('agent-a:s1', ?, 'scope-1', 'idle', ?, ?, 'abc123')")
+      .run(f.agentAId, now(), now());
+    const first = handleClaim(
+      wctx(f, f.agentAId, ["pool-dev"]),
+      claim({ scope: "sample-app", action: "claim", title: "Task", ttl_minutes: 15, session: "agent-a:s1" }),
+    ) as { lease: { task_id: string } };
+    journalCommit(f, f.agentAId, "deadbeef", "fix the bug", "src/a.ts");
+    f.db.prepare("UPDATE leases SET expires_at = ? WHERE task_id = ?").run(new Date(Date.now() - 60_000).toISOString(), first.lease.task_id);
+
+    try {
+      handleClaim(wctx(f, f.agentBId, ["pool-dev"]), claim({ scope: "sample-app", action: "claim", task_id: first.lease.task_id }));
+      expect.fail("expected CLAIM_STALE");
+    } catch (err) {
+      const e = err as CtxdError;
+      expect(e.code).toBe("CLAIM_STALE");
+      expect(e.details.holder_session_state).toBe("idle");
+      expect(e.details.commits_since_claim).toEqual([{ sha: "deadbeef", subject: "fix the bug" }]);
+    }
+  });
+
+  it("falls back to holder_session_state unknown when the claim predates session_ref", () => {
+    const f = setup();
+    const first = handleClaim(wctx(f, f.agentAId, ["pool-dev"]), claim({ scope: "sample-app", action: "claim", title: "Task", ttl_minutes: 15 })) as {
+      lease: { task_id: string };
+    };
+    f.db.prepare("UPDATE leases SET expires_at = ? WHERE task_id = ?").run(new Date(Date.now() - 60_000).toISOString(), first.lease.task_id);
+    try {
+      handleClaim(wctx(f, f.agentBId, ["pool-dev"]), claim({ scope: "sample-app", action: "claim", task_id: first.lease.task_id }));
+      expect.fail("expected CLAIM_STALE");
+    } catch (err) {
+      expect((err as CtxdError).details.holder_session_state).toBe("unknown");
+    }
+  });
+
+  it("release derives changed_files and drift from journaled commit pointers when not supplied", () => {
+    const f = setup();
+    const claimed = handleClaim(
+      wctx(f, f.agentAId, ["pool-dev"]),
+      claim({ scope: "sample-app", action: "claim", title: "Task", paths: ["src/a.ts"] }),
+    ) as { lease: { task_id: string } };
+    journalCommit(f, f.agentAId, "deadbeef", "add b", "src/a.ts\nsrc/b.ts");
+
+    const released = handleClaim(wctx(f, f.agentAId, ["pool-dev"]), claim({ scope: "sample-app", action: "release", task_id: claimed.lease.task_id })) as {
+      changed_files: string[] | null;
+      drift: string[] | null;
+    };
+    expect(released.changed_files).toEqual(["src/a.ts", "src/b.ts"]);
+    expect(released.drift).toEqual(["src/b.ts"]);
+  });
+
+  it("release still reports unknown changed_files when there are no commit pointers to derive from", () => {
+    const f = setup();
+    const claimed = handleClaim(wctx(f, f.agentAId, ["pool-dev"]), claim({ scope: "sample-app", action: "claim", title: "Task" })) as {
+      lease: { task_id: string };
+    };
+    const released = handleClaim(wctx(f, f.agentAId, ["pool-dev"]), claim({ scope: "sample-app", action: "release", task_id: claimed.lease.task_id })) as {
+      changed_files: string[] | null;
+    };
+    expect(released.changed_files).toBeNull();
   });
 });
 
