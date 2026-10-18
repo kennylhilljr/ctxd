@@ -14,6 +14,7 @@
 - **The event log is the source of truth.** Never mutate materialized state without an event (ADR 0002).
 - **Sync changes ship with tests.** Every change to sync or apply comes with property tests for convergence.
 - **No secrets in fixtures or docs.**
+- **No real project, scope or pool names anywhere in the repository** (docs, examples, tests, fixtures, commit messages). Use invented examples such as `sample-app`, `notes`, `project-b`, `shared-tools`, `pool-dev`, `pool-notes`, `pool-ops`, `pool-private`, `private-a`. The owner's real names live only in ctxd's local data, never in Git. This rule overrides "never edit a past version" when sanitizing.
 - **Access is default deny.** Every new tool or command goes through the access evaluation in Spec 10.5; agents never get human-only operations.
 - **Purge is the only history rewrite.** Nothing else may modify stored events (Spec 7.6.6).
 - **Writing style for docs:** no em dashes, en dashes or double hyphens in prose; use commas, colons, semicolons, periods or parentheses.
