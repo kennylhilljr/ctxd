@@ -48,7 +48,7 @@ CREATE TABLE events (
   hlc          TEXT NOT NULL,
   scope_id     TEXT NOT NULL,
   entry_id     TEXT NOT NULL,
-  op           TEXT NOT NULL CHECK (op IN ('create','update','status','delete','resolve','claim','release','relate','unrelate','flag','unflag','quarantine','unquarantine','revert','purge','acl')),
+  op           TEXT NOT NULL CHECK (op IN ('create','update','status','delete','resolve','claim','release','relate','unrelate','flag','unflag','quarantine','unquarantine','revert','purge','acl','suspend','resume')),
   part         TEXT NOT NULL CHECK (part IN ('content','status','relations','claim','meta')),
   parent_revs  TEXT NOT NULL DEFAULT '[]',
   rev          TEXT NOT NULL,
@@ -300,7 +300,8 @@ CREATE TABLE leases (
   changed_files TEXT,                -- JSON array, recorded on release
   drift        TEXT,                 -- JSON array of changed files outside paths
   taken_over_by TEXT,
-  lost_by      TEXT
+  lost_by      TEXT,
+  suspended_at TEXT                  -- non-NULL: quarantine suspended this claim (7.6.2); overlaps and blocking ignore it
 );
 CREATE INDEX leases_scope_state ON leases(scope_id, state);
 

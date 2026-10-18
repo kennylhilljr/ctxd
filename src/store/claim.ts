@@ -189,8 +189,9 @@ function claimTask(ctx: WriteContext, input: ClaimInput, scope: { id: string; na
 
   const myPaths = input.paths !== undefined ? normalizePathsOrThrow(input.paths) : existing?.paths ? (JSON.parse(existing.paths) as string[]) : undefined;
 
+  // Suspended leases (SPEC 7.6.2 step 4) no longer block other agents: overlap detection ignores them.
   const otherActive = db
-    .prepare("SELECT task_id, holder, paths FROM leases WHERE scope_id = ? AND state = 'active' AND task_id != ?")
+    .prepare("SELECT task_id, holder, paths FROM leases WHERE scope_id = ? AND state = 'active' AND task_id != ? AND suspended_at IS NULL")
     .all(scope.id, task.id) as { task_id: string; holder: string; paths: string | null }[];
   const overlaps: OverlapOut[] = [];
   const intentUnknown: string[] = [];

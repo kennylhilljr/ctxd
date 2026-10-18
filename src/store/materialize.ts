@@ -231,6 +231,70 @@ export function applyEvent(db: Database.Database, e: EventForMaterialize, { skip
     return;
   }
 
+  if (e.part === "status" && e.op === "quarantine") {
+    // Mirrors the flag branch's status_before/restore pattern (SPEC 7.6.2 step 3): record the
+    // status being left behind so release (unquarantine) or revert can put it back.
+    const current = db.prepare("SELECT status FROM entries WHERE entry_id = ?").get(e.entryId) as { status: string };
+    db.prepare("UPDATE entries SET status = 'quarantined', status_before = ?, status_rev = ?, updated_hlc = ? WHERE entry_id = ?").run(
+      current.status,
+      e.rev,
+      e.hlc,
+      e.entryId,
+    );
+    return;
+  }
+
+  if (e.part === "status" && e.op === "unquarantine") {
+    // SPEC 7.6.4: "unquarantine events restore each member's status_before."
+    const current = db.prepare("SELECT status_before FROM entries WHERE entry_id = ?").get(e.entryId) as { status_before: string | null };
+    const restored = current.status_before ?? "active";
+    db.prepare("UPDATE entries SET status = ?, status_before = NULL, status_rev = ?, updated_hlc = ? WHERE entry_id = ?").run(
+      restored,
+      e.rev,
+      e.hlc,
+      e.entryId,
+    );
+    return;
+  }
+
+  if (e.part === "content" && e.op === "delete") {
+    // SPEC 7.6.3's revert-tombstone for an entry created inside a quarantine window. There is no
+    // separate "content erased" representation distinct from purge's purged_at (7.6.6), and the
+    // status enum already has a 'deleted' value for this, so a delete event is materialized the
+    // same way as quarantine/unquarantine: record status_before, flip the status column.
+    const current = db.prepare("SELECT status FROM entries WHERE entry_id = ?").get(e.entryId) as { status: string };
+    db.prepare("UPDATE entries SET status = 'deleted', status_before = ?, status_rev = ?, updated_hlc = ? WHERE entry_id = ?").run(
+      current.status,
+      e.rev,
+      e.hlc,
+      e.entryId,
+    );
+    return;
+  }
+
+  if (e.part === "relations" && e.op === "unrelate") {
+    // Soft delete, matching the schema's own convention (relations_entry's index is already
+    // `WHERE removed_event IS NULL`): set removed_event rather than deleting the row, so history
+    // (and a future sync peer) can still see the link existed.
+    const p = e.payload as { link_id: string };
+    db.prepare("UPDATE relations SET removed_event = ? WHERE link_id = ? AND removed_event IS NULL").run(e.eventId, p.link_id);
+    db.prepare("UPDATE entries SET relations_rev = ? WHERE entry_id = ?").run(e.rev, e.entryId);
+    return;
+  }
+
+  if (e.part === "claim" && e.op === "suspend") {
+    // SPEC 7.6.2 step 4: suspended claims no longer block other agents, and overlaps ignore them
+    // (see claim.ts's otherActive query). Modeled as its own claim-part event, not a direct table
+    // write, so a rebuild reconstructs suspension the same way it reconstructs the lease itself.
+    db.prepare("UPDATE leases SET suspended_at = ? WHERE task_id = ?").run(new Date(decodeHlc(e.hlc).physical).toISOString(), e.entryId);
+    return;
+  }
+
+  if (e.part === "claim" && e.op === "resume") {
+    db.prepare("UPDATE leases SET suspended_at = NULL WHERE task_id = ?").run(e.entryId);
+    return;
+  }
+
   if (e.part === "meta" && e.op === "purge") {
     const payload = e.payload as { fingerprint: string; scope_id: string; kind: string; slug: string };
     const before = db.prepare("SELECT rowid, title, body, tags FROM entries WHERE entry_id = ?").get(e.entryId) as
