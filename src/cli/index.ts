@@ -3,7 +3,8 @@
  * ctxd command-line entry point (SPEC v6 section 13).
  * Scaffold: commands route to their modules as milestones land.
  */
-import { parseArgs } from "node:util";
+import { run as runHookCommand } from "./hook.js";
+import "../hooks/handlers.js"; // registers HOOK_HANDLERS entries (path guard, and later M2 slices) before any hook dispatches
 import { run as runInitCommand } from "./init.js";
 import { run as runRebuildCommand } from "./rebuild.js";
 import { run as runClientCommand } from "./client.js";
@@ -23,14 +24,11 @@ import { run as runStatsCommand } from "./stats.js";
 import { run as runLsCommand } from "./ls.js";
 import { run as runTreeCommand } from "./tree.js";
 import { run as runReadCommand } from "./read.js";
+import { run as runReviewCommand } from "./review.js";
 
 /** Each command's parsed-args entry point, added as its milestone lands. */
 const COMMAND_RUNNERS: Record<string, (argv: string[]) => number | Promise<number>> = {
-  hook: (argv) => {
-    // Hooks must never break a session (SPEC section 9.1): exit 0 silently until M2 lands.
-    parseArgs({ args: argv, allowPositionals: true, strict: false });
-    return 0;
-  },
+  hook: runHookCommand,
   init: runInitCommand,
   rebuild: runRebuildCommand,
   client: runClientCommand,
@@ -50,6 +48,7 @@ const COMMAND_RUNNERS: Record<string, (argv: string[]) => number | Promise<numbe
   ls: runLsCommand,
   tree: runTreeCommand,
   read: runReadCommand,
+  review: runReviewCommand,
 };
 
 const COMMANDS: Record<string, { milestone: string; summary: string }> = {
