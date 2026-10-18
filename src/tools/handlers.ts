@@ -1,5 +1,4 @@
 import type { RequestContext } from "../server/context.js";
-import { CtxdError } from "../core/errors.js";
 import { contextBrief } from "./brief.js";
 import type { BriefInput } from "../brief/assemble.js";
 import { contextSearch } from "./search.js";
@@ -20,13 +19,7 @@ import type { ClaimInput } from "../store/claim.js";
  */
 export type ToolHandler = (ctx: RequestContext, input: Record<string, unknown>) => unknown;
 
-function notYet(toolName: string, milestone: string): ToolHandler {
-  return () => {
-    throw new CtxdError("VALIDATION", `${toolName} is not implemented yet (planned for ${milestone}).`);
-  };
-}
-
-/** Registry the server dispatches `tools/call` through. Slices 5 and 6 replace these entries. */
+/** Registry the server dispatches `tools/call` through. All seven M1 tools are live. */
 export const TOOL_HANDLERS: Record<string, ToolHandler> = {
   // The zod contract (tools/schemas.ts) already validated `input` into this exact shape before
   // dispatch (server/mcp.ts); the cast here just bridges the handler registry's generic type.
