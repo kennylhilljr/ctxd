@@ -27,6 +27,10 @@ import { run as runLsCommand } from "./ls.js";
 import { run as runTreeCommand } from "./tree.js";
 import { run as runReadCommand } from "./read.js";
 import { run as runReviewCommand } from "./review.js";
+import { run as runRememberCommand } from "./remember.js";
+import { run as runLogCommand } from "./log.js";
+import { run as runJournalCommand } from "./journal.js";
+import { run as runSignalsCommand } from "./signals.js";
 
 /** Each command's parsed-args entry point, added as its milestone lands. */
 const COMMAND_RUNNERS: Record<string, (argv: string[]) => number | Promise<number>> = {
@@ -53,6 +57,10 @@ const COMMAND_RUNNERS: Record<string, (argv: string[]) => number | Promise<numbe
   tree: runTreeCommand,
   read: runReadCommand,
   review: runReviewCommand,
+  remember: runRememberCommand,
+  log: runLogCommand,
+  journal: runJournalCommand,
+  signals: runSignalsCommand,
 };
 
 const COMMANDS: Record<string, { milestone: string; summary: string }> = {
