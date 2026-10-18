@@ -16,6 +16,8 @@ import { run as runServerCommand } from "./server.js";
 import { run as runMcpCommand } from "./mcp.js";
 import { run as runFlagCommand } from "./flag.js";
 import { run as runPurgeCommand } from "./purge.js";
+import { run as runQuarantineCommand } from "./quarantine.js";
+import { run as runBatchCommand } from "./batch.js";
 import { run as runBriefCommand } from "./brief.js";
 import { run as runHistoryCommand } from "./history.js";
 import { run as runShowCommand } from "./show.js";
@@ -43,6 +45,8 @@ const COMMAND_RUNNERS: Record<string, (argv: string[]) => number | Promise<numbe
   mcp: runMcpCommand,
   flag: runFlagCommand,
   purge: runPurgeCommand,
+  quarantine: runQuarantineCommand,
+  batch: runBatchCommand,
   brief: runBriefCommand,
   history: runHistoryCommand,
   show: runShowCommand,
@@ -82,6 +86,7 @@ const COMMANDS: Record<string, { milestone: string; summary: string }> = {
   pool: { milestone: "M1", summary: "Persona pools: create, grant, members, seal, enroll, lock" },
   flag: { milestone: "M1", summary: "Flag or unflag an entry" },
   quarantine: { milestone: "M2", summary: "Quarantine a source's writes; then revert or release" },
+  batch: { milestone: "M2", summary: "Show, revert or release a quarantine batch" },
   purge: { milestone: "M1", summary: "Erase an entry's content everywhere" },
   tidy: { milestone: "M5", summary: "Interactive cleanup suggestions" },
   ls: { milestone: "M2", summary: "List a ctxd:// folder with summary lines" },

@@ -251,11 +251,30 @@ function performDirectWrite(
       const hlc = ctx.clock.tick();
       contentRev = makeRev(revVersion(existing.content_rev) + 1, eventId);
       const payload: Record<string, unknown> = { title };
-      if (bodySan !== undefined) payload.body = bodySan;
-      if (summarySan !== undefined) payload.summary = summarySan;
-      if (tagsSan !== undefined) payload.tags = tagsSan;
-      appendPrimaryEvent(db, ctx, input, hash, allocSeq, { scopeId: scope.id, entryId, op: "update", part: "content", rev: contentRev, parentRevs: [existing.content_rev], payload, eventId, hlc });
-      applyEvent(db, { eventId, scopeId: scope.id, entryId, op: "update", part: "content", rev: contentRev, clientId: ctx.clientId, hlc, payload, prev: null });
+      // "prev... prior values of the changed fields of this part" (schema.ts): recorded so a
+      // later revert (SPEC 7.6.3) can restore exactly what this update is about to overwrite,
+      // without guessing at it from some other event.
+      const beforeUpdate = db.prepare("SELECT title, summary, body, tags FROM entries WHERE entry_id = ?").get(entryId) as {
+        title: string;
+        summary: string;
+        body: string;
+        tags: string;
+      };
+      const prev: Record<string, unknown> = { title: beforeUpdate.title };
+      if (bodySan !== undefined) {
+        payload.body = bodySan;
+        prev.body = beforeUpdate.body;
+      }
+      if (summarySan !== undefined) {
+        payload.summary = summarySan;
+        prev.summary = beforeUpdate.summary;
+      }
+      if (tagsSan !== undefined) {
+        payload.tags = tagsSan;
+        prev.tags = JSON.parse(beforeUpdate.tags);
+      }
+      appendPrimaryEvent(db, ctx, input, hash, allocSeq, { scopeId: scope.id, entryId, op: "update", part: "content", rev: contentRev, parentRevs: [existing.content_rev], payload, prev, eventId, hlc });
+      applyEvent(db, { eventId, scopeId: scope.id, entryId, op: "update", part: "content", rev: contentRev, clientId: ctx.clientId, hlc, payload, prev });
     } else {
       entryId = newId();
       const eventId = newId();
