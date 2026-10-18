@@ -80,13 +80,11 @@ function sanitizeField(text: string, failures: Set<string>): string {
 
 export function writeEntry(ctx: WriteContext, input: Input): WriteResult {
   const { db } = ctx;
-  const rejectAs = (scopeId: string | undefined, entryId: string | undefined, err: CtxdError): never => reject(db, ctx.clientId, scopeId, entryId, err);
-
   const scope = loadScopeByName(db, input.scope);
-  if (!scope) rejectAs(undefined, undefined, new CtxdError("NOT_FOUND", `Scope not found: ${input.scope}`));
+  if (!scope) reject(db, ctx.clientId, undefined, undefined, new CtxdError("NOT_FOUND", `Scope not found: ${input.scope}`));
 
   const client = loadClient(db, ctx.clientId);
-  if (!client) rejectAs(scope.id, undefined, new CtxdError("UNAUTHORIZED", "Unknown or revoked client"));
+  if (!client) reject(db, ctx.clientId, scope.id, undefined, new CtxdError("UNAUTHORIZED", "Unknown or revoked client"));
 
   const snapshot = loadAccessSnapshot(db);
   const level = accessLevel(client, scope, snapshot, Date.now(), ctx.assumedPools);
@@ -94,7 +92,7 @@ export function writeEntry(ctx: WriteContext, input: Input): WriteResult {
   const decision = decideWrite(level, vendorBlocked);
 
   if (decision.kind === "forbidden") {
-    rejectAs(scope.id, undefined, new CtxdError("SCOPE_FORBIDDEN", `No access to scope: ${scope.name}`));
+    reject(db, ctx.clientId, scope.id, undefined, new CtxdError("SCOPE_FORBIDDEN", `No access to scope: ${scope.name}`));
   }
 
   // Step 2: idempotency. Runs before the hold/direct branch (matching the spec's own step
@@ -105,14 +103,26 @@ export function writeEntry(ctx: WriteContext, input: Input): WriteResult {
     .get(ctx.clientId, input.request_id) as { entry_id: string; scope_id: string; request_hash: string } | undefined;
   if (existingEvent) {
     if (existingEvent.request_hash !== hash) {
-      rejectAs(scope.id, existingEvent.entry_id, new CtxdError("IDEMPOTENCY_MISMATCH", "request_id was already used with different input"));
+      reject(
+        db,
+        ctx.clientId,
+        scope.id,
+        existingEvent.entry_id,
+        new CtxdError("IDEMPOTENCY_MISMATCH", "request_id was already used with different input"),
+      );
     }
     return replayResult(db, ctx.clientId, existingEvent.entry_id, existingEvent.scope_id);
   }
 
   if (decision.kind === "hold") {
     if (input.id) {
-      rejectAs(scope.id, input.id, new CtxdError("NOT_ALLOWED", "Cannot update an entry in a scope you cannot write to"));
+      reject(
+        db,
+        ctx.clientId,
+        scope.id,
+        input.id,
+        new CtxdError("NOT_ALLOWED", "Cannot update an entry in a scope you cannot write to"),
+      );
     }
     return performHeldWrite(ctx, client, scope, input, hash);
   }
@@ -131,9 +141,10 @@ function replayResult(db: Database.Database, clientId: string, entryId: string, 
 
   if (scope.kind === "hold" && scope.owner === clientId) {
     const ref = formatRef(scope.name, entryId);
+    const escapedRef = ref.replace(/[\\%_]/g, "\\$&");
     const request = db
-      .prepare("SELECT request_id, scope_id FROM access_requests WHERE client_id = ? AND held_entries LIKE ?")
-      .get(clientId, `%"${ref}"%`) as { request_id: string; scope_id: string } | undefined;
+      .prepare("SELECT request_id, scope_id FROM access_requests WHERE client_id = ? AND held_entries LIKE ? ESCAPE '\\'")
+      .get(clientId, `%"${escapedRef}"%`) as { request_id: string; scope_id: string } | undefined;
     const target = request ? loadScopeById(db, request.scope_id) : null;
     return {
       held: true,
@@ -432,6 +443,10 @@ function performHeldWrite(
       (r) => r.pool_id,
     );
 
+    // Per spec, an access_requests row is opened only when the target scope belongs to a pool.
+    // A held write to a scope that belongs to no pool (SCOPE_FORBIDDEN already never reaches
+    // here) leaves no reviewable request row; flagged for SPEC-v7 as a gap, since the only
+    // present-day recourse is a direct client_grant from the human, not a reviewable request.
     let requestId = "";
     if (poolIds.length > 0) {
       const openRequest = db

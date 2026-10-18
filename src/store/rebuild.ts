@@ -37,7 +37,7 @@ export function rebuild(db: Database.Database): void {
         hlc: e.hlc,
         payload: JSON.parse(e.payload) as Record<string, unknown>,
         prev: e.prev ? (JSON.parse(e.prev) as Record<string, unknown>) : null,
-      });
+      }, { skipFts: true });
       touchedScopes.add(e.scope_id);
     }
 

@@ -288,8 +288,15 @@ describe("writeEntry (SPEC v6 section 6)", () => {
     } as never);
     if ("held" in replacement) throw new Error("unexpected hold");
 
-    const originalRow = f.db.prepare("SELECT status FROM entries WHERE entry_id = ?").get(original.id) as { status: string };
+    const originalRow = f.db.prepare("SELECT status, created_hlc, updated_hlc FROM entries WHERE entry_id = ?").get(original.id) as {
+      status: string;
+      created_hlc: string;
+      updated_hlc: string;
+    };
     expect(originalRow.status).toBe("superseded");
+    // Regression: the status-event handler used to leave updated_hlc at its creation-time
+    // value, making the superseded entry look like it was active for zero time in signals.
+    expect(originalRow.updated_hlc).not.toBe(originalRow.created_hlc);
     const relation = f.db.prepare("SELECT type, target FROM relations WHERE entry_id = ?").get(replacement.id) as {
       type: string;
       target: string;
@@ -361,6 +368,61 @@ describe("ctxd rebuild (SPEC v6 section 13)", () => {
             if ("held" in result) throw new Error("unexpected hold");
             lastId = result.id;
             lastRev = result.rev;
+          }
+          const before = dumpHash(f.db);
+          rebuild(f.db);
+          const after = dumpHash(f.db);
+          return after === before;
+        },
+      ),
+      { numRuns: 25 },
+    );
+  });
+
+  // AGENTS.md: "every change to sync or apply comes with property tests for convergence."
+  // This interleaves content updates with supersede (status-event) transitions, the path
+  // the updated_hlc bug above lived in and the prior property test above never touched.
+  it("is deterministic across random sequences including supersede/status transitions (property test)", () => {
+    fc.assert(
+      fc.property(
+        fc.array(
+          fc.record({
+            kind: fc.constantFrom<"note" | "supersede">("note", "supersede"),
+            title: fc.string({ minLength: 1, maxLength: 30 }),
+            body: fc.string({ minLength: 1, maxLength: 50 }),
+          }),
+          { minLength: 1, maxLength: 10 },
+        ),
+        (ops) => {
+          const f = setup();
+          let lastNoteId: string | undefined;
+          let lastNoteRev: string | undefined;
+          let lastDecisionRef: string | undefined;
+          for (const op of ops) {
+            if (op.kind === "note") {
+              const result = writeEntry(ctxFor(f, f.humanId), {
+                scope: "notes",
+                kind: "note",
+                title: op.title || "untitled",
+                body: op.body || "empty",
+                ...(lastNoteId ? { id: lastNoteId, expected_rev: lastNoteRev } : {}),
+                request_id: requestId(),
+              } as never);
+              if ("held" in result) throw new Error("unexpected hold");
+              lastNoteId = result.id;
+              lastNoteRev = result.rev;
+            } else {
+              const result = writeEntry(ctxFor(f, f.humanId), {
+                scope: "notes",
+                kind: "decision",
+                title: op.title || "untitled decision",
+                body: op.body || "empty",
+                ...(lastDecisionRef ? { supersedes: lastDecisionRef } : {}),
+                request_id: requestId(),
+              } as never);
+              if ("held" in result) throw new Error("unexpected hold");
+              lastDecisionRef = result.ref;
+            }
           }
           const before = dumpHash(f.db);
           rebuild(f.db);

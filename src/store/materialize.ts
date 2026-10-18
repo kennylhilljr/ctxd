@@ -35,7 +35,12 @@ interface CreatePayload {
   supersedes?: string | null;
 }
 
-export function applyEvent(db: Database.Database, e: EventForMaterialize): void {
+export interface ApplyEventOptions {
+  /** Skip the incremental per-event FTS sync. `ctxd rebuild` sets this and does one bulk FTS5 rebuild instead. */
+  skipFts?: boolean;
+}
+
+export function applyEvent(db: Database.Database, e: EventForMaterialize, { skipFts = false }: ApplyEventOptions = {}): void {
   if (e.part === "content" && e.op === "create") {
     const p = e.payload as unknown as CreatePayload;
     db.prepare(
@@ -67,7 +72,7 @@ export function applyEvent(db: Database.Database, e: EventForMaterialize): void 
       e.hlc,
       e.hlc,
     );
-    syncFtsRow(db, e.entryId, null);
+    if (!skipFts) syncFtsRow(db, e.entryId, null);
     return;
   }
 
@@ -85,17 +90,18 @@ export function applyEvent(db: Database.Database, e: EventForMaterialize): void 
     db.prepare(
       "UPDATE entries SET title = ?, summary = ?, body = ?, tags = ?, content_rev = ?, content_version = ?, updated_by = ?, updated_hlc = ? WHERE entry_id = ?",
     ).run(merged.title, merged.summary, merged.body, merged.tags, e.rev, revVersion(e.rev), e.clientId, e.hlc, e.entryId);
-    syncFtsRow(db, e.entryId, current);
+    if (!skipFts) syncFtsRow(db, e.entryId, current);
     return;
   }
 
   if (e.part === "status" && e.op === "status") {
     const p = e.payload as { status: string };
     const prevStatus = (e.prev as { status?: string } | null)?.status ?? null;
-    db.prepare("UPDATE entries SET status = ?, status_before = ?, status_rev = ? WHERE entry_id = ?").run(
+    db.prepare("UPDATE entries SET status = ?, status_before = ?, status_rev = ?, updated_hlc = ? WHERE entry_id = ?").run(
       p.status,
       prevStatus,
       e.rev,
+      e.hlc,
       e.entryId,
     );
     return;
