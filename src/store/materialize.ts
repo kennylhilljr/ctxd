@@ -450,9 +450,20 @@ function applyEventCore(db: Database.Database, e: EventForMaterialize, skipFts: 
 
   if (e.part === "meta" && e.op === "purge") {
     const payload = e.payload as { fingerprint: string; scope_id: string; kind: string; slug: string };
-    const before = db.prepare("SELECT rowid, title, body, tags FROM entries WHERE entry_id = ?").get(e.entryId) as
-      | { rowid: number; title: string; body: string; tags: string }
+    const before = db.prepare("SELECT rowid, title, body, tags, purged_at, updated_hlc FROM entries WHERE entry_id = ?").get(e.entryId) as
+      | { rowid: number; title: string; body: string; tags: string; purged_at: string | null; updated_hlc: string }
       | undefined;
+    // Two nodes can each independently purge the same entry while partitioned (their own,
+    // possibly differently-fingerprinted, unsynced content). Sync's apply.ts lets every purge
+    // event through rather than treating the second one as a stripped late arrival, so that
+    // whichever purge carries the later HLC always wins here, on every node, regardless of which
+    // one that node happens to receive first (the convergence property, 7.3): an already-purged
+    // entry's row is only touched by a purge event whose HLC is at least as new as the one that
+    // set it. An older-HLC purge event is a no-op for the row; its own stored event payload still
+    // keeps its fingerprint (untouched by the rewrite below), but it does not become the entry's
+    // `purge_fingerprint`, so reinsertion-blocking only covers whichever fingerprint's HLC won.
+    const alreadyPurged = before?.purged_at != null;
+    if (alreadyPurged && compareHlc(e.hlc, before.updated_hlc) <= 0) return;
     // UPSERT, not a plain UPDATE (SPEC v7 7.6.6): a rebuild replays the create event neutered to
     // {"purged": true} (the guard at the top of this function), so the row may not exist yet when
     // this purge event itself is replayed. scope_id/kind/slug come from the purge event's own
@@ -494,23 +505,30 @@ function applyEventCore(db: Database.Database, e: EventForMaterialize, skipFts: 
       e.hlc,
       e.hlc,
     );
-    // entries_fts is an external-content table: a plain DELETE does nothing (and can corrupt the
-    // index); it needs the 'delete' command with the row's prior values, same as syncFtsRow.
-    if (!skipFts && before) {
-      db.prepare("INSERT INTO entries_fts(entries_fts, rowid, title, body, tags) VALUES ('delete', ?, ?, ?, ?)").run(
-        before.rowid,
-        before.title,
-        before.body,
-        ftsTags(before.tags),
-      );
+    // The one-time erasure (FTS row, relations, open flags, every other stored event) already
+    // ran when the entry was first purged; a later-HLC purge event that wins here (above) only
+    // updates the row's own columns. Re-running the FTS 'delete' command against content that is
+    // no longer indexed (this entry's real title/body were removed by that first purge) corrupts
+    // the index rather than no-op-ing, so this whole block is step 1 only, done exactly once.
+    if (!alreadyPurged) {
+      // entries_fts is an external-content table: a plain DELETE does nothing (and can corrupt
+      // the index); it needs the 'delete' command with the row's prior values, same as syncFtsRow.
+      if (!skipFts && before) {
+        db.prepare("INSERT INTO entries_fts(entries_fts, rowid, title, body, tags) VALUES ('delete', ?, ?, ?, ?)").run(
+          before.rowid,
+          before.title,
+          before.body,
+          ftsTags(before.tags),
+        );
+      }
+      db.prepare("DELETE FROM relations WHERE entry_id = ?").run(e.entryId);
+      db.prepare("UPDATE relations SET target = '[purged]' WHERE target LIKE ?").run(`%/${e.entryId}`);
+      closeOpenFlags(db, e.entryId, "purge");
+      // "Erase history": every stored event for this entry is rewritten in place (the only
+      // operation that rewrites events, ADR-0002's own carve-out) -- but not this purge event
+      // itself, whose own payload is exactly what records the fingerprint that blocks reinsertion.
+      db.prepare("UPDATE events SET payload = '{\"purged\":true}', prev = NULL WHERE entry_id = ? AND event_id != ?").run(e.entryId, e.eventId);
     }
-    db.prepare("DELETE FROM relations WHERE entry_id = ?").run(e.entryId);
-    db.prepare("UPDATE relations SET target = '[purged]' WHERE target LIKE ?").run(`%/${e.entryId}`);
-    closeOpenFlags(db, e.entryId, "purge");
-    // "Erase history": every stored event for this entry is rewritten in place (the only
-    // operation that rewrites events, ADR-0002's own carve-out) -- but not this purge event
-    // itself, whose own payload is exactly what records the fingerprint that blocks reinsertion.
-    db.prepare("UPDATE events SET payload = '{\"purged\":true}', prev = NULL WHERE entry_id = ? AND event_id != ?").run(e.entryId, e.eventId);
     return;
   }
 

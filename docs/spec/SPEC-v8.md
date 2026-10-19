@@ -10,7 +10,7 @@
 
 ## Changes in v8
 
-Earlier changes are listed in [Spec v7](SPEC-v7.md), [v6](SPEC-v6.md), [v5](SPEC-v5.md), [v4](SPEC-v4.md), [v3](SPEC-v3.md) and [v2](SPEC-v2.md). v8 is written across M3's slices (`docs/build/M3-M6-kickoff-v1.md`), collecting each one's changes as it lands rather than waiting for the milestone to finish. Slice 1 added the feature-flag registry; slice 2 added the sync listener and pull protocol; slice 3 (this update) adds the conflict policies.
+Earlier changes are listed in [Spec v7](SPEC-v7.md), [v6](SPEC-v6.md), [v5](SPEC-v5.md), [v4](SPEC-v4.md), [v3](SPEC-v3.md) and [v2](SPEC-v2.md). v8 is written across M3's slices (`docs/build/M3-M6-kickoff-v1.md`), collecting each one's changes as it lands rather than waiting for the milestone to finish. Slice 1 added the feature-flag registry; slice 2 added the sync listener and pull protocol; slice 3 added the conflict policies; slice 4 (this update) adds purge propagation.
 
 | Section | Change |
 |---|---|
@@ -27,6 +27,7 @@ Earlier changes are listed in [Spec v7](SPEC-v7.md), [v6](SPEC-v6.md), [v5](SPEC
 | 4, 5 | Slice 3: `makeRev` (src/core/ids.ts) now takes the *last* 10 characters of an event's ULID instead of the first 10, fixing a real rev collision between two events minted in the same millisecond, found while testing conflict resolution |
 | 13 | Slice 3: `ctxd review`'s `conflicted` and `auto_resolved` categories are now populated by real sync traffic, not placeholders |
 | 4 | Slice 3: a new `events(entry_id, rev)` index backs the conflict lookup; schema bumped to 9 |
+| 7.3, 7.6.6 | Slice 4: `meta`/`purge` events are now let through via sync instead of only being logged, closing that gap; step 3's strip-on-receipt (any non-purge event for an already-purged entry stored with payload `{"purged": true}`, never materialized) is implemented; a second, independent purge of the same entry (two partitioned nodes, each purging their own unsynced content) is resolved by HLC in `materialize.ts`'s purge handler instead of always losing to arrival order, so every node converges on the same, highest-HLC purge's fingerprint and metadata (found and fixed during `/code-review`) |
 
 ### Traceability
 

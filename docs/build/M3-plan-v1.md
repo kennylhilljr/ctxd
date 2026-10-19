@@ -20,7 +20,7 @@ unchanged, renumbered.
 | 1 | Feature flags | `m3/feature-flags` | `main` | PRD-feature-flags-v1 in full; Spec v8; retrofits every M1/M2 flag; `hooks.prompt_search` plus a minimal R7 handler |
 | 2 | Sync core | `m3/sync-protocol` | `main` (slice 1 merged as PR #26 before this branched) | Spec 7.1, 7.2, 7.3 (fast-forward and already-known only); `127.0.0.1:7412`, peer tokens, `/v1/pull`, `/v1/notify`, watermarks, `ctxd node add-peer\|revoke`, `ctxd sync`, flags `sync`/`sync.serve`; the new `peers` table |
 | 3 | Conflict policies, siblings, review | `m3/sync-conflicts` | `m3/sync-protocol` | Spec 7.4; per-part conflict policies for the "Concurrent" row of 7.3's table (status, and content for every kind: lww for status/brief, conflicted for the rest); `entry_siblings`; `conflicted` status; surfacing both in `ctxd review`; missing-parent events, and `claim`/`meta` events, remain deferred to slices 4 and 5 |
-| 4 | Purge propagation | `m3/sync-purge` | `m3/sync-conflicts` | Spec 7.6.6 step 3; stripping late arrivals for an already-purged entry on receipt |
+| 4 | Purge propagation | `m3/sync-purge` | `m3/sync-conflicts` | Spec 7.6.6; purge (`meta`/`purge`) events now fast-forward unconditionally when received via sync, closing the gap that `decide` previously deferred every `meta` event; step 3's strip-on-receipt for any event (of any op) arriving for an already-purged entry |
 | 5 | Claims across nodes | `m3/sync-claims` | `m3/sync-purge` | Spec 7.4's claim rows; tentative claims while offline; deterministic tie-break; `lost` leases; sync-origin overlap detection |
 | 6 | ACL and scope metadata as events | `m3/sync-acl-events` | `m3/sync-claims` | Spec 7.2; review rules, grants, pool changes and scope creation itself travel as `acl`/scope-metadata events in `_system` instead of direct table writes (closes the M2 handoff gap in `src/cli/grant.ts`, `src/cli/pool.ts`, `src/store/review.ts`, and the gap slice 2 found: named project scopes created independently on two nodes do not share a `scope_id` yet, so only `_me` converges until this slice lands) |
 | 7 | Freshness and property tests | `m3/sync-freshness` | `m3/sync-acl-events` | Spec 10.2; sync freshness in brief headers, the stale-sync notice; the N-node partition property suite |
@@ -204,10 +204,52 @@ events applied in either order reach the same final state), `ctxd review`'s `con
 `auto_resolved` categories populated from real data, and `ctxd review --approve` clearing a
 conflict. `test/unit/ids.test.ts` for the `makeRev` fix.
 
-## Slices 4 to 7
+## Slice 4: purge propagation
+
+**A gap the plan did not originally name.** Slices 2 and 3 both deferred every `meta`-part event
+(the only op on that part is `purge`) alongside `claim` events, treating both as needing their own
+later slice. That was right for `claim` (real cross-node tie-break semantics, slice 5) but wrong
+for `purge`: the handler (`src/store/materialize.ts`, M1) is already an idempotent UPSERT, order-
+and retry-tolerant by construction. `src/sync/apply.ts`'s `decide` now lets every `meta`/`purge`
+event through instead of only logging it, so a purge done on one node now actually erases the
+entry on a peer that syncs it, which (checked while writing this slice) it previously never did
+at all. `decide` does not treat this as a plain, unconditional fast-forward, though: see the
+concurrent-purge case below, which is also a `meta` event but is resolved, not just passed
+through.
+
+**Step 3, stripping late arrivals.** `decide` checks `entries.purged_at` before anything else: if
+the target entry is already purged locally and the incoming event is *not itself a purge event*,
+it is stored with `payload` replaced by `{"purged": true}` and `prev` cleared to `NULL`, the exact
+shape a *local* purge rewrites every other stored event to (`store/purge.ts`), and is never
+materialized. This covers a genuinely late content/status edit from an offline peer.
+
+**Concurrent purges of the same entry, found by `/code-review`.** Two nodes can each purge the
+same entry independently while partitioned, each from their own unsynced content, producing two
+purge events with two different fingerprints. The first version of this slice stripped the second
+one outright (treating it like any other late arrival for an already-purged entry), so whichever
+purge event a given node happened to apply first won there permanently: different nodes could
+converge on different `purge_fingerprint` values for the same entry, and the losing fingerprint's
+reinsertion block (step 4) was lost. Fixed: `decide` lets a second purge event through instead of
+stripping it, and `materialize.ts`'s purge handler itself now compares the incoming event's HLC
+against the row's current `updated_hlc`; an older-or-equal HLC is a no-op for the row (its own
+event payload is still stored with its real fingerprint, just never promoted to `purge_fingerprint`),
+a later HLC overwrites it. Every node converges on the same, highest-HLC purge's metadata
+regardless of arrival order. The reinsertion-block gap for the non-winning fingerprint is narrower
+now (only a concurrent purge's losing side, not every out-of-order arrival) but still open; closing
+it fully would mean retaining more than one fingerprint per entry, deferred rather than designed
+under this slice.
+
+**Tests:** `test/unit/sync-purge.test.ts`: a purge event fast-forwards and reconstructs the stub
+row with no prior create materialized locally; the same purge event applied twice is
+`already-known` the second time; a late content update for an already-purged entry is stored
+stripped and never un-erases the entry; two independent purge events for the same entry converge
+on the later-HLC one's fingerprint whichever order they are applied in, including the case of a
+strictly earlier-HLC second purge arriving after the row is already settled.
+
+## Slices 5 to 7
 
 Each slice's own PR restates its piece of the bullet list in
-`docs/build/M3-M6-kickoff-v1.md` section 1 in the same level of detail as slices 1 to 3 above,
-written at the start of that slice's branch rather than all up front here, since slices 4 to 7
+`docs/build/M3-M6-kickoff-v1.md` section 1 in the same level of detail as slices 1 to 4 above,
+written at the start of that slice's branch rather than all up front here, since slices 5 to 7
 depend on decisions earlier slices make along the way. This document is updated with a row in the
 table above, not rewritten, as each slice's branch opens.

@@ -100,6 +100,7 @@ export function servePull(db: Database.Database, requesterRole: NodeRole, req: P
 export interface PullOutcome {
   pulled: number;
   conflicts: number;
+  purged: number;
   deferred: number;
   through: Record<string, number>;
 }
@@ -118,6 +119,7 @@ export async function pullFromPeer(
   const vector = currentVector(db, peer.name);
   let pulled = 0;
   let conflicts = 0;
+  let purged = 0;
   let deferred = 0;
   let more = true;
   let lastThrough: Record<string, number> = {};
@@ -135,6 +137,7 @@ export async function pullFromPeer(
       const result = applyEvent(db, event);
       if (result.outcome === "fast-forward") pulled++;
       else if (result.outcome === "conflict-resolved") conflicts++;
+      else if (result.outcome === "purge-stripped") purged++;
       else if (result.outcome === "deferred") deferred++;
     }
     storeThrough(db, peer.name, body.through);
@@ -142,7 +145,7 @@ export async function pullFromPeer(
     lastThrough = body.through;
     more = body.more;
   }
-  return { pulled, conflicts, deferred, through: lastThrough };
+  return { pulled, conflicts, purged, deferred, through: lastThrough };
 }
 
 function currentVector(db: Database.Database, peerName: string): Record<string, number> {
