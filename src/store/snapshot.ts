@@ -22,8 +22,16 @@ export function loadClient(db: Database.Database, clientId: string): ClientInfo 
   return { id: row.client_id, vendor: row.vendor, tags: JSON.parse(row.tags) as string[] };
 }
 
+/**
+ * A client's display name, falling back to its raw id rather than crashing when the row isn't
+ * local: clients never replicate (each node issues its own tokens, Spec 7.1), so a client id that
+ * arrived here only via a replicated event (a claim holder, an entry's created_by, ...) has no
+ * local row to read a name from. Found via M3 slice 7's N-node property suite, the first test to
+ * exercise a claim contended across genuinely separate nodes' own clients.
+ */
 export function loadClientName(db: Database.Database, clientId: string): string {
-  return (db.prepare("SELECT name FROM clients WHERE client_id = ?").get(clientId) as { name: string }).name;
+  const row = db.prepare("SELECT name FROM clients WHERE client_id = ?").get(clientId) as { name: string } | undefined;
+  return row?.name ?? clientId;
 }
 
 interface ScopeRow {

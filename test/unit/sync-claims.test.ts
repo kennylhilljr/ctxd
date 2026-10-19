@@ -188,7 +188,9 @@ describe("a release only applies to the claim it was issued against (Spec 7.4)",
     const staleRelease = releaseWireEvent(f, { entryId: taskId, holder: f.agentAId, hlc: hlcAt(1500, f.nodeId), claimHlc: hlcAt(1000, f.nodeId) });
     // Routed through the conflict-checking path, same as a genuine race, even though
     // materialize.ts's handler finds nothing to resolve (the release's target claim has already
-    // been superseded, so it is a no-op there).
+    // been superseded, so it is a no-op there): src/sync/apply.ts's `decide` tells "target never
+    // arrived" from "target arrived and was superseded" by whether a claim was ever recorded at
+    // that exact hlc (`claimHlcEverRecorded`), and this node's own earlier claim event proves it.
     expect(applyEvent(f.db, staleRelease).outcome).toBe("conflict-resolved");
 
     const lease = readLease(f.db, taskId);
@@ -216,13 +218,13 @@ describe("a release only applies to the claim it was issued against (Spec 7.4)",
     expect(readLease(f.db, taskId).state).toBe("released");
 
     // A second, distinct release event (different eventId, so not caught by "already-known")
-    // for the exact same already-superseded claim: two nodes mechanically releasing the same
-    // expired claim while partitioned. With no active lease left at all, this must not be
-    // classified "missing-parent" (deferred forever, since the claim it would wait for already
-    // came and went) -- it is routed through the conflict-checking path instead, same as any
-    // other stale release, and materialize.ts finds nothing left to do.
+    // for the exact same claim: two nodes mechanically releasing the same claim while
+    // partitioned. `release` never changes `claim_hlc` (only `state`/`released_at`/...), so the
+    // row's claim_hlc is still this same claim's hlc -- this duplicate's parentRevs matches it
+    // directly, fast-forwarding through the idempotent release handler again rather than needing
+    // any conflict check at all.
     const duplicateRelease = releaseWireEvent(f, { entryId: taskId, holder: f.agentAId, hlc: hlcAt(1600, f.nodeId), claimHlc: hlcAt(1000, f.nodeId) });
-    expect(applyEvent(f.db, duplicateRelease).outcome).toBe("conflict-resolved");
+    expect(applyEvent(f.db, duplicateRelease).outcome).toBe("fast-forward");
     expect(readLease(f.db, taskId).state).toBe("released");
   });
 });

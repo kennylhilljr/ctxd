@@ -2,7 +2,7 @@ import type Database from "better-sqlite3";
 import type { NodeRole, Replication } from "../core/kinds.js";
 import { nowIso } from "../core/time.js";
 import { mayReplicate } from "../security/policy.js";
-import { applyEvent, type WireEvent } from "./apply.js";
+import { applyEvent, toWireEvent, type EventRow, type WireEvent } from "./apply.js";
 
 /** POST /v1/pull's request and response bodies (Spec v8 7.1). */
 export interface PullRequest {
@@ -17,46 +17,8 @@ export interface PullResponse {
   more: boolean;
 }
 
-interface EventRow {
-  event_id: string;
-  origin_node: string;
-  origin_seq: number;
-  hlc: string;
-  scope_id: string;
-  entry_id: string;
-  op: string;
-  part: WireEvent["part"];
-  parent_revs: string;
-  rev: string;
-  client_id: string;
-  session_ref: string | null;
-  request_id: string | null;
-  request_hash: string | null;
-  payload: string;
-  prev: string | null;
-  scope_replication: Replication;
-}
-
-function toWireEvent(row: EventRow): WireEvent {
-  return {
-    eventId: row.event_id,
-    originNode: row.origin_node,
-    originSeq: row.origin_seq,
-    hlc: row.hlc,
-    scopeId: row.scope_id,
-    entryId: row.entry_id,
-    op: row.op,
-    part: row.part,
-    parentRevs: JSON.parse(row.parent_revs) as string[],
-    rev: row.rev,
-    clientId: row.client_id,
-    sessionRef: row.session_ref,
-    requestId: row.request_id,
-    requestHash: row.request_hash,
-    payload: JSON.parse(row.payload) as Record<string, unknown>,
-    prev: row.prev === null ? null : (JSON.parse(row.prev) as Record<string, unknown>),
-  };
-}
+/** `EventRow` plus the one extra column only this query's own replication filter needs. */
+type PullRow = EventRow & { scope_replication: Replication };
 
 /**
  * Serve POST /v1/pull (Spec 7.1, 7.2): events the requester hasn't seen, filtered by its role,
@@ -84,7 +46,7 @@ export function servePull(db: Database.Database, requesterRole: NodeRole, req: P
        ORDER BY e.origin_node, e.origin_seq
        LIMIT ?`,
     )
-    .all(...whereArgs, req.limit + 1) as EventRow[];
+    .all(...whereArgs, req.limit + 1) as PullRow[];
 
   const more = rows.length > req.limit;
   const page = more ? rows.slice(0, req.limit) : rows;

@@ -173,9 +173,14 @@ function performDirectWrite(
       reject(db, ctx.clientId, scope.id, input.id, new CtxdError("VALIDATION", "expected_rev is required with id", {}, "expected_rev"));
     }
     const row = db
-      .prepare("SELECT entry_id, kind, content_rev, status, scope_id FROM entries WHERE entry_id = ?")
-      .get(input.id) as { entry_id: string; kind: Kind; content_rev: string; status: Status; scope_id: string } | undefined;
-    if (!row || row.scope_id !== scope.id) {
+      .prepare("SELECT entry_id, kind, content_rev, status, scope_id, purged_at FROM entries WHERE entry_id = ?")
+      .get(input.id) as { entry_id: string; kind: Kind; content_rev: string; status: Status; scope_id: string; purged_at: string | null } | undefined;
+    // A purged entry is erased (SPEC 7.6.6), never a live update target: without this check, the
+    // node that ran the purge locally could still "revive" it by writing a fresh update on top of
+    // the purge's placeholder row, while every synced peer refuses to materialize that same event
+    // (sync/apply.ts's own `purged_at` guard) -- a real, found-via-property-test convergence split
+    // between the purging node and everyone else.
+    if (!row || row.scope_id !== scope.id || row.purged_at != null) {
       reject(db, ctx.clientId, scope.id, input.id, new CtxdError("NOT_FOUND", `Entry not found: ${input.id}`));
     }
     if (row.kind !== input.kind) {

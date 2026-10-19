@@ -63,5 +63,13 @@ export function rebuild(db: Database.Database): void {
 
     db.exec("INSERT INTO entries_fts(entries_fts) VALUES ('rebuild')");
     for (const scopeId of touchedScopes) syncSignalsForScope(db, scopeId);
+
+    // A full, HLC-ordered replay never hits sync/apply.ts's "missing-parent" case (every event's
+    // own prior rev always has a smaller hlc, so it has already replayed by the time this one
+    // does): whatever `materialized` said before this rebuild, every event is now reflected in
+    // materialized state. Left stale, a `materialized = 0` row surviving from before the rebuild
+    // would make a later live sync event for the same entry retry (and so double-apply) an event
+    // this rebuild already handled (sync/apply.ts's `retryPendingFor`).
+    db.exec("UPDATE events SET materialized = 1 WHERE materialized = 0");
   })();
 }

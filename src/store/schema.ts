@@ -16,8 +16,15 @@
  * `acl_cursors` table backs an HLC guard (found during `/simplify`) so a grant and a revoke of
  * the same pool/scope applied out of causal order converge on whichever is actually later,
  * instead of letting a stale grant silently un-revoke what a later revoke already took away.
+ * Bumped to 12 for M3 slice 7 (sync freshness and the N-node partition property suite, Spec
+ * 7.1-7.4): `events.materialized` marks a stored event that `src/sync/apply.ts`'s `decide`
+ * deferred as missing-parent (per-origin pull batching does not guarantee cross-origin causal
+ * delivery order), retried once a sibling event for the same entry materializes
+ * (`retryPendingFor`); `leases.earliest_claim_hlc` tracks a task's smallest claim_hlc across every
+ * epoch, so a late-arriving concurrent claim is always resolved against the task's true earliest
+ * claimant, not whichever claim happens to be current right now.
  */
-export const SCHEMA_VERSION = 11;
+export const SCHEMA_VERSION = 12;
 
 export const SCHEMA_SQL = `
 CREATE TABLE nodes (
@@ -83,6 +90,11 @@ CREATE TABLE events (
   payload      TEXT NOT NULL,
   prev         TEXT,                   -- JSON: prior values of the changed fields of this part (NULL on create)
   received_at  TEXT NOT NULL,
+  materialized INTEGER NOT NULL DEFAULT 1, -- 0: stored but deferred, sync/apply.ts's "missing-parent"
+                                            -- row (its own create, or an earlier rev, hasn't arrived
+                                            -- yet); retried once a sibling event for the same entry
+                                            -- materializes (its own real apply, every local write and
+                                            -- rebuild, always sets this to 1 up front)
   UNIQUE (origin_node, origin_seq),
   UNIQUE (client_id, request_id)
 );
@@ -327,6 +339,11 @@ CREATE TABLE leases (
   paths        TEXT,                 -- JSON array of normalized patterns; NULL = unknown, '[]' = no writes
   claim_event  TEXT NOT NULL,
   claim_hlc    TEXT NOT NULL,
+  earliest_claim_hlc TEXT NOT NULL, -- the smallest claim_hlc this task has EVER contended (7.4): a
+                                     -- late-arriving concurrent claim from a closed-and-reclaimed
+                                     -- epoch is still compared against this, not the current
+                                     -- (possibly much later) claim_hlc, so "earliest wins" holds
+                                     -- regardless of delivery order even across a release/reclaim
   session_ref  TEXT,
   base_head    TEXT,                 -- git HEAD when claimed, for the drift audit
   expires_at   TEXT NOT NULL,
