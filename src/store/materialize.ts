@@ -1,11 +1,14 @@
 import type Database from "better-sqlite3";
 import { revVersion } from "../core/ids.js";
-import { decodeHlc } from "../core/hlc.js";
+import { compareHlc, decodeHlc } from "../core/hlc.js";
+import { LWW_CONTENT_KINDS, type Kind } from "../core/kinds.js";
+import { loadClient } from "./snapshot.js";
 
 /**
  * Turns one already-appended event into its effect on `entries` and `relations` (SPEC v6
- * section 6, step 7). Shared by the live write path (store/write.ts) and `ctxd rebuild`
- * (store/rebuild.ts), so the two can never materialize an event differently.
+ * section 6, step 7; conflict policies, Spec v8 7.4). Shared by the live write path
+ * (store/write.ts), `ctxd rebuild` (store/rebuild.ts) and sync's puller (src/sync/apply.ts), so
+ * all three can never materialize an event differently.
  */
 
 export interface EventForMaterialize {
@@ -19,6 +22,128 @@ export interface EventForMaterialize {
   hlc: string;
   payload: Record<string, unknown>;
   prev: Record<string, unknown> | null;
+}
+
+/** A replicated event (Spec 7.3): its own stated parent revision(s), so this is checked for a genuinely concurrent arrival (Spec 7.4) rather than trusted as fast-forward. */
+export type ReplicatedEvent = EventForMaterialize & { parentRevs: string[] };
+
+/** The current head revision for a part that can conflict, or undefined for a part with none (relations/claim/meta never reach the conflict check). */
+function currentRevFor(db: Database.Database, entryId: string, part: "content" | "status"): string | undefined {
+  const column = part === "content" ? "content_rev" : "status_rev";
+  const row = db.prepare(`SELECT ${column} AS rev FROM entries WHERE entry_id = ?`).get(entryId) as { rev: string } | undefined;
+  return row?.rev;
+}
+
+/** The event that currently holds `rev` for this entry, whatever part it was recorded under (ranks share a rev value with their creating event: Spec v6 4, status_rev/content_rev/relations_rev all start equal to the create event's own rev). */
+function eventHoldingRev(db: Database.Database, entryId: string, rev: string): { event_id: string; client_id: string; hlc: string } | undefined {
+  return db.prepare("SELECT event_id, client_id, hlc FROM events WHERE entry_id = ? AND rev = ?").get(entryId, rev) as
+    | { event_id: string; client_id: string; hlc: string }
+    | undefined;
+}
+
+function isHumanClient(db: Database.Database, clientId: string): boolean {
+  return loadClient(db, clientId)?.vendor === "human";
+}
+
+/** `INSERT OR IGNORE`: the same conflict can be detected more than once via different relay paths (or, for `revert-conflict`, a revert retried after a crash), with no new information the second time. */
+export function recordSibling(db: Database.Database, entryId: string, part: string, rev: string, eventId: string, reason: string): void {
+  db.prepare("INSERT OR IGNORE INTO entry_siblings (entry_id, part, rev, event_id, reason) VALUES (?, ?, ?, ?, ?)").run(entryId, part, rev, eventId, reason);
+}
+
+/** The shared shape of both conflict policies: record the loser as a sibling, and if the incoming event won, run `applyWinner` to materialize it. */
+function resolveConflict(
+  db: Database.Database,
+  part: "content" | "status",
+  entryId: string,
+  reason: string,
+  incomingWins: boolean,
+  currentRev: string,
+  local: { event_id: string },
+  incoming: { eventId: string; rev: string },
+  applyWinner: () => void,
+): void {
+  if (incomingWins) {
+    recordSibling(db, entryId, part, currentRev, local.event_id, reason);
+    applyWinner();
+  } else {
+    recordSibling(db, entryId, part, incoming.rev, incoming.eventId, reason);
+  }
+}
+
+function mergeAndUpdateContent(
+  db: Database.Database,
+  entryId: string,
+  current: { title: string; summary: string; body: string; tags: string },
+  payload: Record<string, unknown>,
+  rev: string,
+  clientId: string,
+  hlc: string,
+  skipFts: boolean,
+): void {
+  const p = payload as { title?: string; body?: string; summary?: string; tags?: string[] };
+  const merged = {
+    title: p.title ?? current.title,
+    summary: p.summary ?? current.summary,
+    body: p.body ?? current.body,
+    tags: p.tags !== undefined ? JSON.stringify(p.tags) : current.tags,
+  };
+  db.prepare(
+    "UPDATE entries SET title = ?, summary = ?, body = ?, tags = ?, content_rev = ?, content_version = ?, updated_by = ?, updated_hlc = ? WHERE entry_id = ?",
+  ).run(merged.title, merged.summary, merged.body, merged.tags, rev, revVersion(rev), clientId, hlc, entryId);
+  if (!skipFts) syncFtsRow(db, entryId, current);
+}
+
+/** Spec 7.4: "Status (all kinds)": a human-client event wins; otherwise the later HLC wins. The loser is kept as a sibling. */
+function applyStatusConflict(db: Database.Database, e: ReplicatedEvent, currentStatusRev: string): void {
+  const local = eventHoldingRev(db, e.entryId, currentStatusRev);
+  if (!local) return; // defensive: the rev this entry claims to hold has no recorded event; nothing safe to compare against
+  const incomingHuman = isHumanClient(db, e.clientId);
+  const localHuman = isHumanClient(db, local.client_id);
+  const incomingWins = incomingHuman !== localHuman ? incomingHuman : compareHlc(e.hlc, local.hlc) > 0;
+
+  resolveConflict(db, "status", e.entryId, "lww", incomingWins, currentStatusRev, local, e, () => {
+    const p = e.payload as { status: string };
+    const prevStatus = (e.prev as { status?: string } | null)?.status ?? null;
+    db.prepare("UPDATE entries SET status = ?, status_before = ?, status_rev = ?, updated_hlc = ? WHERE entry_id = ?").run(
+      p.status,
+      prevStatus,
+      e.rev,
+      e.hlc,
+      e.entryId,
+    );
+  });
+}
+
+/**
+ * Spec 7.4: "Content of status, brief" is last-writer-wins (reason `lww`, surfaced in
+ * `ctxd review` as auto-resolved); every other mutable kind moves the entry to `conflicted`
+ * (reason `conflict`), with both revisions kept and the head at the higher HLC so reads still
+ * work. Clearing a `conflicted` status, once a human reconciles the content by hand, reuses the
+ * existing `ctxd review --approve` path (src/store/review.ts): that was already built for
+ * `proposed`/`conflicted` before sync existed, and does not need its own mechanism here.
+ */
+function applyContentConflict(db: Database.Database, e: ReplicatedEvent, currentContentRev: string, skipFts: boolean): void {
+  const entry = db.prepare("SELECT kind, title, summary, body, tags FROM entries WHERE entry_id = ?").get(e.entryId) as
+    | { kind: Kind; title: string; summary: string; body: string; tags: string }
+    | undefined;
+  const local = eventHoldingRev(db, e.entryId, currentContentRev);
+  if (!entry || !local) return;
+
+  const incomingWins = compareHlc(e.hlc, local.hlc) > 0;
+  const lww = LWW_CONTENT_KINDS.has(entry.kind);
+  const reason = lww ? "lww" : "conflict";
+
+  resolveConflict(db, "content", e.entryId, reason, incomingWins, currentContentRev, local, e, () => {
+    mergeAndUpdateContent(db, e.entryId, entry, e.payload, e.rev, e.clientId, e.hlc, skipFts);
+    // "Edit... also close[s] open flags with that action as the resolution" (SPEC 7.6.1) applies
+    // here exactly as it does to an ordinary content update: the winning side's content did just
+    // change, whether or not this particular change also moved status to 'conflicted' below.
+    closeOpenFlags(db, e.entryId, "edit");
+  });
+
+  if (!lww) {
+    db.prepare("UPDATE entries SET status = 'conflicted' WHERE entry_id = ? AND status NOT IN ('conflicted', 'deleted', 'archived', 'superseded')").run(e.entryId);
+  }
 }
 
 interface CreatePayload {
@@ -41,17 +166,54 @@ export interface ApplyEventOptions {
   skipFts?: boolean;
 }
 
-export function applyEvent(db: Database.Database, e: EventForMaterialize, { skipFts = false }: ApplyEventOptions = {}): void {
-  // Purge rewrites every OTHER stored event for the entry to {"purged": true} (SPEC 7.6.6 step
-  // 2); replaying one of those neutered events (e.g. a rebuild after a purge) must not try to
-  // materialize a create/update/etc with no real payload. The purge event's own payload is never
-  // rewritten, so this never short-circuits the purge handler below it.
-  // Fixed in SPEC-v7 (was an M1 gap): a rebuild after a purge used to leave the entry absent from
-  // `entries`, since the create event that would normally insert the row is one of the neutered
-  // ones. The purge handler below now UPSERTs using scope_id/kind/slug carried in its own event
-  // payload, so it reconstructs the stub row whether or not the create event ran first.
-  if ((e.payload as { purged?: boolean }).purged === true) return;
+/**
+ * Apply a trusted event: the caller already read the current head and is building the next
+ * revision from it (the live write path, store/write.ts; `ctxd review`'s resolve), so this is
+ * fast-forward by construction and never runs a conflict check. A caller that cannot make that
+ * guarantee (`ctxd rebuild`, sync's puller) calls `applyReplicatedEvent` instead: the choice of
+ * entry point, not an optional field on a shared type, is what decides whether a conflict check
+ * runs, so a future caller cannot silently skip it by forgetting to pass something.
+ */
+export function applyEvent(db: Database.Database, e: EventForMaterialize, opts: ApplyEventOptions = {}): void {
+  if (isPurgedNoOp(e)) return;
+  applyEventCore(db, e, opts.skipFts ?? false);
+}
 
+/** Apply a possibly-concurrent event (Spec 7.3, 7.4): checks `parentRevs` against the current head for content/status parts and resolves a genuine conflict before falling through to the same core every other event goes through. */
+export function applyReplicatedEvent(db: Database.Database, e: ReplicatedEvent, opts: ApplyEventOptions = {}): void {
+  if (isPurgedNoOp(e)) return;
+  const skipFts = opts.skipFts ?? false;
+
+  if (e.part === "content" && e.op === "update") {
+    const current = currentRevFor(db, e.entryId, "content");
+    if (current !== undefined && !(e.parentRevs.length === 1 && e.parentRevs[0] === current)) {
+      applyContentConflict(db, e, current, skipFts);
+      return;
+    }
+  } else if (e.part === "status" && e.op === "status") {
+    const current = currentRevFor(db, e.entryId, "status");
+    if (current !== undefined && !(e.parentRevs.length === 1 && e.parentRevs[0] === current)) {
+      applyStatusConflict(db, e, current);
+      return;
+    }
+  }
+
+  applyEventCore(db, e, skipFts);
+}
+
+// Purge rewrites every OTHER stored event for the entry to {"purged": true} (SPEC 7.6.6 step 2);
+// replaying one of those neutered events (e.g. a rebuild after a purge) must not try to
+// materialize a create/update/etc with no real payload. The purge event's own payload is never
+// rewritten, so this never short-circuits the purge handler in applyEventCore below.
+// Fixed in SPEC-v7 (was an M1 gap): a rebuild after a purge used to leave the entry absent from
+// `entries`, since the create event that would normally insert the row is one of the neutered
+// ones. The purge handler now UPSERTs using scope_id/kind/slug carried in its own event payload,
+// so it reconstructs the stub row whether or not the create event ran first.
+function isPurgedNoOp(e: EventForMaterialize): boolean {
+  return (e.payload as { purged?: boolean }).purged === true;
+}
+
+function applyEventCore(db: Database.Database, e: EventForMaterialize, skipFts: boolean): void {
   if (e.part === "content" && e.op === "create") {
     const p = e.payload as unknown as CreatePayload;
     db.prepare(
@@ -92,16 +254,7 @@ export function applyEvent(db: Database.Database, e: EventForMaterialize, { skip
       | { title: string; summary: string; body: string; tags: string }
       | undefined;
     if (!current) throw new Error(`materialize: update for missing entry ${e.entryId}`);
-    const merged = {
-      title: (e.payload.title as string | undefined) ?? current.title,
-      summary: (e.payload.summary as string | undefined) ?? current.summary,
-      body: (e.payload.body as string | undefined) ?? current.body,
-      tags: e.payload.tags !== undefined ? JSON.stringify(e.payload.tags) : current.tags,
-    };
-    db.prepare(
-      "UPDATE entries SET title = ?, summary = ?, body = ?, tags = ?, content_rev = ?, content_version = ?, updated_by = ?, updated_hlc = ? WHERE entry_id = ?",
-    ).run(merged.title, merged.summary, merged.body, merged.tags, e.rev, revVersion(e.rev), e.clientId, e.hlc, e.entryId);
-    if (!skipFts) syncFtsRow(db, e.entryId, current);
+    mergeAndUpdateContent(db, e.entryId, current, e.payload, e.rev, e.clientId, e.hlc, skipFts);
     // "Edit... also close[s] open flags with that action as the resolution" (SPEC 7.6.1).
     closeOpenFlags(db, e.entryId, "edit");
     return;

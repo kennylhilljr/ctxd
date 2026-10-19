@@ -51,6 +51,9 @@ export const DEFAULT_AGENT_STATUS: Record<Kind, Status> = {
 /** Kinds an agent can never get auto-accepted, whatever the review rules say (SPEC v6 10.4). */
 export const ALWAYS_REVIEWED_KINDS: ReadonlySet<Kind> = new Set(["preference", "skill"]);
 
+/** Spec v8 7.4: "Content of status, brief" is last-writer-wins on a concurrent sync conflict; every other mutable kind moves the entry to `conflicted` instead. */
+export const LWW_CONTENT_KINDS: ReadonlySet<Kind> = new Set(["status", "brief"]);
+
 /** Journal significance (SPEC v6 4.3). */
 export const SIGNIFICANCES = ["routine", "milestone", "breakthrough", "blocker", "incident", "decision"] as const;
 export type Significance = (typeof SIGNIFICANCES)[number];

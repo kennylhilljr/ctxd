@@ -6,7 +6,7 @@ import { CtxdError } from "../core/errors.js";
 import { parseRef } from "../model/refs.js";
 import { timeWindow } from "../journal/time.js";
 import { canonicalJson } from "./idempotency.js";
-import { applyEvent } from "./materialize.js";
+import { applyEvent, recordSibling } from "./materialize.js";
 import { loadClient, loadScopeByName } from "./snapshot.js";
 import type { WriteContext } from "./write.js";
 
@@ -523,12 +523,7 @@ export function revertBatch(ctx: WriteContext, batchId: string, entryRef?: strin
         for (const part of partsTouched) {
           const earliest = windowEvents.find((e) => e.part === part);
           if (earliest) {
-            db.prepare("INSERT OR IGNORE INTO entry_siblings (entry_id, part, rev, event_id, reason) VALUES (?, ?, ?, ?, 'revert-conflict')").run(
-              member.entry_id,
-              part,
-              earliest.rev,
-              earliest.event_id,
-            );
+            recordSibling(db, member.entry_id, part, earliest.rev, earliest.event_id, "revert-conflict");
           }
         }
         if (entry.status !== "conflicted") {

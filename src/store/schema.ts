@@ -4,8 +4,10 @@
  * Bumped to 8 for M3 slice 2 (replication, Spec 7.1): the new `peers` table replaces the unused
  * `nodes.peer_token_hash` placeholder, since peers are never rows in `nodes` (that table's many
  * `SELECT node_id FROM nodes LIMIT 1` call sites assume exactly one row: the local node).
+ * Bumped to 9 for M3 slice 3 (conflict policies, Spec 7.4): a new `events(entry_id, rev)` index
+ * backs the conflict lookup `eventHoldingRev` (src/store/materialize.ts) added that slice.
  */
-export const SCHEMA_VERSION = 8;
+export const SCHEMA_VERSION = 9;
 
 export const SCHEMA_SQL = `
 CREATE TABLE nodes (
@@ -74,6 +76,7 @@ CREATE TABLE events (
   UNIQUE (client_id, request_id)
 );
 CREATE INDEX events_entry ON events(entry_id, hlc);
+CREATE INDEX events_entry_rev ON events(entry_id, rev);  -- the conflict-policy lookup, eventHoldingRev (Spec 7.4)
 
 CREATE TABLE entries (
   entry_id     TEXT PRIMARY KEY,

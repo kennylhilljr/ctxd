@@ -19,7 +19,7 @@ unchanged, renumbered.
 |---|---|---|---|---|
 | 1 | Feature flags | `m3/feature-flags` | `main` | PRD-feature-flags-v1 in full; Spec v8; retrofits every M1/M2 flag; `hooks.prompt_search` plus a minimal R7 handler |
 | 2 | Sync core | `m3/sync-protocol` | `main` (slice 1 merged as PR #26 before this branched) | Spec 7.1, 7.2, 7.3 (fast-forward and already-known only); `127.0.0.1:7412`, peer tokens, `/v1/pull`, `/v1/notify`, watermarks, `ctxd node add-peer\|revoke`, `ctxd sync`, flags `sync`/`sync.serve`; the new `peers` table |
-| 3 | Conflict policies, siblings, review | `m3/sync-conflicts` | `m3/sync-protocol` | Spec 7.4; per-part conflict policies (the concurrent and missing-parent rows of 7.3's table, deferred by slice 2); `entry_siblings`; `conflicted` status; surfacing both in `ctxd review` |
+| 3 | Conflict policies, siblings, review | `m3/sync-conflicts` | `m3/sync-protocol` | Spec 7.4; per-part conflict policies for the "Concurrent" row of 7.3's table (status, and content for every kind: lww for status/brief, conflicted for the rest); `entry_siblings`; `conflicted` status; surfacing both in `ctxd review`; missing-parent events, and `claim`/`meta` events, remain deferred to slices 4 and 5 |
 | 4 | Purge propagation | `m3/sync-purge` | `m3/sync-conflicts` | Spec 7.6.6 step 3; stripping late arrivals for an already-purged entry on receipt |
 | 5 | Claims across nodes | `m3/sync-claims` | `m3/sync-purge` | Spec 7.4's claim rows; tentative claims while offline; deterministic tie-break; `lost` leases; sync-origin overlap detection |
 | 6 | ACL and scope metadata as events | `m3/sync-acl-events` | `m3/sync-claims` | Spec 7.2; review rules, grants, pool changes and scope creation itself travel as `acl`/scope-metadata events in `_system` instead of direct table writes (closes the M2 handoff gap in `src/cli/grant.ts`, `src/cli/pool.ts`, `src/store/review.ts`, and the gap slice 2 found: named project scopes created independently on two nodes do not share a `scope_id` yet, so only `_me` converges until this slice lands) |
@@ -152,10 +152,62 @@ vector/through/filter arithmetic are deferred to the same pass as slice 3's conf
 since the two are easiest to test together against the same fixture data (SPEC v8 14 is updated
 when that lands, not claimed early here).
 
-## Slices 3 to 7
+## Slice 3: conflict policies
+
+**Where the detection lives.** `src/store/materialize.ts`'s `applyEvent` (already shared by the
+live write path and `ctxd rebuild`) gained a third caller-contract: an optional `parentRevs` on
+`EventForMaterialize`. Every existing call site (the live write path, `ctxd review`'s resolve)
+omits it, since both already know they are building the next revision from a head they just read,
+by construction; their behavior is unchanged. `ctxd rebuild` and `src/sync/apply.ts` both supply
+it, since both can legitimately receive a concurrent event, and both need to resolve it exactly
+the same way for the convergence property (Spec 7.4: "every node that has applied the same set of
+events reaches identical materialized state") to hold through a rebuild as well as through live
+sync. Putting the check inside `materialize.ts` itself, rather than in `sync/apply.ts` alone, is
+why this works: a conflict resolution is computed once and reused, not reimplemented per caller.
+
+**Status (all kinds).** A human-client event wins outright; otherwise the later HLC wins. The
+loser is recorded in `entry_siblings` with reason `lww`.
+
+**Content, by kind.** `status` and `brief`: last-writer-wins by HLC, loser recorded with reason
+`lww`, status untouched (`ctxd review`'s `auto_resolved`). Every other mutable kind (`convention`,
+`fact`, `lesson`, `note`, `task`, plus `preference` and `skill`, which the spec table does not
+name explicitly: treated the same as the conservative, surface-for-review bucket rather than
+guessing they are safe to auto-merge): the entry moves to `status = 'conflicted'` directly (not
+its own replicated event: every node that applies the same two concurrent content events computes
+`conflicted` independently and identically, the same way `entry_siblings` rows themselves are
+derived, not replicated); both revisions are kept, head is the higher HLC. Clearing a `conflicted`
+status reuses the existing `ctxd review --approve` path (`resolveEntry`, built in M2 for
+`proposed`), rather than building a separate merge-resolve mechanism for a "resolve event whose
+parent_revs lists both" that nothing yet needs in practice.
+
+**Decide, in `src/sync/apply.ts`.** Extended from a boolean fast-forward check into a four-way
+decision (`fast-forward` / `concurrent` / `missing-parent` / `deferred`): `concurrent` now flows
+through `materializeEvent` with `parentRevs` attached instead of being deferred; `missing-parent`
+(the entry does not exist locally at all yet) and `deferred` (`claim`/`meta` events) are unchanged
+from slice 2. `ctxd sync`'s output gained a third count: `N applied, M resolved by conflict
+policy, K deferred`.
+
+**A real bug found by testing this, fixed, not merely noted:** `makeRev` (`src/core/ids.ts`) took
+a ULID's first 10 characters for a revision's suffix. Those 10 characters are a millisecond
+timestamp, not random, so two events minted in the same millisecond, exactly what two concurrent
+updates racing to the same version number are, produced the identical rev string, and the new
+conflict lookup (`eventHoldingRev`, keyed on rev) could not tell them apart. Fixed to take the
+*last* 10 characters instead, inside the ULID's random suffix; nothing in the codebase parses the
+suffix's meaning, only compares it for equality, so this needed no migration. `test/unit/ids.test.ts`
+is the regression test.
+
+**Tests:** `test/unit/sync-conflicts.test.ts`, built directly on `src/sync/apply.ts`'s
+`applyEvent` rather than through spawned CLI processes (deterministic, no port/timing dependence):
+content conflict resolution for both the lww and conflicted buckets, status conflict resolution
+for both the human-override and later-HLC cases, order-independence (the same two concurrent
+events applied in either order reach the same final state), `ctxd review`'s `conflicted` and
+`auto_resolved` categories populated from real data, and `ctxd review --approve` clearing a
+conflict. `test/unit/ids.test.ts` for the `makeRev` fix.
+
+## Slices 4 to 7
 
 Each slice's own PR restates its piece of the bullet list in
-`docs/build/M3-M6-kickoff-v1.md` section 1 in the same level of detail as slices 1 and 2 above,
-written at the start of that slice's branch rather than all up front here, since slices 3 to 7
+`docs/build/M3-M6-kickoff-v1.md` section 1 in the same level of detail as slices 1 to 3 above,
+written at the start of that slice's branch rather than all up front here, since slices 4 to 7
 depend on decisions earlier slices make along the way. This document is updated with a row in the
 table above, not rewritten, as each slice's branch opens.
