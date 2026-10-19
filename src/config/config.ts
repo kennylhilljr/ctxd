@@ -67,6 +67,14 @@ export const configSchema = z.object({
         .default("sunday"),
     })
     .default({ digest_node: "", digest_weekday: "sunday" }),
+  /** Native skill sync (SPEC v8 12.2): writes approved skills into a client's personal skills folder. */
+  skills: z
+    .object({
+      sync_clients: z.array(z.string()).default([]),
+      include_scopes: z.array(z.string()).default(["_me"]),
+      keep_allowed_tools: z.boolean().default(false),
+    })
+    .default({ sync_clients: [], include_scopes: ["_me"], keep_allowed_tools: false }),
   /** Feature flags (PRD-feature-flags-v1 section 2): per machine, never synced. */
   features: z.record(z.string(), z.boolean()).default({}),
 });
