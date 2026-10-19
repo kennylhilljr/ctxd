@@ -1,5 +1,6 @@
 import type Database from "better-sqlite3";
 import type { NodeRole, Replication } from "../core/kinds.js";
+import { nowIso } from "../core/time.js";
 import { mayReplicate } from "../security/policy.js";
 import { applyEvent, type WireEvent } from "./apply.js";
 
@@ -100,6 +101,7 @@ export function servePull(db: Database.Database, requesterRole: NodeRole, req: P
 export interface PullOutcome {
   pulled: number;
   conflicts: number;
+  purged: number;
   deferred: number;
   through: Record<string, number>;
 }
@@ -118,6 +120,7 @@ export async function pullFromPeer(
   const vector = currentVector(db, peer.name);
   let pulled = 0;
   let conflicts = 0;
+  let purged = 0;
   let deferred = 0;
   let more = true;
   let lastThrough: Record<string, number> = {};
@@ -135,6 +138,7 @@ export async function pullFromPeer(
       const result = applyEvent(db, event);
       if (result.outcome === "fast-forward") pulled++;
       else if (result.outcome === "conflict-resolved") conflicts++;
+      else if (result.outcome === "purge-stripped") purged++;
       else if (result.outcome === "deferred") deferred++;
     }
     storeThrough(db, peer.name, body.through);
@@ -142,7 +146,11 @@ export async function pullFromPeer(
     lastThrough = body.through;
     more = body.more;
   }
-  return { pulled, conflicts, deferred, through: lastThrough };
+  // Spec 7.4's tentative-claim check (src/store/claim.ts) reads this: a completed pull counts as
+  // "successful" whether or not it carried any new events, so an idle-but-reachable peer still
+  // keeps claims on this node out of tentative state.
+  db.prepare("UPDATE peers SET last_synced_at = ? WHERE peer_id = ?").run(nowIso(), peer.peerId);
+  return { pulled, conflicts, purged, deferred, through: lastThrough };
 }
 
 function currentVector(db: Database.Database, peerName: string): Record<string, number> {

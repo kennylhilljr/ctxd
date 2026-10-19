@@ -21,8 +21,11 @@ import type { WriteContext } from "./write.js";
  * rebuild after a purge used to leave the entry absent instead of present with placeholder
  * content).
  *
- * M1 scope notes still open, flagged for a later milestone:
- * - "Strip late arrivals" (step 3) is a sync-time concern; there's no replication in M1.
+ * M1 scope notes, since resolved:
+ * - "Strip late arrivals" (step 3) was a sync-time concern with no replication yet; done in
+ *   src/sync/apply.ts's `decide`, M3 slice 4.
+ *
+ * Still open, flagged for a later milestone:
  * - "--rewrite-backups" (step 5) needs the M4 encrypted backup system.
  */
 

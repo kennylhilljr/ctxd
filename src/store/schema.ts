@@ -6,8 +6,13 @@
  * `SELECT node_id FROM nodes LIMIT 1` call sites assume exactly one row: the local node).
  * Bumped to 9 for M3 slice 3 (conflict policies, Spec 7.4): a new `events(entry_id, rev)` index
  * backs the conflict lookup `eventHoldingRev` (src/store/materialize.ts) added that slice.
+ * Bumped to 10 for M3 slice 5 (claims across nodes, Spec 7.4, 7.5): `entry_siblings.part`'s CHECK
+ * now allows `'claim'`, so a claim event that loses a concurrent-claim race can be recorded the
+ * same way a losing content/status event already is; `peers.last_synced_at` records when a pull
+ * from that peer last completed successfully, backing the "no successful sync for 10 minutes"
+ * tentative-claim check (src/store/claim.ts).
  */
-export const SCHEMA_VERSION = 9;
+export const SCHEMA_VERSION = 10;
 
 export const SCHEMA_SQL = `
 CREATE TABLE nodes (
@@ -26,7 +31,8 @@ CREATE TABLE peers (                   -- a machine we sync with (Spec 7.1); nev
   incoming_token_hash TEXT NOT NULL,     -- hash of the token this peer must present to pull from us
   outgoing_token      TEXT,              -- the token we present when pulling from this peer; NULL until supplied
   revoked_at          TEXT,
-  created_at          TEXT NOT NULL
+  created_at          TEXT NOT NULL,
+  last_synced_at      TEXT                -- set when a pull from this peer last completed successfully (Spec 7.4's tentative-claim check)
 );
 
 CREATE TABLE clients (
@@ -117,7 +123,7 @@ CREATE INDEX entries_journal ON entries(scope_id, created_hlc) WHERE kind = 'jou
 
 CREATE TABLE entry_siblings (
   entry_id     TEXT NOT NULL,
-  part         TEXT NOT NULL CHECK (part IN ('content','status','relations')),
+  part         TEXT NOT NULL CHECK (part IN ('content','status','relations','claim')),
   rev          TEXT NOT NULL,
   event_id     TEXT NOT NULL,
   reason       TEXT NOT NULL,
