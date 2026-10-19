@@ -40,6 +40,7 @@ import { runBackupCommand, runRestoreCommand } from "./backup.js";
 import { run as runDoctorCommand } from "./doctor.js";
 import { runStatus, runStatusline } from "./status.js";
 import { run as runWorkerCommand } from "./worker.js";
+import { run as runTidyCommand } from "./tidy.js";
 
 /** Each command's parsed-args entry point, added as its milestone lands. */
 const COMMAND_RUNNERS: Record<string, (argv: string[]) => number | Promise<number>> = {
@@ -82,6 +83,7 @@ const COMMAND_RUNNERS: Record<string, (argv: string[]) => number | Promise<numbe
   status: runStatus,
   statusline: runStatusline,
   worker: runWorkerCommand,
+  tidy: runTidyCommand,
 };
 
 const COMMANDS: Record<string, { milestone: string; summary: string }> = {

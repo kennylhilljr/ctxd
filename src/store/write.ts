@@ -39,6 +39,21 @@ export type WriteResult =
 
 type Input = z.infer<typeof contextWriteInput>;
 
+/** Per-kind review-by defaults (Knowledge model 3.1, SPEC 7.6.7): "never, unless set" for every other kind. */
+const REVIEW_AFTER_DAYS: Readonly<Partial<Record<Kind, number>>> = {
+  status: 14,
+  handoff: 30,
+  fact: 180,
+  lesson: 180,
+  preference: 365,
+};
+
+/** `review_after` is set at creation from the table above, as an ISO date; SPEC 7.6.7. */
+function defaultReviewAfter(kind: Kind, createdAtMs: number): string | null {
+  const days = REVIEW_AFTER_DAYS[kind];
+  return days === undefined ? null : new Date(createdAtMs + days * 86_400_000).toISOString().slice(0, 10);
+}
+
 function nextOriginSeq(db: Database.Database, nodeId: string): number {
   const row = db.prepare("SELECT COALESCE(MAX(origin_seq), 0) + 1 AS next FROM events WHERE origin_node = ?").get(nodeId) as {
     next: number;
@@ -318,6 +333,7 @@ function performDirectWrite(
         confirmed_by_user: input.confirmed_by_user ?? false,
         supersedes: supersedesTarget ? formatRef(supersedesTarget.scopeName, supersedesTarget.id) : null,
         skill_name: skillName ?? null,
+        review_after: defaultReviewAfter(input.kind, Date.now()),
       };
       appendPrimaryEvent(db, ctx, input, hash, allocSeq, { scopeId: scope.id, entryId, op: "create", part: "content", rev: contentRev, parentRevs: [], payload, eventId, hlc });
       applyEvent(db, { eventId, scopeId: scope.id, entryId, op: "create", part: "content", rev: contentRev, clientId: ctx.clientId, hlc, payload, prev: null });
