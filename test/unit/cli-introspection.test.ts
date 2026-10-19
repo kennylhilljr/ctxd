@@ -118,6 +118,29 @@ describe("ctxd show (CLI)", () => {
     if ("held" in created) throw new Error("unexpected hold");
     expect(() => printShow(f.db, created.ref, "2000-01-01")).toThrow(/did not exist/);
   });
+
+  it("--why prints the importance score and its four parts (SPEC 11.3)", () => {
+    const f = setup();
+    const created = writeEntry(writeCtx(f, f.humanId), { scope: "notes", kind: "note", title: "N", body: "v1", request_id: newId() } as never);
+    if ("held" in created) throw new Error("unexpected hold");
+
+    printShow(f.db, created.ref, undefined, true);
+    const out = lines.join("\n");
+    expect(out).toContain("importance");
+    expect(out).toContain("weight");
+    expect(out).toContain("links");
+    expect(out).toContain("recency");
+    expect(out).toContain("use");
+  });
+
+  it("omits --why's line when --why is not given", () => {
+    const f = setup();
+    const created = writeEntry(writeCtx(f, f.humanId), { scope: "notes", kind: "note", title: "N", body: "v1", request_id: newId() } as never);
+    if ("held" in created) throw new Error("unexpected hold");
+
+    printShow(f.db, created.ref);
+    expect(lines.join("\n")).not.toContain("importance");
+  });
 });
 
 describe("ctxd stats (CLI)", () => {
