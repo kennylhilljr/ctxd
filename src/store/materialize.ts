@@ -609,7 +609,121 @@ function applyEventCore(db: Database.Database, e: EventForMaterialize, skipFts: 
     return;
   }
 
+  if (e.part === "meta" && e.op === "acl") {
+    applyAclEvent(db, e);
+    return;
+  }
+
   throw new Error(`materialize: no handler yet for op=${e.op} part=${e.part} (lands with its own M1 slice)`);
+}
+
+/**
+ * Spec v8 4: "Access metadata... changes only through acl events... in the reserved _system
+ * scope." `e.entryId` is the deterministic id of the thing being changed (a scope or pool's own
+ * id for most actions, a client's id for `client_grant`), not a knowledge entry; these events
+ * never touch `entries`. Scope and pool creation are plain, order-independent upserts: their ids
+ * are already collision-free across nodes (`core/ids.ts`'s `deterministicId`), so whichever
+ * node's create a given node sees first just wins, nothing to guard. Every other action mutates
+ * an existing row (a grant, a membership, a review policy), where two nodes making genuinely
+ * *conflicting* changes while partitioned (one grants a level the other revokes, for the same
+ * pool and scope) need the same HLC-guarded-upsert treatment purge and claims already get,
+ * applied here via `aclGuardPasses`/`acl_cursors` (found missing during `/simplify`, M3 slice 6).
+ */
+type AclPayload =
+  | { action: "scope_create"; name: string; kind: string; replication: string; vendor_policy: string }
+  | { action: "scope_review_policy_set"; review_policy: unknown[] }
+  | { action: "pool_create"; name: string; description: string }
+  | { action: "pool_grant"; scope_id: string; level: string }
+  | { action: "pool_revoke"; scope_id: string }
+  | { action: "pool_add_member"; principal: string }
+  | { action: "pool_remove_member"; principal: string }
+  | { action: "client_grant"; scope_id: string; level: string; expires_at: string; granted_by: string };
+
+/**
+ * HLC guard for a mutable acl target (Spec v8 4, found during `/simplify`): `decide` fast-forwards
+ * every acl event unconditionally (Spec 7.3's generic apply table has no notion of "the pool_grants
+ * row for this pool+scope"), so without this, a grant and a revoke of the same target applied out
+ * of causal order would converge on whichever one a given node happens to apply last, not on
+ * whichever is actually later -- silently un-revoking access a later revoke already took away.
+ * `target` names the specific row being touched (never just the coarser pool/client id `e.entryId`
+ * carries, which is shared by every grant and every membership change for that pool), so unrelated
+ * writes never spuriously contend. Returns false (skip) when a prior acl event already touched
+ * this exact target with an equal-or-later HLC.
+ */
+function aclGuardPasses(db: Database.Database, target: string, hlc: string): boolean {
+  const row = db.prepare("SELECT updated_hlc FROM acl_cursors WHERE target = ?").get(target) as { updated_hlc: string } | undefined;
+  // Strictly earlier loses; a tie accepts (found during /code-review). An encoded HLC tie can
+  // only happen between two events from the *same* origin node (the node id is part of the
+  // string, so two different nodes never produce an identical one) -- either a genuine replay of
+  // the same event (idempotent either way: every action here is itself an idempotent upsert or
+  // delete) or two rapid, separate CLI invocations on this node whose HlcClock each started fresh
+  // at the same millisecond. In both cases this node's own transaction order is the real causal
+  // order regardless of what the tied clock values say, so rejecting a tie would silently drop a
+  // second, distinct local action instead of applying it.
+  if (row && compareHlc(hlc, row.updated_hlc) < 0) return false;
+  db.prepare("INSERT INTO acl_cursors (target, updated_hlc) VALUES (?, ?) ON CONFLICT (target) DO UPDATE SET updated_hlc = excluded.updated_hlc").run(
+    target,
+    hlc,
+  );
+  return true;
+}
+
+function applyAclEvent(db: Database.Database, e: EventForMaterialize): void {
+  const p = e.payload as unknown as AclPayload;
+  const createdAt = new Date(decodeHlc(e.hlc).physical).toISOString();
+  switch (p.action) {
+    case "scope_create":
+      // Deterministic, name-derived scope_id (core/ids.ts) means two nodes creating the same
+      // name while partitioned already agree on the id, so there is nothing to guard about
+      // *which* create wins; the declared fields (replication, vendor_policy) still need one,
+      // found during /code-review: two nodes creating "the same" scope with different flags
+      // would otherwise each keep its own values forever (the first local apply always wins
+      // locally, via ON CONFLICT DO NOTHING, before the other side's event ever arrives).
+      if (!aclGuardPasses(db, `scope:${e.entryId}`, e.hlc)) return;
+      db.prepare(
+        `INSERT INTO scopes (scope_id, name, kind, replication, vendor_policy, created_at) VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT (scope_id) DO UPDATE SET name = excluded.name, kind = excluded.kind, replication = excluded.replication, vendor_policy = excluded.vendor_policy`,
+      ).run(e.entryId, p.name, p.kind, p.replication, p.vendor_policy, createdAt);
+      return;
+    case "scope_review_policy_set":
+      if (!aclGuardPasses(db, `scope_review_policy:${e.entryId}`, e.hlc)) return;
+      db.prepare("UPDATE scopes SET review_policy = ? WHERE scope_id = ?").run(JSON.stringify(p.review_policy), e.entryId);
+      return;
+    case "pool_create":
+      if (!aclGuardPasses(db, `pool:${e.entryId}`, e.hlc)) return;
+      db.prepare(
+        `INSERT INTO pools (pool_id, name, description, created_at) VALUES (?, ?, ?, ?)
+         ON CONFLICT (pool_id) DO UPDATE SET name = excluded.name, description = excluded.description`,
+      ).run(e.entryId, p.name, p.description, createdAt);
+      return;
+    case "pool_grant":
+      if (!aclGuardPasses(db, `pool_grant:${e.entryId}:${p.scope_id}`, e.hlc)) return;
+      db.prepare(
+        "INSERT INTO pool_grants (pool_id, scope_id, level) VALUES (?, ?, ?) ON CONFLICT (pool_id, scope_id) DO UPDATE SET level = excluded.level",
+      ).run(e.entryId, p.scope_id, p.level);
+      return;
+    case "pool_revoke":
+      if (!aclGuardPasses(db, `pool_grant:${e.entryId}:${p.scope_id}`, e.hlc)) return;
+      db.prepare("DELETE FROM pool_grants WHERE pool_id = ? AND scope_id = ?").run(e.entryId, p.scope_id);
+      return;
+    case "pool_add_member":
+      if (!aclGuardPasses(db, `pool_member:${e.entryId}:${p.principal}`, e.hlc)) return;
+      db.prepare("INSERT OR IGNORE INTO pool_members (pool_id, principal) VALUES (?, ?)").run(e.entryId, p.principal);
+      return;
+    case "pool_remove_member":
+      if (!aclGuardPasses(db, `pool_member:${e.entryId}:${p.principal}`, e.hlc)) return;
+      db.prepare("DELETE FROM pool_members WHERE pool_id = ? AND principal = ?").run(e.entryId, p.principal);
+      return;
+    case "client_grant":
+      if (!aclGuardPasses(db, `client_grant:${e.entryId}:${p.scope_id}`, e.hlc)) return;
+      db.prepare(
+        `INSERT INTO client_grants (client_id, scope_id, level, expires_at, granted_by) VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT (client_id, scope_id) DO UPDATE SET level = excluded.level, expires_at = excluded.expires_at, granted_by = excluded.granted_by`,
+      ).run(e.entryId, p.scope_id, p.level, p.expires_at, p.granted_by);
+      return;
+    default:
+      throw new Error(`materialize: unknown acl action ${JSON.stringify((e.payload as { action?: unknown }).action)}`);
+  }
 }
 
 /** Close every open flag on an entry with the given resolution (SPEC v6 section 7.6.1). */

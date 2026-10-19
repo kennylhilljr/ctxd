@@ -11,8 +11,13 @@
  * same way a losing content/status event already is; `peers.last_synced_at` records when a pull
  * from that peer last completed successfully, backing the "no successful sync for 10 minutes"
  * tentative-claim check (src/store/claim.ts).
+ * Bumped to 11 for M3 slice 6 (ACL and scope metadata as events, Spec v8 4): `scopes.kind`'s
+ * CHECK now allows `'system'`, for the reserved `_system` scope `acl` events travel in; the new
+ * `acl_cursors` table backs an HLC guard (found during `/simplify`) so a grant and a revoke of
+ * the same pool/scope applied out of causal order converge on whichever is actually later,
+ * instead of letting a stale grant silently un-revoke what a later revoke already took away.
  */
-export const SCHEMA_VERSION = 10;
+export const SCHEMA_VERSION = 11;
 
 export const SCHEMA_SQL = `
 CREATE TABLE nodes (
@@ -49,7 +54,7 @@ CREATE TABLE clients (
 CREATE TABLE scopes (
   scope_id      TEXT PRIMARY KEY,
   name          TEXT NOT NULL UNIQUE,
-  kind          TEXT NOT NULL DEFAULT 'project' CHECK (kind IN ('project','me','profile','hold')),
+  kind          TEXT NOT NULL DEFAULT 'project' CHECK (kind IN ('project','me','profile','hold','system')),
   owner         TEXT,                  -- pool_id for kind 'profile'; client_id for kind 'hold'
   description   TEXT NOT NULL DEFAULT '',
   replication   TEXT NOT NULL DEFAULT 'all' CHECK (replication IN ('all','home','local')),
@@ -197,6 +202,17 @@ CREATE TABLE client_grants (           -- temporary grants
   expires_at   TEXT NOT NULL,
   granted_by   TEXT NOT NULL,          -- always the human client
   PRIMARY KEY (client_id, scope_id)
+);
+
+-- HLC guard for acl events (Spec v8 4, M3 slice 6): one row per mutable access-metadata target
+-- (a pool+scope grant, a pool+principal membership, a client+scope grant, a scope's review
+-- policy), so a grant and a revoke of the same target applied out of causal order converge on
+-- whichever carries the later HLC, not on arrival order (src/store/materialize.ts's
+-- applyAclEvent). target is a free-form composite key, not a foreign key to any one table,
+-- since it names whichever table's row the acl action actually touches.
+CREATE TABLE acl_cursors (
+  target       TEXT PRIMARY KEY,
+  updated_hlc  TEXT NOT NULL
 );
 
 CREATE TABLE access_requests (

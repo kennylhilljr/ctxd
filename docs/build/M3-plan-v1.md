@@ -22,7 +22,7 @@ unchanged, renumbered.
 | 3 | Conflict policies, siblings, review | `m3/sync-conflicts` | `m3/sync-protocol` | Spec 7.4; per-part conflict policies for the "Concurrent" row of 7.3's table (status, and content for every kind: lww for status/brief, conflicted for the rest); `entry_siblings`; `conflicted` status; surfacing both in `ctxd review`; missing-parent events, and `claim`/`meta` events, remain deferred to slices 4 and 5 |
 | 4 | Purge propagation | `m3/sync-purge` | `m3/sync-conflicts` | Spec 7.6.6; purge (`meta`/`purge`) events now fast-forward unconditionally when received via sync, closing the gap that `decide` previously deferred every `meta` event; step 3's strip-on-receipt for any event (of any op) arriving for an already-purged entry |
 | 5 | Claims across nodes | `m3/sync-claims` | `m3/sync-purge` | Spec 7.4's claim rows; tentative claims while offline; deterministic earliest-claim_hlc tie-break (loser recorded as a lost `entry_siblings` row, not a `leases.state`); local- and sync-origin overlap detection into `claim_overlaps` |
-| 6 | ACL and scope metadata as events | `m3/sync-acl-events` | `m3/sync-claims` | Spec 7.2; review rules, grants, pool changes and scope creation itself travel as `acl`/scope-metadata events in `_system` instead of direct table writes (closes the M2 handoff gap in `src/cli/grant.ts`, `src/cli/pool.ts`, `src/store/review.ts`, and the gap slice 2 found: named project scopes created independently on two nodes do not share a `scope_id` yet, so only `_me` converges until this slice lands) |
+| 6 | ACL and scope metadata as events | `m3/sync-acl-events` | `m3/sync-claims` | Spec v8 4; review rules, grants, pool changes and scope/pool creation itself travel as `acl` events in the reserved `_system` scope instead of direct table writes (closes the M2 handoff gap in `src/cli/grant.ts`, `src/cli/pool.ts`, `src/store/review.ts`); closes the gap slice 2 found (named project scopes created independently on two nodes did not share a `scope_id`) by deriving scope and pool ids from their names (`core/ids.ts`'s `deterministicId`) instead of needing event-order conflict resolution for identity at all |
 | 7 | Freshness and property tests | `m3/sync-freshness` | `m3/sync-acl-events` | Spec 10.2; sync freshness in brief headers, the stale-sync notice; the N-node partition property suite |
 
 Slice 1 is PR #26, merged. Slice 2 is this PR. Slices 3 to 7 follow in order; each is the stated
@@ -324,10 +324,113 @@ dead branch checking for it.
   well beyond this slice's files; nothing reads `claim_overlaps.origin` yet, so this is named here
   rather than fixed speculatively.
 
-## Slices 6 and 7
+## Slice 6: ACL and scope metadata as events
 
-Each slice's own PR restates its piece of the bullet list in
-`docs/build/M3-M6-kickoff-v1.md` section 1 in the same level of detail as slices 1 to 5 above,
-written at the start of that slice's branch rather than all up front here, since slices 6 and 7
-depend on decisions earlier slices make along the way. This document is updated with a row in the
-table above, not rewritten, as each slice's branch opens.
+**What never replicated before this slice.** `ctxd grant`, every `ctxd pool` subcommand that
+mutates state, and `ctxd review --add-rule`/`--remove-rule` all wrote directly to
+`client_grants`/`pools`/`pool_grants`/`pool_members`/`scopes.review_policy`, with no event at all
+(SPEC v8 4's `acl` op already existed in the schema's own CHECK constraint, unused since M1). A
+node's whole access picture was therefore purely local: a grant made on one machine never reached
+another. All of it now goes through one shared `appendAclEvent` (`src/store/acl.ts`), which
+appends an `acl`/`meta` event in the reserved `_system` scope and applies it through the same
+`src/store/materialize.ts` path sync's puller and `ctxd rebuild` already use, materialized by a
+new `applyAclEvent` dispatching on `payload.action`.
+
+**Deterministic scope and pool ids close the slice-2 gap.** Two independently initialized nodes
+creating a project scope or a pool of the same name used to get two different, random
+(`newId()`-derived) ids, the gap slice 2 explicitly named as still open. `core/ids.ts`'s new
+`deterministicId(namespace, name)` (a truncated SHA-256 of `"<namespace>:<name>"`) replaces that:
+the id itself is now a pure function of the name, so a `scope_create`/`pool_create` event from
+either node already names the same id, and a duplicate create is a plain `INSERT ... ON CONFLICT
+DO NOTHING`, not a conflict needing HLC arbitration at all. This generalizes `_me`'s own fixed
+constant (M3 slice 2) to every named scope instead of leaving it as a special case.
+
+**The reserved `_system` scope.** `acl` events' own `scope_id` is always the fixed constant
+`SYSTEM_SCOPE_ID` (`"_system"`), never the entity's own id: `src/sync/pull.ts`'s replication
+filter joins on an event's `scope_id` against a real `scopes` row, and a brand-new scope or pool
+doesn't exist in `scopes`/`pools` yet at the moment its own creation event is in flight.
+`_system` is created the same genesis-exception way `_me` is (`ctxd init`), with replication
+`all` (every node needs the whole access picture) and vendor policy `local-only`, which by itself
+only excludes a non-`local`-vendor agent outright (the same as any other `local-only` scope);
+`src/cli/pool.ts` and `src/cli/grant.ts` refuse to resolve `_system` as a grant target at all
+(found missing during `/code-review`), which is the actual enforcement that keeps it acl-events
+only. One named, deliberate side effect: every `acl` event now replicates under `_system`'s own
+policy, not the target scope's declared `replication` (`home`/`local` scopes used to replicate
+nothing at all, so this is a new disclosure surface, not a regression); closing that fully means
+per-scope-aware routing for metadata events, out of scope
+here.
+
+**Found during `/simplify`, redesigned around before `/code-review`:** the first cut treated
+every `acl` action as a plain, unconditional upsert, reasoning that these are human-only,
+low-frequency operations where "whichever node applies a conflicting pair last wins" was an
+acceptable, narrower guarantee than content/status/claim get. All four parallel reviewers pushed
+back, correctly: `decide` (`src/sync/apply.ts`) fast-forwards every `meta` event unconditionally,
+so a grant and a revoke of the same pool+scope applied out of causal order would silently
+converge on arrival order, not HLC order, with a revoke's later HLC sometimes losing to a grant's
+earlier one: resurrecting access the human explicitly took away, with no conflict ever recorded.
+Fixed with the same HLC-guarded-upsert mechanism purge (slice 4) and claims (slice 5) already
+use, generalized behind one small new table: `acl_cursors(target, updated_hlc)`, where `target`
+names the specific row being touched (a pool+scope pair, a pool+principal pair, a client+scope
+pair, a scope's review policy, or a scope's or pool's own declared fields), finer than the
+coarser pool/client id the event's own `entryId` carries, so unrelated writes (grant scope X, add
+member Y) never spuriously contend. `aclGuardPasses` (`src/store/materialize.ts`) checks and
+updates it before every mutating action, including `scope_create`/`pool_create` themselves:
+deterministic ids (above) mean two such creates never need HLC arbitration over *which one wins*,
+but their *declared fields* (replication, vendor policy, description) still do, a narrower gap
+`/code-review` found in the first version of this fix.
+
+**Tests:** `test/unit/sync-acl.test.ts`: deterministic ids agree across namespaces and never
+collide; each `acl` action materializes correctly from a replicated event; two independent
+`scope_create`s of the same name converge on the later HLC's declared fields regardless of
+application order; a rebuild reproduces the same pool/grant/membership state a live sequence of
+events already produced; a grant-then-revoke and a revoke-then-grant pair (and the same shape for
+pool membership, client grants, scope creation, and review-policy changes) all converge on the
+later-HLC outcome regardless of application order.
+
+**Found during `/code-review`, fixed:** `scope_create`/`pool_create` were (wrongly) believed to
+need no guard at all, reasoning that their deterministic ids already make them conflict-free; true
+for the id, not for the declared fields (replication, vendor policy, description), which still
+need `aclGuardPasses` like everything else, above. `aclGuardPasses` itself rejected an exact HLC
+tie as stale; since an encoded HLC can only tie between two events from the *same* node (the node
+id is part of the string), this was only ever reachable from a fresh `HlcClock` in a separate CLI
+process producing the same millisecond as a just-prior one, and it was silently dropping the
+second action while the CLI still printed success. Fixed to accept a tie: this node's own
+transaction order is the real causal order regardless of what a tied clock says. `ctxd rebuild`
+never cleared `pools`/`pool_grants`/`pool_members`/`client_grants`/`acl_cursors` before replay, so
+it could not actually recover from corruption in any of them, the way it already does for
+entries: every replayed acl event was a guard-rejected no-op against the pre-rebuild cursor it was
+never asked to forget. Fixed; `scopes` itself is still never wiped, since `_me`/`_system` (and a
+lazily created `_hold.*` scope, `src/store/write.ts`) are genesis rows with no backing event,
+predating this slice, so a blanket wipe would lose them permanently. `src/cli/pool.ts` and
+`src/cli/grant.ts` could resolve `_system` itself as a grant target (nothing stopped `ctxd pool
+grant <pool> _system write`); both now refuse to resolve it, which is the real enforcement behind
+the claim that `_system` holds acl events only. `src/store/acl.ts`'s `nextOriginSeq` duplicated
+`src/store/write.ts`'s; the latter is now exported and reused instead, undoing one of the four
+duplicates this slice's own `/simplify` pass had just consolidated down to.
+
+**Deliberately out of scope, named rather than guessed at:**
+- `_system`'s replication policy gates every `acl` event, not the target scope's own declared
+  one (see above); a `home`-only or `local`-only scope's existence and grants still reach every
+  node, which is new visibility, not new write access, but is named here rather than silently
+  shipped.
+- `ctxd review --add-rule`/`--remove-rule` build the whole rules array via read-modify-write on
+  each node's own local copy before `scope_review_policy_set` replaces it wholesale, guarded by
+  one HLC cursor per scope. Two nodes independently changing *different* rules for the same scope
+  while partitioned can still lose one side's change: whichever whole-array write has the later
+  HLC wins outright, silently dropping a concurrent, non-conflicting edit from the other side,
+  the same failure mode this slice closed for grants and memberships by modeling them as
+  per-target add/remove actions instead of a whole-list replace. Rules have no stable identity to
+  key a per-rule guard on (today, `--remove-rule` targets a list position, not an id), so closing
+  this properly means giving each rule its own id first; a larger, separate change, not attempted
+  here given how rare concurrent, partitioned rule edits for the same scope are expected to be.
+- `makeRev(1, eventId)` is hardcoded to version 1 on every `acl` event; harmless today since
+  nothing reads an acl event's own rev, but would need to change if a future feature ever needs
+  to reference one acl event from another.
+
+## Slice 7
+
+Its own PR restates its piece of the bullet list in `docs/build/M3-M6-kickoff-v1.md` section 1 in
+the same level of detail as slices 1 to 6 above, written at the start of that slice's branch
+rather than all up front here, since it depends on decisions earlier slices made along the way.
+This document is updated with a row in the table above, not rewritten, as the slice's branch
+opens.
