@@ -39,6 +39,7 @@ import { run as runServiceCommand } from "./service.js";
 import { runBackupCommand, runRestoreCommand } from "./backup.js";
 import { run as runDoctorCommand } from "./doctor.js";
 import { runStatus, runStatusline } from "./status.js";
+import { run as runWorkerCommand } from "./worker.js";
 
 /** Each command's parsed-args entry point, added as its milestone lands. */
 const COMMAND_RUNNERS: Record<string, (argv: string[]) => number | Promise<number>> = {
@@ -79,6 +80,7 @@ const COMMAND_RUNNERS: Record<string, (argv: string[]) => number | Promise<numbe
   doctor: runDoctorCommand,
   status: runStatus,
   statusline: runStatusline,
+  worker: runWorkerCommand,
 };
 
 const COMMANDS: Record<string, { milestone: string; summary: string }> = {
@@ -106,7 +108,7 @@ const COMMANDS: Record<string, { milestone: string; summary: string }> = {
   show: { milestone: "M1", summary: "Show an entry, optionally as of a time" },
   status: { milestone: "M4", summary: "Health, scope, claims and sync" },
   statusline: { milestone: "M4", summary: "One-line status for the Claude Code status line" },
-  worker: { milestone: "M2", summary: "Internal: detached hook work" },
+  worker: { milestone: "M4", summary: "Internal: detached hook work" },
   mcp: { milestone: "M1", summary: "Stdio MCP launcher: picks the persona, proxies with its token" },
   persona: { milestone: "M1", summary: "Issue, rotate, revoke or prefer persona tokens" },
   pool: { milestone: "M1", summary: "Persona pools: create, grant, members, seal, enroll, lock" },
