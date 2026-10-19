@@ -21,7 +21,7 @@ unchanged, renumbered.
 | 2 | Sync core | `m3/sync-protocol` | `main` (slice 1 merged as PR #26 before this branched) | Spec 7.1, 7.2, 7.3 (fast-forward and already-known only); `127.0.0.1:7412`, peer tokens, `/v1/pull`, `/v1/notify`, watermarks, `ctxd node add-peer\|revoke`, `ctxd sync`, flags `sync`/`sync.serve`; the new `peers` table |
 | 3 | Conflict policies, siblings, review | `m3/sync-conflicts` | `m3/sync-protocol` | Spec 7.4; per-part conflict policies for the "Concurrent" row of 7.3's table (status, and content for every kind: lww for status/brief, conflicted for the rest); `entry_siblings`; `conflicted` status; surfacing both in `ctxd review`; missing-parent events, and `claim`/`meta` events, remain deferred to slices 4 and 5 |
 | 4 | Purge propagation | `m3/sync-purge` | `m3/sync-conflicts` | Spec 7.6.6; purge (`meta`/`purge`) events now fast-forward unconditionally when received via sync, closing the gap that `decide` previously deferred every `meta` event; step 3's strip-on-receipt for any event (of any op) arriving for an already-purged entry |
-| 5 | Claims across nodes | `m3/sync-claims` | `m3/sync-purge` | Spec 7.4's claim rows; tentative claims while offline; deterministic tie-break; `lost` leases; sync-origin overlap detection |
+| 5 | Claims across nodes | `m3/sync-claims` | `m3/sync-purge` | Spec 7.4's claim rows; tentative claims while offline; deterministic earliest-claim_hlc tie-break (loser recorded as a lost `entry_siblings` row, not a `leases.state`); local- and sync-origin overlap detection into `claim_overlaps` |
 | 6 | ACL and scope metadata as events | `m3/sync-acl-events` | `m3/sync-claims` | Spec 7.2; review rules, grants, pool changes and scope creation itself travel as `acl`/scope-metadata events in `_system` instead of direct table writes (closes the M2 handoff gap in `src/cli/grant.ts`, `src/cli/pool.ts`, `src/store/review.ts`, and the gap slice 2 found: named project scopes created independently on two nodes do not share a `scope_id` yet, so only `_me` converges until this slice lands) |
 | 7 | Freshness and property tests | `m3/sync-freshness` | `m3/sync-acl-events` | Spec 10.2; sync freshness in brief headers, the stale-sync notice; the N-node partition property suite |
 
@@ -246,10 +246,88 @@ stripped and never un-erases the entry; two independent purge events for the sam
 on the later-HLC one's fingerprint whichever order they are applied in, including the case of a
 strictly earlier-HLC second purge arriving after the row is already settled.
 
-## Slices 5 to 7
+## Slice 5: claims across nodes
+
+**Claim events now carry a real parent.** Before this slice, a `claim` event's `parent_revs`
+column was always the literal `'[]'`, and `src/sync/apply.ts`'s `decide` fast-forwarded every
+`claim`/`release` event unconditionally, deferring the actual cross-node semantics entirely.
+`claim.ts` now sets `parentRevs` to the prior active lease's `claim_hlc` for a renewal or
+take-over, `[]` only for a genuinely fresh claim; `decide` compares that against the task's
+current active `claim_hlc` (`leases`' head for the claim part, parallel to `*_rev` for
+content/status) through the exact same fast-forward/concurrent fork those parts already use.
+
+**Concurrent claims on one task (Spec 7.4).** Two nodes can each claim the same task
+independently while partitioned, each unaware of the other, each writing `parentRevs: []`. When
+the second one syncs, its parent no longer matches the live lease: `decide` returns
+`"concurrent"`, routing it to a new `applyClaimConflict` in `src/store/materialize.ts`, which
+mirrors the existing content/status conflict shape (`resolveConflict`) instead of inventing its
+own. The earliest `claim_hlc` wins regardless of which claim a given node applies first (the
+convergence property, 7.3); the other claim never becomes active and is recorded as a lost
+`entry_siblings` row (`part` widened to allow `'claim'`) instead of needing the single `leases`
+row to represent two outcomes at once.
+
+**A stale release is a no-op, not a crash.** A release's `parentRevs` names the exact claim it
+targets; if that claim has since been superseded (a take-over, a newer claim, or an earlier
+duplicate release), `decide` still routes it to the conflict-checking path, and
+`applyReplicatedEvent`'s release branch finds the mismatch and does nothing, instead of
+clobbering whatever claim is actually active now.
+
+**Write-intent overlaps across tasks (Spec 7.4's other row).** A new `src/claims/overlap.ts`
+holds `scanOverlappingLeases` and `persistOverlaps`, shared by `claim.ts`'s local, synchronous
+overlap check (origin `claim`, closing a gap `claim_overlaps` left unused since M1/M2: the schema
+allowed it but nothing ever wrote to it) and `materialize.ts`'s replicated path (origin `sync`,
+this slice's own named requirement). Sharing one helper, called from both the live-local and the
+replicated path, is what makes `ctxd rebuild` -- which always replays through the replicated path,
+whatever an event's true origin was -- reproduce the exact same rows a live claim already wrote,
+instead of creating new ones a live system never had or skipping ones it did.
+
+**Tentative claims.** `isTentative` (`claim.ts`) flags a claim when this node has a peer at all
+and none has completed a successful pull in the last 10 minutes (`peers.last_synced_at`, set by
+`src/sync/pull.ts` on every completed pull); a node with no peers is exempt, so a non-sync
+install's claims behave exactly as before this slice.
+
+**A real bug in `rebuild.ts`, found while writing this slice's tests.** It hardcoded `parentRevs`
+to `[]` for every op except `update`/`status`, an optimization from before claims needed a real
+parent. Once they did, every claim/release event silently lost its parent during a rebuild,
+making every take-over look like a fresh claim and every release look stale (never applying).
+Fixed by adding `claim`/`release` to the ops it bothers to parse `parent_revs` for.
+
+**Found by `/code-review` after the redesign, all fixed:** `persistOverlaps` wrote the same
+`{mine, theirs}`-oriented pattern pairs into both directions' rows, so the reverse row's own
+"mine" named the other task's pattern instead of its own; fixed by swapping orientation for the
+second row. `decide`'s claim branch returned `"missing-parent"` (deferred forever) for a release
+whose target claim had already left `'active'`, rather than the `"concurrent"` path that already
+handles it correctly; fixed, reasoning from `pull.ts`'s per-origin ordering guarantee that a
+release can never genuinely outrace its own claim, so this case is always "already resolved," not
+"still arriving." The same branch also didn't check `op`, so a future `suspend`/`resume` claim
+event (not yet reachable; quarantine-driven claim suspension isn't wired up yet) would have been
+misclassified as concurrent; fixed. `applyClaimConflict` recorded the losing claim's
+`entry_siblings.rev` as an HLC on one side of the race and a `makeRev` revision string on the
+other; fixed to use the HLC consistently on both sides. The now-dead `"deferred"` `Decision`
+value (its only producer was removed by this slice's own redesign) was removed along with the
+dead branch checking for it.
+
+**Deliberately out of scope, named rather than guessed at:**
+- Taken-over and lost claims still don't surface a brief notice ("your claim on T was taken over
+  by..."); SPEC 7.5.4 names the exact wording, but `src/brief/assemble.ts`'s notices section
+  doesn't implement any claim-state notice yet, a gap predating this slice (M2).
+- Under a scope's `strict` intent policy, a sync-detected overlap doesn't additionally flag the
+  later claim for review (Spec 7.4's last sentence); it is recorded in `claim_overlaps` but not
+  otherwise acted on. Doing so means synthesizing a system-raised `flag` event, a large enough
+  addition to warrant its own slice rather than folding into this one.
+- A from-scratch `ctxd rebuild` can record a locally-originated overlap's `claim_overlaps.origin`
+  as `'sync'` instead of `'claim'` (every event replays through the replicated path regardless of
+  where it first came from). An incremental rebuild of an already-populated database never hits
+  this, since the ON CONFLICT clause never overwrites an existing row's origin. Closing the
+  from-scratch case fully means threading the event's own `origin_node` through every trusted
+  `applyEvent` call site across the codebase (write.ts, flag.ts, review.ts, purge.ts, hygiene.ts),
+  well beyond this slice's files; nothing reads `claim_overlaps.origin` yet, so this is named here
+  rather than fixed speculatively.
+
+## Slices 6 and 7
 
 Each slice's own PR restates its piece of the bullet list in
-`docs/build/M3-M6-kickoff-v1.md` section 1 in the same level of detail as slices 1 to 4 above,
-written at the start of that slice's branch rather than all up front here, since slices 5 to 7
+`docs/build/M3-M6-kickoff-v1.md` section 1 in the same level of detail as slices 1 to 5 above,
+written at the start of that slice's branch rather than all up front here, since slices 6 and 7
 depend on decisions earlier slices make along the way. This document is updated with a row in the
 table above, not rewritten, as each slice's branch opens.

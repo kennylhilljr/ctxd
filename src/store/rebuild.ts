@@ -33,12 +33,12 @@ export function rebuild(db: Database.Database): void {
         entryId: e.entry_id,
         op: e.op,
         part: e.part,
-        // Only content/update and status/status events ever consult parentRevs (Spec 7.4's
-        // conflict check); parsing it for every other op/part would be pure waste on a full
-        // rebuild. Passed through at all so a rebuild re-derives the same conflict/lww
-        // resolution live sync apply already made, whatever order these events replay in (SPEC
-        // v8 7.4's convergence property, store/materialize.ts's own docstring).
-        parentRevs: e.op === "update" || e.op === "status" ? (JSON.parse(e.parent_revs) as string[]) : [],
+        // Only content/update, status/status and claim/release events ever consult parentRevs
+        // (Spec 7.4's conflict check); parsing it for every other op/part would be pure waste on
+        // a full rebuild. Passed through at all so a rebuild re-derives the same conflict/lww/
+        // claim-race resolution live sync apply already made, whatever order these events replay
+        // in (SPEC v8 7.4's convergence property, store/materialize.ts's own docstring).
+        parentRevs: e.op === "update" || e.op === "status" || e.op === "claim" || e.op === "release" ? (JSON.parse(e.parent_revs) as string[]) : [],
         rev: e.rev,
         clientId: e.client_id,
         hlc: e.hlc,

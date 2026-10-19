@@ -1,5 +1,6 @@
 import type Database from "better-sqlite3";
 import type { NodeRole, Replication } from "../core/kinds.js";
+import { nowIso } from "../core/time.js";
 import { mayReplicate } from "../security/policy.js";
 import { applyEvent, type WireEvent } from "./apply.js";
 
@@ -145,6 +146,10 @@ export async function pullFromPeer(
     lastThrough = body.through;
     more = body.more;
   }
+  // Spec 7.4's tentative-claim check (src/store/claim.ts) reads this: a completed pull counts as
+  // "successful" whether or not it carried any new events, so an idle-but-reachable peer still
+  // keeps claims on this node out of tentative state.
+  db.prepare("UPDATE peers SET last_synced_at = ? WHERE peer_id = ?").run(nowIso(), peer.peerId);
   return { pulled, conflicts, purged, deferred, through: lastThrough };
 }
 

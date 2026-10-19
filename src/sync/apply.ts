@@ -2,17 +2,15 @@ import type Database from "better-sqlite3";
 import { applyEvent as materializeEvent, applyReplicatedEvent as materializeReplicatedEvent, type EventForMaterialize } from "../store/materialize.js";
 
 /**
- * Apply one incoming replicated event (Spec v8 7.3), idempotently, covering every row of 7.3's
- * table except "missing parent" and `claim` events, which this slice still only logs
- * (claims-across-nodes is its own later slice): fast-forward, already-known, relations (never
- * conflict, 7.4), genuinely concurrent content/status events (via src/store/materialize.ts's
- * conflict policies, shared with `ctxd rebuild` so a replay from scratch reaches the same
- * materialized state this live apply does), purge events (always fast-forward: the purge handler
- * is an idempotent upsert, order- and retry-tolerant by construction, so there is no concurrent
- * case to resolve), and purge propagation's own step 3 (7.6.6): any event, of any kind, for an
- * entry already purged locally has its payload and prev stripped to `{"purged": true}` before
- * it is even stored, exactly like the events a local purge rewrites in place, so the content it
- * carries never lands and never needs rewriting again later.
+ * Apply one incoming replicated event (Spec v8 7.3), idempotently: fast-forward, already-known,
+ * relations (never conflict, 7.4), genuinely concurrent content/status/claim events (via
+ * src/store/materialize.ts's conflict policies, shared with `ctxd rebuild` so a replay from
+ * scratch reaches the same materialized state this live apply does), purge events (always
+ * fast-forward: the purge handler is an idempotent, HLC-guarded upsert, order- and
+ * retry-tolerant by construction), and purge propagation's own step 3 (7.6.6): any non-purge
+ * event for an entry already purged locally has its payload and prev stripped to
+ * `{"purged": true}` before it is even stored. Only a genuinely missing-parent content/status/
+ * claim event, or a release for a claim already superseded, is held back or no-op'd.
  */
 export interface WireEvent {
   eventId: string;
@@ -38,12 +36,14 @@ export interface ApplyResult {
    * "already-known" (dedup by event_id); "fast-forward" or "conflict-resolved" (both
    * materialized, the latter through a conflict policy); "purge-stripped" (stored with its
    * content already erased, Spec 7.6.6 step 3; never materialized); "deferred" (logged only: a
-   * missing-parent content/status event, or any claim event).
+   * missing-parent content/status/claim event). "conflict-resolved" also covers a stale release
+   * (one whose claim was already superseded): routed through the same conflict-checking path as
+   * a genuine race, even though materialize.ts's own handler finds nothing to resolve there.
    */
   outcome: "already-known" | "fast-forward" | "conflict-resolved" | "purge-stripped" | "deferred";
 }
 
-type Decision = "fast-forward" | "concurrent" | "missing-parent" | "deferred" | "purged";
+type Decision = "fast-forward" | "concurrent" | "missing-parent" | "purged";
 
 const HEAD_REV_COLUMN: Partial<Record<WireEvent["part"], "content_rev" | "status_rev" | "relations_rev">> = {
   content: "content_rev",
@@ -63,6 +63,12 @@ function loadEntryState(db: Database.Database, entryId: string): EntryState | un
   return db.prepare("SELECT purged_at, content_rev, status_rev, relations_rev FROM entries WHERE entry_id = ?").get(entryId) as EntryState | undefined;
 }
 
+/** The active lease's `claim_hlc` for a task (the claim part's "head", Spec 7.3), or null when no claim is active there. */
+function currentClaimHead(db: Database.Database, taskId: string): string | null {
+  const row = db.prepare("SELECT claim_hlc FROM leases WHERE task_id = ? AND state = 'active'").get(taskId) as { claim_hlc: string } | undefined;
+  return row?.claim_hlc ?? null;
+}
+
 /** Spec 7.3's apply table, narrowed to the parts this slice knows how to resolve, plus 7.6.6's purge rows. */
 function decide(db: Database.Database, event: WireEvent): Decision {
   const entry = loadEntryState(db, event.entryId);
@@ -71,8 +77,25 @@ function decide(db: Database.Database, event: WireEvent): Decision {
   // nodes independently purging the same entry while partitioned) is let through instead, so
   // materialize.ts's own HLC guard, not arrival order, decides whether it wins (7.3 convergence).
   if (entry?.purged_at != null && !isPurgeEvent) return "purged";
-  if (event.part === "claim") return "deferred";
   if (event.part === "meta") return "fast-forward"; // the purge handler is an idempotent, HLC-guarded upsert; never a concurrent case this layer needs to resolve
+  if (event.part === "claim") {
+    // suspend/resume (quarantine, 7.6.2) carry no real parentRevs and never conflict, same as
+    // every claim-part op did before this slice; only claim/release consult the head below.
+    if (event.op !== "claim" && event.op !== "release") return "fast-forward";
+    const head = currentClaimHead(db, event.entryId);
+    if (head === null) {
+      if (event.op === "claim") return event.parentRevs.length === 0 ? "fast-forward" : "missing-parent"; // a fresh claim, or one referencing a prior claim not yet synced
+      // A release with no active lease to match: per-origin pull ordering (src/sync/pull.ts)
+      // guarantees a claim always arrives before its own later release from the same origin, so
+      // this is never "the claim hasn't synced yet" -- it is always a release whose target claim
+      // already left 'active' (a duplicate release, or one superseded by a take-over or an even
+      // later release). Routed to "concurrent" so materialize.ts's own no-op handles it, instead
+      // of sitting "deferred" forever for a parent that was never going to arrive.
+      return "concurrent";
+    }
+    if (event.parentRevs.length === 1 && event.parentRevs[0] === head) return "fast-forward";
+    return "concurrent"; // a genuinely concurrent claim (Spec 7.4), or a release whose target claim was already superseded
+  }
   const column = HEAD_REV_COLUMN[event.part];
   const head = column && entry ? entry[column] : null;
   if (event.part === "relations") return head !== null ? "fast-forward" : "missing-parent"; // never conflicts (7.4); only needs its entry to exist
@@ -119,16 +142,18 @@ export function applyEvent(db: Database.Database, event: WireEvent): ApplyResult
     );
 
     if (decision === "purged") return { outcome: "purge-stripped" };
-    if (decision === "deferred" || decision === "missing-parent") return { outcome: "deferred" };
+    if (decision === "missing-parent") return { outcome: "deferred" };
 
     // Every EventForMaterialize field is already a same-named WireEvent field; only `part`'s
-    // type needs narrowing ("claim"/"meta" were already ruled out by `decide` to get here). Only
-    // the confirmed-fast-forward branch skips the conflict-checking entry point: `decide` already
-    // paid for the head-rev query that branch would otherwise redo for nothing. The concurrent
-    // branch still pays its own head-rev query inside materializeReplicatedEvent, since it needs
-    // the matching events-table row (not just the rev string) to resolve the conflict.
+    // type needs narrowing ("meta" was already ruled out by `decide` to get here). Only the
+    // confirmed-fast-forward branch for content/status/relations skips the conflict-checking
+    // entry point: `decide` already paid for the head query that branch would otherwise redo for
+    // nothing. A claim event always goes through it regardless of `decision`, fast-forward
+    // included, since even a non-conflicting replicated claim still needs the write-intent
+    // overlap check against other tasks that only that entry point runs (Spec 7.4); a local
+    // claim never reaches this function at all, so it is never run twice for the same claim.
     const forMaterialize = { ...event, part: event.part as EventForMaterialize["part"] };
-    if (decision === "concurrent") {
+    if (decision === "concurrent" || event.part === "claim") {
       materializeReplicatedEvent(db, { ...forMaterialize, parentRevs: event.parentRevs });
     } else {
       materializeEvent(db, forMaterialize);

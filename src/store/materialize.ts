@@ -2,6 +2,7 @@ import type Database from "better-sqlite3";
 import { revVersion } from "../core/ids.js";
 import { compareHlc, decodeHlc } from "../core/hlc.js";
 import { LWW_CONTENT_KINDS, type Kind } from "../core/kinds.js";
+import { persistOverlaps, scanOverlappingLeases } from "../claims/overlap.js";
 import { loadClient } from "./snapshot.js";
 
 /**
@@ -27,11 +28,17 @@ export interface EventForMaterialize {
 /** A replicated event (Spec 7.3): its own stated parent revision(s), so this is checked for a genuinely concurrent arrival (Spec 7.4) rather than trusted as fast-forward. */
 export type ReplicatedEvent = EventForMaterialize & { parentRevs: string[] };
 
-/** The current head revision for a part that can conflict, or undefined for a part with none (relations/claim/meta never reach the conflict check). */
+/** The current head revision for a part that can conflict, or undefined for a part with none (relations/meta never reach a conflict check; claim has its own head, `currentClaimHeadFor`, since leases aren't rev-versioned the same way). */
 function currentRevFor(db: Database.Database, entryId: string, part: "content" | "status"): string | undefined {
   const column = part === "content" ? "content_rev" : "status_rev";
   const row = db.prepare(`SELECT ${column} AS rev FROM entries WHERE entry_id = ?`).get(entryId) as { rev: string } | undefined;
   return row?.rev;
+}
+
+/** The current active claim's `claim_hlc` for a task (Spec 7.3's "head" for the claim part), or undefined when no claim is active there. Only an *active* lease counts: a released, expired-but-taken-over, or lost one blocks nothing, so a fresh claim against it is a legitimate new lineage, not a conflict. */
+function currentClaimHeadFor(db: Database.Database, taskId: string): string | undefined {
+  const row = db.prepare("SELECT claim_hlc FROM leases WHERE task_id = ? AND state = 'active'").get(taskId) as { claim_hlc: string } | undefined;
+  return row?.claim_hlc;
 }
 
 /** The event that currently holds `rev` for this entry, whatever part it was recorded under (ranks share a rev value with their creating event: Spec v6 4, status_rev/content_rev/relations_rev all start equal to the create event's own rev). */
@@ -50,10 +57,10 @@ export function recordSibling(db: Database.Database, entryId: string, part: stri
   db.prepare("INSERT OR IGNORE INTO entry_siblings (entry_id, part, rev, event_id, reason) VALUES (?, ?, ?, ?, ?)").run(entryId, part, rev, eventId, reason);
 }
 
-/** The shared shape of both conflict policies: record the loser as a sibling, and if the incoming event won, run `applyWinner` to materialize it. */
+/** The shared shape of all three conflict policies: record the loser as a sibling, and if the incoming event won, run `applyWinner` to materialize it. */
 function resolveConflict(
   db: Database.Database,
-  part: "content" | "status",
+  part: "content" | "status" | "claim",
   entryId: string,
   reason: string,
   incomingWins: boolean,
@@ -146,6 +153,83 @@ function applyContentConflict(db: Database.Database, e: ReplicatedEvent, current
   }
 }
 
+/** The claim UPSERT (Spec 7.5.3): a fresh claim, a renewal, a take-over, or (via `applyClaimConflict`) the winning side of a concurrent-claim race. Shared so there is exactly one place that writes `leases` for a `claim` op. */
+function upsertLease(db: Database.Database, e: EventForMaterialize): void {
+  const p = e.payload as {
+    holder: string;
+    paths: string[] | null;
+    ttl_minutes: number;
+    session_ref: string | null;
+    base_head: string | null;
+    taken_over_from: string | null;
+    tentative?: boolean;
+  };
+  const expiresAt = new Date(decodeHlc(e.hlc).physical + p.ttl_minutes * 60_000).toISOString();
+  db.prepare(
+    `INSERT INTO leases (task_id, scope_id, holder, state, paths, claim_event, claim_hlc, session_ref, base_head, expires_at, last_activity_hlc, tentative, taken_over_by)
+     VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT (task_id) DO UPDATE SET
+       scope_id = excluded.scope_id, holder = excluded.holder, state = 'active', paths = excluded.paths,
+       claim_event = excluded.claim_event, claim_hlc = excluded.claim_hlc, session_ref = excluded.session_ref,
+       base_head = excluded.base_head, expires_at = excluded.expires_at, last_activity_hlc = excluded.last_activity_hlc,
+       tentative = excluded.tentative, released_at = NULL, changed_files = NULL, drift = NULL, lost_by = NULL,
+       taken_over_by = excluded.taken_over_by`,
+  ).run(
+    e.entryId,
+    e.scopeId,
+    p.holder,
+    p.paths !== null ? JSON.stringify(p.paths) : null,
+    e.eventId,
+    e.hlc,
+    p.session_ref,
+    p.base_head,
+    expiresAt,
+    e.hlc,
+    p.tentative ? 1 : 0,
+    p.taken_over_from,
+  );
+}
+
+/**
+ * Spec 7.4: "Concurrent claims on one task: the earliest claim_hlc wins." Only reached via
+ * `applyReplicatedEvent` once its parentRevs-vs-current-head check has already confirmed a
+ * mismatch: claim.ts's own CLAIM_HELD/CLAIM_STALE checks never let a local claim write a parent
+ * that mismatches the live lease, so this is always a genuinely concurrent claim made offline,
+ * unaware of the other. Earliest wins on every node regardless of which claim it applies first
+ * here (the convergence property, 7.3); whichever claim is not earliest never becomes active,
+ * and is recorded as a lost sibling (entry_siblings, reason "lost") instead, so it can be
+ * surfaced to its own holder later without the single leases row needing to represent both
+ * outcomes.
+ */
+function applyClaimConflict(db: Database.Database, e: ReplicatedEvent, currentClaimHlc: string): void {
+  const local = db.prepare("SELECT claim_event FROM leases WHERE task_id = ?").get(e.entryId) as { claim_event: string } | undefined;
+  if (!local) return; // defensive: `currentClaimHeadFor` just reported this HLC, so its row should exist
+  const incomingWins = compareHlc(e.hlc, currentClaimHlc) <= 0;
+  // `resolveConflict`'s "rev" slot holds e.hlc for claims, not e.rev: the loser's identity must
+  // be an HLC either way this resolves (currentClaimHlc, the other side, already is one), so a
+  // reader comparing entry_siblings.rev against leases.claim_hlc or another claim's parentRevs
+  // sees the same format regardless of which side lost.
+  resolveConflict(db, "claim", e.entryId, "lost", incomingWins, currentClaimHlc, { event_id: local.claim_event }, { eventId: e.eventId, rev: e.hlc }, () => {
+    upsertLease(db, e);
+    recordClaimOverlaps(db, e);
+  });
+}
+
+/**
+ * Spec 7.4's other concurrent-claim case: write intent overlapping an already-active claim on a
+ * DIFFERENT task. Only reached from `applyReplicatedEvent` (sync, or `ctxd rebuild` replaying a
+ * historical sync-originated claim): a local claim already ran this same check synchronously
+ * (claim.ts, via the same `scanOverlappingLeases`) and returned it straight to the caller, so a
+ * local claim's own overlaps are never persisted here.
+ */
+function recordClaimOverlaps(db: Database.Database, e: EventForMaterialize): void {
+  const p = e.payload as { paths: string[] | null };
+  const { overlaps } = scanOverlappingLeases(db, e.scopeId, e.entryId, p.paths ?? undefined);
+  if (overlaps.length === 0) return;
+  const policy = (db.prepare("SELECT intent_policy FROM scopes WHERE scope_id = ?").get(e.scopeId) as { intent_policy: string }).intent_policy;
+  persistOverlaps(db, e.entryId, e.hlc, policy, overlaps, "sync");
+}
+
 interface CreatePayload {
   kind: string;
   slug: string;
@@ -179,7 +263,7 @@ export function applyEvent(db: Database.Database, e: EventForMaterialize, opts: 
   applyEventCore(db, e, opts.skipFts ?? false);
 }
 
-/** Apply a possibly-concurrent event (Spec 7.3, 7.4): checks `parentRevs` against the current head for content/status parts and resolves a genuine conflict before falling through to the same core every other event goes through. */
+/** Apply a possibly-concurrent event (Spec 7.3, 7.4): checks `parentRevs` against the current head for content/status/claim parts and resolves a genuine conflict before falling through to the same core every other event goes through. */
 export function applyReplicatedEvent(db: Database.Database, e: ReplicatedEvent, opts: ApplyEventOptions = {}): void {
   if (isPurgedNoOp(e)) return;
   const skipFts = opts.skipFts ?? false;
@@ -194,6 +278,28 @@ export function applyReplicatedEvent(db: Database.Database, e: ReplicatedEvent, 
     const current = currentRevFor(db, e.entryId, "status");
     if (current !== undefined && !(e.parentRevs.length === 1 && e.parentRevs[0] === current)) {
       applyStatusConflict(db, e, current);
+      return;
+    }
+  } else if (e.part === "claim" && e.op === "claim") {
+    const current = currentClaimHeadFor(db, e.entryId);
+    if (current !== undefined && !(e.parentRevs.length === 1 && e.parentRevs[0] === current)) {
+      applyClaimConflict(db, e, current);
+      return;
+    }
+    // A legitimate continuation (renewal, take-over, or a brand-new claim with no prior lease),
+    // not a race: materialize normally, then check it against OTHER active tasks' write intent.
+    // That overlap check only runs here (sync, or a rebuild replaying a historical sync-originated
+    // claim), never for a local claim, which already ran the identical check synchronously in
+    // claim.ts and returned it straight to the caller.
+    applyEventCore(db, e, skipFts);
+    recordClaimOverlaps(db, e);
+    return;
+  } else if (e.part === "claim" && e.op === "release") {
+    const current = currentClaimHeadFor(db, e.entryId);
+    if (current === undefined || !(e.parentRevs.length === 1 && e.parentRevs[0] === current)) {
+      // Stale: this release targets a claim already superseded by a later claim or take-over
+      // (or none is active at all). `decide` only routes a release here once it has already
+      // confirmed the mismatch, so there is nothing left to do but leave the current lease alone.
       return;
     }
   }
@@ -314,36 +420,7 @@ function applyEventCore(db: Database.Database, e: EventForMaterialize, skipFts: 
   }
 
   if (e.part === "claim" && e.op === "claim") {
-    const p = e.payload as {
-      holder: string;
-      paths: string[] | null;
-      ttl_minutes: number;
-      session_ref: string | null;
-      base_head: string | null;
-      taken_over_from: string | null;
-    };
-    const expiresAt = new Date(decodeHlc(e.hlc).physical + p.ttl_minutes * 60_000).toISOString();
-    db.prepare(
-      `INSERT INTO leases (task_id, scope_id, holder, state, paths, claim_event, claim_hlc, session_ref, base_head, expires_at, last_activity_hlc, tentative, taken_over_by)
-       VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, 0, ?)
-       ON CONFLICT (task_id) DO UPDATE SET
-         scope_id = excluded.scope_id, holder = excluded.holder, state = 'active', paths = excluded.paths,
-         claim_event = excluded.claim_event, claim_hlc = excluded.claim_hlc, session_ref = excluded.session_ref,
-         base_head = excluded.base_head, expires_at = excluded.expires_at, last_activity_hlc = excluded.last_activity_hlc,
-         released_at = NULL, changed_files = NULL, drift = NULL, lost_by = NULL, taken_over_by = excluded.taken_over_by`,
-    ).run(
-      e.entryId,
-      e.scopeId,
-      p.holder,
-      p.paths !== null ? JSON.stringify(p.paths) : null,
-      e.eventId,
-      e.hlc,
-      p.session_ref,
-      p.base_head,
-      expiresAt,
-      e.hlc,
-      p.taken_over_from,
-    );
+    upsertLease(db, e);
     return;
   }
 
