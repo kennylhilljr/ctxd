@@ -8,7 +8,20 @@ import { syncSignalsForScope } from "../journal/sync.js";
  */
 export function rebuild(db: Database.Database): void {
   db.transaction(() => {
-    db.exec("DELETE FROM relations; DELETE FROM entries; DELETE FROM signals; DELETE FROM flags; DELETE FROM leases;");
+    // `scopes` is not wiped: `_me`/`_system` are genesis rows with no backing event (SPEC 4's
+    // one deliberate exception to "every change is an event"), and a lazily-created `_hold.*`
+    // scope (src/store/write.ts) is the same way, so a blanket wipe would permanently lose them.
+    // `pools`/`pool_grants`/`pool_members`/`client_grants`/`acl_cursors` have no such exception
+    // (every row traces back to an `acl` event, M3 slice 6) and are wiped like everything else,
+    // so `ctxd rebuild` actually reconstructs them instead of leaving a corrupted row untouched
+    // (found during `/code-review`: without this, aclGuardPasses's own guard against the
+    // pre-rebuild cursor made every replayed acl event a no-op).
+    // Children before parents (pool_grants/pool_members both reference pools(pool_id), enforced
+    // with PRAGMA foreign_keys = ON): deleting pools first would fail while a still-populated
+    // child row points at the one being removed.
+    db.exec(
+      "DELETE FROM relations; DELETE FROM entries; DELETE FROM signals; DELETE FROM flags; DELETE FROM leases; DELETE FROM pool_grants; DELETE FROM pool_members; DELETE FROM pools; DELETE FROM client_grants; DELETE FROM acl_cursors;",
+    );
 
     const events = db.prepare("SELECT * FROM events ORDER BY hlc, event_id").all() as {
       event_id: string;

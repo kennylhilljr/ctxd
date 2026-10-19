@@ -2,21 +2,23 @@
 import { parseArgs } from "node:util";
 import { join } from "node:path";
 import type Database from "better-sqlite3";
-import { resolveDataDir } from "./common.js";
+import { resolveDataDir, resolveHumanWriteContext } from "./common.js";
 import { openDatabase } from "../store/db.js";
-import { newId } from "../core/ids.js";
-import { nowIso } from "../core/time.js";
+import { deterministicId } from "../core/ids.js";
+import { appendAclEvent } from "../store/acl.js";
 import { REPLICATIONS, VENDOR_POLICIES, type Replication, type VendorPolicy } from "../core/kinds.js";
 import { bindScope, unbindScope } from "../store/scopeRepos.js";
+import type { WriteContext } from "../store/write.js";
 
-export function addScope(db: Database.Database, name: string, replication: Replication, vendorPolicy: VendorPolicy): number {
-  if (db.prepare("SELECT 1 FROM scopes WHERE name = ?").get(name)) {
+export function addScope(ctx: WriteContext, name: string, replication: Replication, vendorPolicy: VendorPolicy): number {
+  if (ctx.db.prepare("SELECT 1 FROM scopes WHERE name = ?").get(name)) {
     console.error(`ctxd scope: "${name}" already exists.`);
     return 1;
   }
-  db.prepare(
-    "INSERT INTO scopes (scope_id, name, kind, replication, vendor_policy, created_at) VALUES (?, ?, 'project', ?, ?, ?)",
-  ).run(newId(), name, replication, vendorPolicy, nowIso());
+  // A scope's id is derived from its name (SPEC v8 4), not random, so two nodes creating the
+  // same name while partitioned converge on one scope without ever needing to sync first.
+  const scopeId = deterministicId("scope", name);
+  appendAclEvent(ctx, scopeId, { action: "scope_create", name, kind: "project", replication, vendor_policy: vendorPolicy });
   console.log(`ctxd scope added: ${name} (replication: ${replication}, vendor policy: ${vendorPolicy})`);
   return 0;
 }
@@ -122,7 +124,7 @@ export function run(argv: string[]): number {
   const dataDir = resolveDataDir({ dataDir: values["data-dir"], configPath: values.config });
   const db = openDatabase(join(dataDir, "ctxd.db"));
   try {
-    return addScope(db, name, replication, vendorPolicy);
+    return addScope(resolveHumanWriteContext(db), name, replication, vendorPolicy);
   } finally {
     db.close();
   }

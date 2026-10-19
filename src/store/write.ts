@@ -39,7 +39,7 @@ export type WriteResult =
 
 type Input = z.infer<typeof contextWriteInput>;
 
-function nextOriginSeq(db: Database.Database, nodeId: string): number {
+export function nextOriginSeq(db: Database.Database, nodeId: string): number {
   const row = db.prepare("SELECT COALESCE(MAX(origin_seq), 0) + 1 AS next FROM events WHERE origin_node = ?").get(nodeId) as {
     next: number;
   };

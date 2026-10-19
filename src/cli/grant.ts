@@ -1,8 +1,9 @@
 /** `ctxd grant <client> <scope> --level <l> --for <duration>`: temporary grants (SPEC v6 section 13). */
 import { parseArgs } from "node:util";
 import { join } from "node:path";
-import { resolveDataDir } from "./common.js";
+import { resolveDataDir, resolveHumanWriteContext } from "./common.js";
 import { openDatabase } from "../store/db.js";
+import { appendAclEvent } from "../store/acl.js";
 import { GRANT_LEVELS, type AccessLevel } from "../core/kinds.js";
 
 const DURATION = /^(\d{1,5})([hdw])$/i;
@@ -53,16 +54,15 @@ export function run(argv: string[]): number {
       console.error(`ctxd grant: client "${clientName}" not found.`);
       return 1;
     }
-    const scope = db.prepare("SELECT scope_id FROM scopes WHERE name = ?").get(scopeName) as { scope_id: string } | undefined;
+    // Excludes the reserved `_system` scope: it holds acl events only, never a valid grant target.
+    const scope = db.prepare("SELECT scope_id FROM scopes WHERE name = ? AND kind != 'system'").get(scopeName) as { scope_id: string } | undefined;
     if (!scope) {
       console.error(`ctxd grant: scope "${scopeName}" not found.`);
       return 1;
     }
-    const human = db.prepare("SELECT client_id FROM clients WHERE vendor = 'human' LIMIT 1").get() as { client_id: string };
+    const ctx = resolveHumanWriteContext(db);
     const expiresAt = new Date(Date.now() + durationMs).toISOString();
-    db.prepare(
-      "INSERT INTO client_grants (client_id, scope_id, level, expires_at, granted_by) VALUES (?, ?, ?, ?, ?) ON CONFLICT (client_id, scope_id) DO UPDATE SET level = excluded.level, expires_at = excluded.expires_at, granted_by = excluded.granted_by",
-    ).run(client.client_id, scope.scope_id, level, expiresAt, human.client_id);
+    appendAclEvent(ctx, client.client_id, { action: "client_grant", scope_id: scope.scope_id, level, expires_at: expiresAt, granted_by: ctx.clientId });
     console.log(`ctxd grant: ${clientName} -> ${scopeName} (${level}) until ${expiresAt}`);
     return 0;
   } finally {

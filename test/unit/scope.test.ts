@@ -7,11 +7,19 @@ import { isBypassed, normalizeOriginUrl, originFromConfig, repoIdentity, resolve
 import { openDatabase } from "../../src/store/db.js";
 import { newId } from "../../src/core/ids.js";
 import { addScope, bindScopeCommand, unbindScopeCommand } from "../../src/cli/scope.js";
+import { resolveHumanWriteContext } from "../../src/cli/common.js";
 
 function freshDb(): Database.Database {
   const dir = mkdtempSync(join(tmpdir(), "ctxd-scope-resolve-"));
   const db = openDatabase(join(dir, "ctxd.db"), { create: true });
-  db.prepare("INSERT INTO nodes (node_id, name, role, created_at) VALUES (?, 'air', 'home', ?)").run(newId(), new Date().toISOString());
+  const nodeId = newId();
+  db.prepare("INSERT INTO nodes (node_id, name, role, created_at) VALUES (?, 'air', 'home', ?)").run(nodeId, new Date().toISOString());
+  db.prepare("INSERT INTO clients (client_id, name, vendor, node_id, token_hash, created_at) VALUES (?, 'human', 'human', ?, ?, ?)").run(
+    newId(),
+    nodeId,
+    newId(),
+    new Date().toISOString(),
+  );
   db.prepare(
     "INSERT INTO scopes (scope_id, name, kind, replication, vendor_policy, created_at) VALUES (?, '_me', 'me', 'all', 'any', ?)",
   ).run(newId(), new Date().toISOString());
@@ -156,7 +164,7 @@ describe("resolveScope (SPEC v6 section 3)", () => {
 describe("ctxd scope bind/unbind (SPEC v6 sections 3, 13)", () => {
   it("binds a repository to an existing scope", () => {
     const db = freshDb();
-    addScope(db, "sample-app", "all", "any");
+    addScope(resolveHumanWriteContext(db), "sample-app", "all", "any");
 
     expect(bindScopeCommand(db, "sample-app", "github.com/example/sample-app")).toBe(0);
     const row = db.prepare("SELECT scope_id FROM scope_repos WHERE repo = ?").get("github.com/example/sample-app") as
@@ -176,8 +184,8 @@ describe("ctxd scope bind/unbind (SPEC v6 sections 3, 13)", () => {
 
   it("rebinding a repo to a different scope replaces the previous binding", () => {
     const db = freshDb();
-    addScope(db, "sample-app", "all", "any");
-    addScope(db, "project-b", "all", "any");
+    addScope(resolveHumanWriteContext(db), "sample-app", "all", "any");
+    addScope(resolveHumanWriteContext(db), "project-b", "all", "any");
     bindScopeCommand(db, "sample-app", "github.com/example/sample-app");
     bindScopeCommand(db, "project-b", "github.com/example/sample-app");
 
@@ -191,7 +199,7 @@ describe("ctxd scope bind/unbind (SPEC v6 sections 3, 13)", () => {
 
   it("unbinds a repository and reports when nothing was bound", () => {
     const db = freshDb();
-    addScope(db, "sample-app", "all", "any");
+    addScope(resolveHumanWriteContext(db), "sample-app", "all", "any");
     bindScopeCommand(db, "sample-app", "github.com/example/sample-app");
 
     expect(unbindScopeCommand(db, "github.com/example/sample-app")).toBe(0);

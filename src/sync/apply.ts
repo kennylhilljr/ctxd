@@ -77,7 +77,7 @@ function decide(db: Database.Database, event: WireEvent): Decision {
   // nodes independently purging the same entry while partitioned) is let through instead, so
   // materialize.ts's own HLC guard, not arrival order, decides whether it wins (7.3 convergence).
   if (entry?.purged_at != null && !isPurgeEvent) return "purged";
-  if (event.part === "meta") return "fast-forward"; // the purge handler is an idempotent, HLC-guarded upsert; never a concurrent case this layer needs to resolve
+  if (event.part === "meta") return "fast-forward"; // purge (an idempotent, HLC-guarded upsert) and acl (M3 slice 6, Spec v8 4) are both plain upserts with no concurrent case this layer needs to resolve
   if (event.part === "claim") {
     // suspend/resume (quarantine, 7.6.2) carry no real parentRevs and never conflict, same as
     // every claim-part op did before this slice; only claim/release consult the head below.
