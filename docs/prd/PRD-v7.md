@@ -6,7 +6,7 @@
 | **Owner** | Kenny Hill |
 | **Date** | 2026-10-18 |
 | **Supersedes** | [PRD v6](PRD-v6.md) |
-| **Component PRDs** | [Knowledge model](components/PRD-knowledge-model-v3.md), [Persona pools and access](components/PRD-pools-access-v2.md), [Hooks](components/PRD-hooks-v5.md), [Claims](components/PRD-claims-v3.md), [Trust and safety](components/PRD-trust-safety-v4.md), [Context hygiene](components/PRD-context-hygiene-v1.md), [Replication](components/PRD-replication-v4.md), [Briefs and search](components/PRD-briefs-search-v4.md), [Filesystem view](components/PRD-filesystem-view-v1.md), [Skills](components/PRD-skills-v1.md), [Memory and journal](components/PRD-memory-journal-v1.md), [Feature flags](components/PRD-feature-flags-v1.md) |
+| **Component PRDs** | [Knowledge model](components/PRD-knowledge-model-v3.md), [Persona pools and access](components/PRD-pools-access-v2.md), [Hooks](components/PRD-hooks-v5.md), [Claims](components/PRD-claims-v3.md), [Trust and safety](components/PRD-trust-safety-v4.md), [Context hygiene](components/PRD-context-hygiene-v1.md), [Replication](components/PRD-replication-v5.md), [Briefs and search](components/PRD-briefs-search-v4.md), [Filesystem view](components/PRD-filesystem-view-v1.md), [Skills](components/PRD-skills-v1.md), [Memory and journal](components/PRD-memory-journal-v1.md), [Feature flags](components/PRD-feature-flags-v1.md) |
 | **Companion docs** | [Technical spec v7](../spec/SPEC-v7.md) (v8 adds feature flags), [Prior art v4](../research/prior-art-v4.md), [ADRs](../adr/) |
 
 ## Changes in v7
@@ -127,7 +127,7 @@ This parent PRD sets the product's goals, scope and cross-cutting requirements. 
 | [Claims and write intent](components/PRD-claims-v3.md) | Task claims, write intent, overlap policy, drift audit, stale-claim takeover, claim liveness | FR-17, FR-23 to FR-26 | CL- | 4, 7.4, 7.5, 8.2 |
 | [Trust and safety](components/PRD-trust-safety-v4.md) | Sanitization, capture filters, bypass, path guard, provenance, review queue and remembered approvals, tokens, vendor policy, network exposure, data at rest | FR-11, FR-12, FR-18, FR-21 | TS- | 6, 6.1, 9.9, 10 |
 | [Context hygiene](components/PRD-context-hygiene-v1.md) | Cleaning bad context: flag, quarantine and revert by source, scope rollback, purge, review-by dates, tidy | FR-37 to FR-41 | CH- | 4, 7.6, 8.2, 11, 13 |
-| [Replication and offline work](components/PRD-replication-v4.md) | Per-machine replicas, scope replication, sync over Tailscale, per-part conflicts, idempotent retries, hub migration | FR-4, FR-13 to FR-15 | RP- | 4, 5, 7, 12 |
+| [Replication and offline work](components/PRD-replication-v5.md) | Per-machine replicas, scope replication, sync over Tailscale, per-part conflicts, idempotent retries, hub migration | FR-4, FR-13 to FR-15 | RP- | 4, 5, 7, 12 |
 | [Briefs and search](components/PRD-briefs-search-v4.md) | Detail tiers, brief contents and caps (including open signals, the skill catalog and journal highlights), lessons, interrupted-work wording, search scope and filters, tool footprint, agent ergonomics, semantic search | FR-2, FR-5, FR-6, FR-20, FR-56 | BS- | 8.2, 8.5, 11 |
 | [Filesystem view](components/PRD-filesystem-view-v1.md) | `ctxd://` paths, folder summaries, browsing for agents and me, the editable Markdown mirror, import | FR-19, FR-43 to FR-45 | FS- | 4.2, 8.2, 12.1, 13 |
 | [Skills](components/PRD-skills-v1.md) | Shared, versioned, approved procedures; the skill catalog; native sync into Claude Code and Codex | FR-46 to FR-49 | SK- | 4.3, 6, 10.4, 11.1, 12.2, 13 |
@@ -176,7 +176,7 @@ The full definition is in [Hooks and agent lifecycle](components/PRD-hooks-v5.md
 | FR-1 | Store typed entries in scopes, with versions, tags, links and provenance (client, session, node, time) | P0 | [Knowledge](components/PRD-knowledge-model-v3.md) |
 | FR-2 | MCP tools: `context_brief`, `context_search`, `context_get`, `context_write`, `context_handoff`, `context_flag`, `context_claim` | P0 | [Briefs](components/PRD-briefs-search-v4.md) |
 | FR-3 | Optimistic concurrency: writes to an existing entry require `expected_rev`; mismatches return the current revision, never overwrite | P0 | [Knowledge](components/PRD-knowledge-model-v3.md) |
-| FR-4 | Idempotent writes via a client-supplied `request_id` with an input fingerprint; reusing an id with different input is refused | P0 | [Replication](components/PRD-replication-v4.md) |
+| FR-4 | Idempotent writes via a client-supplied `request_id` with an input fingerprint; reusing an id with different input is refused | P0 | [Replication](components/PRD-replication-v5.md) |
 | FR-5 | Budgeted briefs at `micro`, `normal`, `full`, assembled deterministically (no model call) | P0 | [Briefs](components/PRD-briefs-search-v4.md) |
 | FR-6 | Full-text search (SQLite FTS5) with ranking by relevance, recency and kind | P0 | [Briefs](components/PRD-briefs-search-v4.md) |
 | FR-7 | `ctxd hook <event>` CLI for Claude Code and Codex hook events (Hooks section 7) | P0 | [Hooks](components/PRD-hooks-v5.md) |
@@ -185,9 +185,9 @@ The full definition is in [Hooks and agent lifecycle](components/PRD-hooks-v5.md
 | FR-10 | Per-client tokens; every write attributed; tokens revocable | P0 | [Pools](components/PRD-pools-access-v2.md) |
 | FR-11 | Review queue: `proposed` entries listed, approved, edited or rejected via `ctxd review` | P0 | [Trust](components/PRD-trust-safety-v4.md) |
 | FR-12 | Redaction on write: strip `<private>` blocks; strip invisible and bidirectional control characters; reject likely secrets in agent writes; redact in place in mechanical hook captures; sanitize before truncating | P0 | [Trust](components/PRD-trust-safety-v4.md) |
-| FR-13 | Multi-node replication over Tailscale with offline operation and convergence | P1 | [Replication](components/PRD-replication-v4.md) |
-| FR-14 | Conflict policies by kind (spec section 7); conflicted entries surfaced in review | P1 | [Replication](components/PRD-replication-v4.md) |
-| FR-15 | Scope replication policies (`all`, `home`, `local`) enforced during sync | P1 | [Replication](components/PRD-replication-v4.md) |
+| FR-13 | Multi-node replication over Tailscale with offline operation and convergence | P1 | [Replication](components/PRD-replication-v5.md) |
+| FR-14 | Conflict policies by kind (spec section 7); conflicted entries surfaced in review | P1 | [Replication](components/PRD-replication-v5.md) |
+| FR-15 | Scope replication policies (`all`, `home`, `local`) enforced during sync | P1 | [Replication](components/PRD-replication-v5.md) |
 | FR-16 | Scope vendor policy (`any`, `local-only`) enforced per client on every read | P1 | [Pools](components/PRD-pools-access-v2.md) |
 | FR-17 | Leases on tasks with expiry; tentative claims while offline; deterministic tie-break on merge | P1 | [Claims](components/PRD-claims-v3.md) |
 | FR-18 | Encrypted backups (local, optionally copied to Google Drive as ciphertext) | P1 | [Trust](components/PRD-trust-safety-v4.md) |
@@ -312,11 +312,11 @@ If capturing from phone chat apps proves important, add a minimal cloud inbox, n
 
 | # | Question |
 |---|---|
-| Q1 | MacBook Air model, chip and RAM; is it still on a supported macOS? (Decides local embeddings in M5.) |
+| Q1 | **Resolved.** The hub is a temporary Intel MacBook Air, approaching macOS end of life, replaced later by a Mac Studio. It does not decide local embeddings in M5 after all: see Q5 and [Replication v5](components/PRD-replication-v5.md) section 2/3, [ADR 0004](../adr/0004-embeddings-replicate.md). |
 | Q2 | Final project name and GitHub repo name (working name `ctxd`). |
 | Q3 | Which scopes are `home`-only and which are `local-only`? |
 | Q4 | Should confirmed decisions auto-accept in some scopes, or always go to review? |
-| Q5 | Embedding model choice for M5 (local only). |
+| Q5 | **Resolved.** A small, CPU-friendly local embedding model, computed on the daily-driver machine (not the hub) and replicated as event data; see [ADR 0004](../adr/0004-embeddings-replicate.md). Exact model to be pinned in the M5 implementation. |
 | Q6 | Run Beads alongside ctxd for task tracking, or keep tasks native? |
 | Q7 | Default nudge thresholds (30 minutes, 20 turns) after a week of real use. |
 | Q8 | Should ctxd integrate with coordinate-agents if I use it (for example, recording its review decisions and task results as pointers in ctxd), or stay independent? |
@@ -458,7 +458,7 @@ DataHub's [context management platform post](https://datahub.com/blog/best-conte
 | 1. Breadth of ingestion | Not a goal; ctxd stores curated knowledge and pointers, not a data estate |
 | 2. Metadata and semantic foundation | Typed kinds, parts, relations ([Knowledge model](components/PRD-knowledge-model-v3.md)) |
 | 3. Expert-validated context | Proposed status and the review queue ([Trust and safety](components/PRD-trust-safety-v4.md)) |
-| 4. Freshness through events | Hooks write at session boundaries; event-log sync ([Hooks](components/PRD-hooks-v5.md), [Replication](components/PRD-replication-v4.md)) |
+| 4. Freshness through events | Hooks write at session boundaries; event-log sync ([Hooks](components/PRD-hooks-v5.md), [Replication](components/PRD-replication-v5.md)) |
 | 5. Shareability across agents | Every MCP client, with hooks for Claude Code and Codex |
 | 6. Activation beyond MCP | Hooks, CLI, Desktop project instructions |
 | 7. Provenance, versioning, auditability | Per-client provenance, full history with prior values |

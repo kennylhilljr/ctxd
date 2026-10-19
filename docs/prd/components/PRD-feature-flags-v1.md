@@ -53,6 +53,7 @@ ctxd runs inside my daily work: hooks fire in every Claude Code and Codex sessio
 | `statusline` | on | M4 | `ctxd statusline` prints nothing |
 | `importance` | on | M5 | Briefs and search fall back to the Spec v6 ranking without importance |
 | `semantic_search` | off | M5 | Full-text search only |
+| `semantic_search.compute` | off | M5 | This machine never computes embeddings itself; it still serves hybrid search over vectors that arrive through sync ([Replication v5](PRD-replication-v5.md) section 3, [ADR 0004](../../adr/0004-embeddings-replicate.md)) |
 | `digest` | on | M5 | No weekly digests from this machine |
 | `skills.native_sync` | off | M5 | Skills are not written into client skill folders, and nothing already synced is changed |
 | `mirror` | off | M6 | The Markdown mirror is neither written nor watched |

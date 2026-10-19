@@ -35,6 +35,8 @@ export const FLAG_REGISTRY: readonly FlagDef[] = [
   { name: "backups", default: true, milestone: "M4", description: "ctxd backup: VACUUM INTO, age encryption, pruning to the newest copies", offMeans: "ctxd backup refuses to run" },
   { name: "backups.copy", default: true, milestone: "M4", description: "Copy the encrypted backup to [backup] copy_to", offMeans: "Backups stay in the local backups directory only", parent: "backups" },
   { name: "statusline", default: true, milestone: "M4", description: "ctxd statusline output", offMeans: "ctxd statusline prints nothing" },
+  { name: "semantic_search", default: false, milestone: "M5", description: "Hybrid search blending FTS with embedding vectors (reciprocal rank fusion)", offMeans: "Full-text search only" },
+  { name: "semantic_search.compute", default: false, milestone: "M5", description: "Compute an embedding for this machine's own writes and replicate it", offMeans: "This machine never computes embeddings itself; it still serves hybrid search over vectors that arrive through sync", parent: "semantic_search" },
 ];
 
 const FLAGS_BY_NAME = new Map(FLAG_REGISTRY.map((def) => [def.name, def]));
