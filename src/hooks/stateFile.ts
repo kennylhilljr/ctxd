@@ -57,19 +57,33 @@ export function readStateFile<T>(path: string): T | undefined {
 }
 
 /**
+ * Take `path`'s lock (same semantics as `writeStateFileLocked`'s own: bounded 200ms wait, a
+ * stale lock over 5s is broken), run `fn`, then release. Resolves to `undefined`, without
+ * running `fn`, if the lock could not be taken in time (SPEC 9.7's per-session lock reused by
+ * `ctxd worker`, outside this module's own state-file writes).
+ */
+export async function withLock<T>(path: string, fn: () => T | Promise<T>): Promise<T | undefined> {
+  mkdirSync(dirname(path), { recursive: true });
+  const deadline = Date.now() + LOCK_WAIT_MS;
+  while (!tryLockOnce(path)) {
+    if (Date.now() >= deadline) return undefined;
+    await sleep(LOCK_POLL_MS);
+  }
+  try {
+    return await fn();
+  } finally {
+    unlock(path);
+  }
+}
+
+/**
  * Write a small JSON state file under a per-file lock, atomically (temp file, fsync, rename).
  * Lock waits are bounded to 200ms (polling every 10ms); on contention, the write is skipped
  * (returns false) rather than blocking -- a missed nudge or checkpoint is acceptable, a blocked
  * or broken session is not.
  */
 export async function writeStateFileLocked<T>(path: string, value: T): Promise<boolean> {
-  mkdirSync(dirname(path), { recursive: true });
-  const deadline = Date.now() + LOCK_WAIT_MS;
-  while (!tryLockOnce(path)) {
-    if (Date.now() >= deadline) return false;
-    await sleep(LOCK_POLL_MS);
-  }
-  try {
+  const wrote = await withLock(path, () => {
     const tmp = `${path}.${process.pid}.tmp`;
     const fd = openSync(tmp, "w");
     try {
@@ -80,7 +94,6 @@ export async function writeStateFileLocked<T>(path: string, value: T): Promise<b
     }
     renameSync(tmp, path);
     return true;
-  } finally {
-    unlock(path);
-  }
+  });
+  return wrote ?? false;
 }
