@@ -4,27 +4,33 @@
  * moments (the agent itself calls context_write or context_claim) and have no hook handler at
  * all; they are not a gap in this slice, just not hook-driven.
  *
- * SessionEnd also attempts the mechanical claim release SPEC 7.5.4/9.2 call for "when its work
- * is committed": any active lease this session holds (by session_ref, M2 slice 9) is released if
- * HEAD has moved past the lease's base_head and the working tree is clean. Deferred, not silently
- * skipped:
- * - SessionEnd's work is specified to run in a detached worker (SPEC 9.7) since its own hook
- *   budget is short (1.5s Claude Code, 3s Codex). No M2 slice has added `ctxd worker` or ticket
- *   files yet, so this runs synchronously within the hook's existing deadline instead; a git
- *   status check and one DB write are fast enough to fit that budget in the normal case.
+ * SessionEnd's own work (SPEC 9.7's named example of work that does not fit the adapter's time
+ * budget: 1.5s on Claude Code, 3s on Codex) is a mechanical journal entry plus the mechanical
+ * claim release (SPEC 7.5.4/9.2, "when its work is committed": any active lease this session
+ * holds, by session_ref, is released if HEAD has moved past the lease's base_head and the
+ * working tree is clean). `sessionEndHandler` itself only writes a work ticket and spawns a
+ * detached `ctxd worker` for it (SPEC 9.7); the actual work lives in `performSessionEnd`, called
+ * by that worker (`src/cli/worker.ts`) and, for a ticket left behind by a crash, by the next
+ * crash sweep (`src/hooks/crashSweep.ts`). This closes the M2 handoff's own note that this work
+ * ran synchronously in the hook instead, for lack of `ctxd worker` or ticket files at the time.
+ *
+ * Still deferred, not silently skipped:
  * - PreCompact's `recovery` update ("phase and last request summary from the hook input") has no
  *   reliable source: Claude Code and Codex's documented PreCompact payloads carry no such field,
  *   only `session_id`/`cwd`/`trigger`. This only writes the checkpoint file, not a recovery guess.
- * - The crash sweep's own mechanical release (src/hooks/crashSweep.ts, for a session that never
- *   reaches SessionEnd at all) still can't do this: a crashed session has no live `cwd` to check
- *   "working tree clean" against, which is exactly what SessionEnd has and the sweep does not.
+ * - The crash sweep's own mechanical release, for a session that never reaches SessionEnd at all
+ *   (no ticket is ever written), still can't do this: a crashed session has no live `cwd` to
+ *   check "working tree clean" against, which is exactly what a real SessionEnd's ticket carries
+ *   and a crashed session never produces.
  *
- * Every write here goes through writeCtxOf's assumedPools, resolved from the client's own issued
- * persona token (store/snapshot.ts's resolveAssumedPools, same reasoning as src/hooks/readMoments.ts),
- * so a mechanical write respects exactly the pools the client was actually given, not every pool
- * it happens to be a member of.
+ * Every write here goes through buildWriteContext's assumedPools, resolved from the client's own
+ * issued persona token (store/snapshot.ts's resolveAssumedPools, same reasoning as
+ * src/hooks/readMoments.ts), so a mechanical write respects exactly the pools the client was
+ * actually given, not every pool it happens to be a member of.
  */
+import { spawn } from "node:child_process";
 import { join } from "node:path";
+import type Database from "better-sqlite3";
 import { decodeHlc, HlcClock } from "../core/hlc.js";
 import { newId } from "../core/ids.js";
 import { isFlagOn } from "../config/flags.js";
@@ -135,26 +141,62 @@ export async function stopHandler(ctx: HookContext): Promise<HookResult> {
   return decision.block ? { block: { reason: decision.reason! } } : undefined;
 }
 
-function sessionStartedAtMs(ctx: HookContext): number | null {
-  const row = ctx.db.prepare("SELECT started_at FROM sessions WHERE session_ref = ?").get(ctx.sessionRef) as { started_at: string } | undefined;
+/** Reused by `ctxd worker` and the crash sweep, which have a `db` and a `sessionRef` but no `HookContext`. */
+export function sessionStartedAtMsFor(db: Database.Database, sessionRef: string): number | null {
+  const row = db.prepare("SELECT started_at FROM sessions WHERE session_ref = ?").get(sessionRef) as { started_at: string } | undefined;
   return row ? Date.parse(row.started_at) : null;
 }
 
-/** W3: a mechanical session journal entry when SessionEnd fires. Never blocks; errors are swallowed (SPEC 9.1, 9.2). */
-export function sessionEndHandler(ctx: HookContext): HookResult {
-  if (!ctx.scope) return undefined;
-  const scopeId = scopeIdOf(ctx);
-  if (!scopeId) return undefined;
-  const cwd = cwdOf(ctx);
-  const branch = gitBranch(cwd);
-  const head = gitHead(cwd);
-  const changedFiles = gitChangedFiles(cwd);
-  const startedAt = sessionStartedAtMs(ctx);
-  const durationMinutes = startedAt !== null ? Math.round((Date.now() - startedAt) / 60_000) : null;
-  const handoffSummary = latestHandoffSummary(ctx, scopeId);
+/**
+ * Everything `performSessionEnd` needs, carried either by a fresh `HookContext` (same session,
+ * still running) or by a `SessionEndTicket` a detached worker or the crash sweep resolved back
+ * into these fields (a different process, no `HookContext` to read from).
+ */
+export interface SessionEndParams {
+  db: Database.Database;
+  nodeId: string;
+  clientId: string;
+  clientName: string;
+  sessionRef: string;
+  scope: string;
+  scopeId: string;
+  cwd: string;
+  startedAtMs: number | null;
+  flags?: Map<string, boolean>;
+}
+
+function buildWriteContext(params: SessionEndParams): WriteContext {
+  return {
+    db: params.db,
+    clock: new HlcClock(params.nodeId),
+    nodeId: params.nodeId,
+    clientId: params.clientId,
+    assumedPools: resolveAssumedPools(params.db, params.clientId),
+    flags: params.flags,
+  };
+}
+
+function latestHandoffSummaryFor(db: Database.Database, scopeId: string, clientId: string): string | null {
+  const row = db
+    .prepare("SELECT summary FROM entries WHERE scope_id = ? AND kind = 'handoff' AND created_by = ? ORDER BY updated_hlc DESC LIMIT 1")
+    .get(scopeId, clientId) as { summary: string } | undefined;
+  return row?.summary ?? null;
+}
+
+/**
+ * W3/SPEC 9.7: the mechanical journal entry plus mechanical claim release, the work a SessionEnd
+ * ticket defers onto `ctxd worker` (or, for a ticket a crash left behind, the next crash sweep)
+ * rather than running inline in the hook. Never blocks; errors are swallowed (SPEC 9.1, 9.2).
+ */
+export function performSessionEnd(params: SessionEndParams): void {
+  const branch = gitBranch(params.cwd);
+  const head = gitHead(params.cwd);
+  const changedFiles = gitChangedFiles(params.cwd);
+  const durationMinutes = params.startedAtMs !== null ? Math.round((Date.now() - params.startedAtMs) / 60_000) : null;
+  const handoffSummary = latestHandoffSummaryFor(params.db, params.scopeId, params.clientId);
 
   const bodyLines = [
-    `Client: ${ctx.clientName}`,
+    `Client: ${params.clientName}`,
     durationMinutes !== null ? `Duration: ${durationMinutes} min` : null,
     branch ? `Branch: ${branch}` : null,
     head ? `HEAD: ${head}` : null,
@@ -163,10 +205,10 @@ export function sessionEndHandler(ctx: HookContext): HookResult {
   ].filter((l): l is string => l !== null);
 
   try {
-    writeEntry(writeCtxOf(ctx), {
-      scope: ctx.scope,
+    writeEntry(buildWriteContext(params), {
+      scope: params.scope,
       kind: "journal",
-      title: `Session ended: ${ctx.clientName}`,
+      title: `Session ended: ${params.clientName}`,
       body: bodyLines.join("\n"),
       significance: "routine",
       tags: ["auto"],
@@ -176,26 +218,96 @@ export function sessionEndHandler(ctx: HookContext): HookResult {
     // A failed mechanical record is not worth breaking SessionEnd over.
   }
 
-  if (isFlagOn(ctx.flags, "claims.mechanical_release")) {
-    releaseCommittedLeases(ctx, scopeId, head, changedFiles.length === 0);
+  if (isFlagOn(params.flags, "claims.mechanical_release")) {
+    releaseCommittedLeases(params, head, changedFiles.length === 0);
   }
-  return undefined;
 }
 
 /** Mechanical release (SPEC 7.5.4/9.2): this session's active leases whose work is committed and clean. */
-function releaseCommittedLeases(ctx: HookContext, scopeId: string, head: string | null, treeClean: boolean): void {
+function releaseCommittedLeases(params: SessionEndParams, head: string | null, treeClean: boolean): void {
   if (head === null || !treeClean) return; // unknown HEAD, or uncommitted work: leave the lease active
-  const leases = ctx.db
+  const leases = params.db
     .prepare("SELECT task_id, base_head FROM leases WHERE scope_id = ? AND state = 'active' AND session_ref = ?")
-    .all(scopeId, ctx.sessionRef) as { task_id: string; base_head: string | null }[];
+    .all(params.scopeId, params.sessionRef) as { task_id: string; base_head: string | null }[];
   for (const lease of leases) {
     if (lease.base_head === null || lease.base_head === head) continue; // no baseline, or no commits since claim
     try {
-      handleClaim(writeCtxOf(ctx), { scope: ctx.scope!, action: "release", task_id: lease.task_id, ttl_minutes: 120, session: ctx.sessionRef });
+      handleClaim(buildWriteContext(params), { scope: params.scope, action: "release", task_id: lease.task_id, ttl_minutes: 120, session: params.sessionRef });
     } catch {
       // A failed mechanical release is not worth breaking SessionEnd over; the claim just stays active.
     }
   }
+}
+
+export interface SessionEndTicket {
+  kind: "session-end";
+  sessionRef: string;
+  clientName: string;
+  scope: string;
+  cwd: string;
+  createdAt: string;
+}
+
+/**
+ * Resolves a ticket's client/scope names back to ids and calls `performSessionEnd`. Shared by
+ * `ctxd worker` (src/cli/worker.ts) and the crash sweep's own leftover-ticket pass
+ * (src/hooks/crashSweep.ts), neither of which has a `HookContext` to read ids from directly.
+ */
+export function applySessionEndTicket(db: Database.Database, nodeId: string, ticket: SessionEndTicket, flags?: Map<string, boolean>): void {
+  const client = db.prepare("SELECT client_id FROM clients WHERE name = ?").get(ticket.clientName) as { client_id: string } | undefined;
+  if (!client) return; // the client was revoked or removed since the ticket was written: no one to attribute the work to
+  const scopeRow = db.prepare("SELECT scope_id FROM scopes WHERE name = ?").get(ticket.scope) as { scope_id: string } | undefined;
+  if (!scopeRow) return; // the scope no longer exists: nothing to write into
+  performSessionEnd({
+    db,
+    nodeId,
+    clientId: client.client_id,
+    clientName: ticket.clientName,
+    sessionRef: ticket.sessionRef,
+    scope: ticket.scope,
+    scopeId: scopeRow.scope_id,
+    cwd: ticket.cwd,
+    startedAtMs: sessionStartedAtMsFor(db, ticket.sessionRef),
+    flags,
+  });
+}
+
+/** `sessions/<sessionRef>.<createdAtMs>.ticket.json`: creation time in the file name (SPEC 9.10 bullet 3). */
+export function sessionEndTicketPath(dataDir: string, sessionRef: string, createdAtMs: number): string {
+  return join(dataDir, "sessions", `${sessionRef.replace(":", "-")}.${createdAtMs}.ticket.json`);
+}
+
+/**
+ * Spawns `ctxd worker <ticket>` detached (new session, stdio closed, unref'd so this process can
+ * exit without waiting for it) against the exact binary and node runtime already running this
+ * hook (`process.argv[1]`/`process.execPath`, the same technique `src/cli/service.ts` uses for
+ * launchd, rather than a `PATH` lookup).
+ */
+export function spawnWorker(ticketPath: string, dataDir: string, configPath: string): void {
+  const args = ["worker", ticketPath, "--data-dir", dataDir, ...(configPath ? ["--config", configPath] : [])];
+  spawn(process.execPath, [process.argv[1]!, ...args], { detached: true, stdio: "ignore" }).unref();
+}
+
+/**
+ * W3/SPEC 9.7: writes the SessionEnd work ticket and spawns a detached `ctxd worker` for it,
+ * instead of doing the work inline, since it does not reliably fit the adapter's own time budget.
+ * `spawnFn` is overridable only for tests; production dispatch always uses the real `spawnWorker`.
+ */
+export async function sessionEndHandler(ctx: HookContext, spawnFn: typeof spawnWorker = spawnWorker): Promise<HookResult> {
+  if (!ctx.scope) return undefined;
+  const createdAtMs = Date.now();
+  const ticket: SessionEndTicket = {
+    kind: "session-end",
+    sessionRef: ctx.sessionRef,
+    clientName: ctx.clientName,
+    scope: ctx.scope,
+    cwd: cwdOf(ctx),
+    createdAt: new Date(createdAtMs).toISOString(),
+  };
+  const path = sessionEndTicketPath(ctx.dataDir, ctx.sessionRef, createdAtMs);
+  await writeStateFileLocked(path, ticket);
+  spawnFn(path, ctx.dataDir, ctx.configPath ?? "");
+  return undefined;
 }
 
 const GIT_COMMIT_COMMAND = /^\s*git\s+(?:-C\s+\S+\s+)?commit\b/;
