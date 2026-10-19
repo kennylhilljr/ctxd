@@ -37,6 +37,7 @@ import { run as runNodeCommand } from "./node.js";
 import { run as runSyncCommand } from "./sync.js";
 import { run as runServiceCommand } from "./service.js";
 import { runBackupCommand, runRestoreCommand } from "./backup.js";
+import { run as runDoctorCommand } from "./doctor.js";
 
 /** Each command's parsed-args entry point, added as its milestone lands. */
 const COMMAND_RUNNERS: Record<string, (argv: string[]) => number | Promise<number>> = {
@@ -74,6 +75,7 @@ const COMMAND_RUNNERS: Record<string, (argv: string[]) => number | Promise<numbe
   service: runServiceCommand,
   backup: runBackupCommand,
   restore: runRestoreCommand,
+  doctor: runDoctorCommand,
 };
 
 const COMMANDS: Record<string, { milestone: string; summary: string }> = {

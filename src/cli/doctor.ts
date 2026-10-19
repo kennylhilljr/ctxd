@@ -1,0 +1,196 @@
+/**
+ * `ctxd doctor` (SPEC v8 section 12, PRD-trust-safety-v4 TS-17): the seven checks the spec lists
+ * for diagnosing a node, each read-only. Printed as one line per check so a human can scan it;
+ * exit code is 0 only if every check passes.
+ *
+ * "Last sync age" (one of the spec's own bullets, under peer reachability) cannot be reported
+ * yet: `sync_state` (M3) stores only `through_seq` per peer, no timestamp of when that was last
+ * updated. Flagged in the peer-reachability check's own detail text rather than guessed at or
+ * silently dropped; adding the column is M3's own table to change, not this slice's.
+ */
+import { execFileSync } from "node:child_process";
+import { existsSync, readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
+import { homedir } from "node:os";
+import { parseArgs } from "node:util";
+import type Database from "better-sqlite3";
+import { resolveConfigPath, resolveDataDir, tokensDir } from "./common.js";
+import { type CtxdConfig, loadConfig } from "../config/config.js";
+import { checkDatabaseIntegrity, openDatabase } from "../store/db.js";
+import {
+  claudeCodeSettingsPath,
+  codexConfigPath,
+  isClaudeCodeHooksInstalled,
+  isCodexHooksInstalled,
+} from "./install-hooks.js";
+
+export interface DoctorCheck {
+  name: string;
+  ok: boolean;
+  detail: string;
+}
+
+function isLoopbackHost(host: string): boolean {
+  return host === "127.0.0.1" || host === "::1" || host === "localhost";
+}
+
+/** `[::1]:7412` -> `::1`; `127.0.0.1:7411` -> `127.0.0.1` (matches configSchema's own `listen` shape). */
+function hostOf(hostPort: string): string {
+  const bracketed = /^\[(.+)\]:\d+$/.exec(hostPort);
+  return bracketed ? bracketed[1]! : hostPort.replace(/:\d+$/, "");
+}
+
+export function checkBindAddresses(config: CtxdConfig): DoctorCheck {
+  const listens = [config.mcp.listen, config.sync.listen];
+  const bad = listens.filter((l) => !isLoopbackHost(hostOf(l)));
+  return {
+    name: "bind addresses",
+    ok: bad.length === 0,
+    detail: bad.length === 0 ? `loopback only (${listens.join(", ")})` : `non-loopback bind address(es): ${bad.join(", ")}`,
+  };
+}
+
+export function checkTokenFilePermissions(configPath: string): DoctorCheck {
+  const dir = tokensDir(configPath);
+  if (!existsSync(dir)) return { name: "token file permissions", ok: true, detail: "no tokens directory yet" };
+  const files = readdirSync(dir).filter((f) => f.endsWith(".token"));
+  const loose = files.filter((f) => (statSync(join(dir, f)).mode & 0o077) !== 0);
+  return {
+    name: "token file permissions",
+    ok: loose.length === 0,
+    detail: loose.length === 0 ? `${files.length} token file(s), none readable by group or other` : `readable by group or other: ${loose.join(", ")}`,
+  };
+}
+
+export function checkDatabaseHealth(db: Database.Database): DoctorCheck {
+  const result = checkDatabaseIntegrity(db);
+  return { name: "database integrity", ok: result.ok, detail: result.ok ? "PRAGMA quick_check: ok" : result.reason! };
+}
+
+interface StoredReviewRule {
+  kind?: string;
+  client?: string;
+  confirmed_by_user?: boolean;
+}
+
+/** SPEC 10.4's own narrowness constraints: a rule must name a kind, must name a client or require confirmed_by_user, and never targets skill or preference. */
+function ruleIsNarrow(rule: StoredReviewRule): boolean {
+  if (!rule.kind || rule.kind === "skill" || rule.kind === "preference") return false;
+  return rule.client !== undefined || rule.confirmed_by_user === true;
+}
+
+export function checkReviewRuleNarrowness(db: Database.Database): DoctorCheck {
+  const scopes = db.prepare("SELECT name, review_policy FROM scopes").all() as { name: string; review_policy: string }[];
+  const violations: string[] = [];
+  for (const scope of scopes) {
+    const parsed = JSON.parse(scope.review_policy) as unknown;
+    if (!Array.isArray(parsed)) continue;
+    parsed.forEach((rule, index) => {
+      if (!ruleIsNarrow(rule as StoredReviewRule)) violations.push(`${scope.name}[${index}]`);
+    });
+  }
+  return {
+    name: "review rule narrowness",
+    ok: violations.length === 0,
+    detail: violations.length === 0 ? "every rule names a kind and a client or confirmed_by_user; none target skill or preference" : `broader than allowed: ${violations.join(", ")}`,
+  };
+}
+
+export async function checkPeers(db: Database.Database, fetchImpl: typeof fetch = fetch): Promise<DoctorCheck> {
+  const peers = db.prepare("SELECT name, url FROM peers WHERE revoked_at IS NULL").all() as { name: string; url: string }[];
+  if (peers.length === 0) return { name: "peer reachability", ok: true, detail: "no peers configured" };
+
+  const results = await Promise.all(
+    peers.map(async (peer) => {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 2000);
+      try {
+        await fetchImpl(peer.url, { signal: controller.signal });
+        return { name: peer.name, reachable: true };
+      } catch {
+        return { name: peer.name, reachable: false };
+      } finally {
+        clearTimeout(timeout);
+      }
+    }),
+  );
+  const unreachable = results.filter((r) => !r.reachable).map((r) => r.name);
+  const summary = results.map((r) => `${r.name}: ${r.reachable ? "reachable" : "unreachable"}`).join(", ");
+  return {
+    name: "peer reachability",
+    ok: unreachable.length === 0,
+    detail: `${summary} (last sync age: not tracked yet; sync_state has no timestamp column)`,
+  };
+}
+
+export function checkFileVault(execFile: typeof execFileSync = execFileSync): DoctorCheck {
+  try {
+    const output = execFile("fdesetup", ["status"], { encoding: "utf8" }) as unknown as string;
+    return { name: "FileVault", ok: /FileVault is On/i.test(output), detail: output.trim() };
+  } catch (err) {
+    return { name: "FileVault", ok: false, detail: `could not check: ${err instanceof Error ? err.message : String(err)}` };
+  }
+}
+
+export function checkHookInstallation(home: string = homedir()): DoctorCheck {
+  const claudeCode = isClaudeCodeHooksInstalled(claudeCodeSettingsPath(home));
+  const codex = isCodexHooksInstalled(codexConfigPath(home));
+  const missing = [...(claudeCode ? [] : ["claude-code"]), ...(codex ? [] : ["codex"])];
+  return {
+    name: "hook installation",
+    ok: missing.length === 0,
+    detail: missing.length === 0 ? "claude-code and codex both have ctxd's hooks installed" : `missing for: ${missing.join(", ")}`,
+  };
+}
+
+export interface DoctorOptions {
+  configPath: string;
+  home?: string;
+  fetchImpl?: typeof fetch;
+  execFile?: typeof execFileSync;
+}
+
+export async function runDoctor(db: Database.Database, config: CtxdConfig, opts: DoctorOptions): Promise<DoctorCheck[]> {
+  return [
+    checkBindAddresses(config),
+    checkTokenFilePermissions(opts.configPath),
+    checkDatabaseHealth(db),
+    checkReviewRuleNarrowness(db),
+    await checkPeers(db, opts.fetchImpl),
+    checkFileVault(opts.execFile),
+    checkHookInstallation(opts.home),
+  ];
+}
+
+export async function run(argv: string[]): Promise<number> {
+  const { values } = parseArgs({ args: argv, options: { "data-dir": { type: "string" }, config: { type: "string" } }, strict: true });
+  const configPath = resolveConfigPath({ configPath: values.config });
+  if (!existsSync(configPath)) {
+    console.error(`ctxd doctor: no config found at ${configPath}. Run "ctxd init" first.`);
+    return 1;
+  }
+  const config = loadConfig(configPath);
+  const dataDir = resolveDataDir({ dataDir: values["data-dir"], configPath: values.config });
+  const dbPath = join(dataDir, "ctxd.db");
+  if (!existsSync(dbPath)) {
+    console.error(`ctxd doctor: ${dbPath} is missing. Run "ctxd restore <file>" from a backup.`);
+    return 1;
+  }
+  let db: Database.Database;
+  try {
+    db = openDatabase(dbPath);
+  } catch (err) {
+    console.error(`ctxd doctor: ${err instanceof Error ? err.message : String(err)}`);
+    return 1;
+  }
+
+  const checks = await runDoctor(db, config, { configPath });
+  db.close();
+
+  let allOk = true;
+  for (const check of checks) {
+    console.log(`${check.ok ? "OK  " : "FAIL"} ${check.name}: ${check.detail}`);
+    if (!check.ok) allOk = false;
+  }
+  return allOk ? 0 : 1;
+}
