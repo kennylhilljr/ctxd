@@ -272,7 +272,7 @@ CREATE TABLE events (
   scope_id     TEXT NOT NULL,
   entry_id     TEXT NOT NULL,
   op           TEXT NOT NULL CHECK (op IN ('create','update','status','delete','resolve','claim','release','relate','unrelate','flag','unflag','quarantine','unquarantine','revert','purge','acl','suspend','resume')),
-  part         TEXT NOT NULL CHECK (part IN ('content','status','relations','claim','meta')),
+  part         TEXT NOT NULL CHECK (part IN ('content','status','relations','claim','meta','embedding')), -- 'embedding' added in M5 (11.2.1)
   parent_revs  TEXT NOT NULL DEFAULT '[]',
   rev          TEXT NOT NULL,
   client_id    TEXT NOT NULL,
@@ -560,6 +560,16 @@ CREATE TABLE sync_state (
 
 CREATE VIRTUAL TABLE entries_fts USING fts5(
   title, body, tags, content='entries', content_rowid='rowid'
+);
+
+CREATE TABLE embeddings (               -- materialized from 'embedding' events (M5, 11.2.1); current content only, like FTS
+  entry_id     TEXT NOT NULL,
+  model_id     TEXT NOT NULL,           -- e.g. "Xenova/all-MiniLM-L6-v2@q8"
+  dim          INTEGER NOT NULL,
+  vector       TEXT NOT NULL,           -- JSON array of floats; sqlite-vec reads this into its own virtual table at query time
+  rev          TEXT NOT NULL,           -- the content rev this embedding was computed from
+  updated_hlc  TEXT NOT NULL,
+  PRIMARY KEY (entry_id, model_id)
 );
 
 CREATE TABLE commits (                 -- local facts recorded by the PostToolUse hook (SPEC v7 7.5)
@@ -1524,8 +1534,21 @@ Recovery intent stores only the task id, a phase label and a one-line summary of
 - **The `scope: "*"` multipliers are intentional, not a gap.** With a session scope known, that scope ranks at 1.0, `_me` and its matching pool profiles at 0.9, and everything else at 0.8, exactly as for a named-scope search. With no session scope known (M1's case, and still the case until the session machinery in 9.2 lands and records one), there is no single "home" scope to rank at 1.0 against the rest, so `_me` and profiles rank at 0.9 and everything else at 0.8; this is the same ranking a named-scope search gives its non-home results, applied uniformly because there is no home to compare against yet.
 - **Flags and quarantine:** `flagged` entries are returned labeled with their open flags and multiplied by 0.5; entries with an open `unsafe` flag, `quarantined` entries and purged stubs are never returned.
 - **Proposed skills** are returned only to their author and the human client (4.3).
-- **M5:** hybrid with sqlite-vec embeddings via reciprocal rank fusion.
+- **M5: hybrid with sqlite-vec embeddings via reciprocal rank fusion.** FTS and vector results are each ranked independently, then combined by reciprocal rank fusion (`1 / (k + rank)`, `k = 60`) rather than a weighted blend of raw scores, so the two incomparable score scales (bm25 and cosine distance) never need calibrating against each other. An entry with no vector yet (11.2.1) ranks by FTS alone, exactly as it does with `semantic_search` off; this is normal, not a gap, per [Replication v5](../prd/components/PRD-replication-v5.md) section 4.
 - **Snippets:** about 40 words, built with FTS5 `snippet()`.
+
+### 11.2.1 Embeddings (M5)
+
+Implements [Replication v5](../prd/components/PRD-replication-v5.md) section 3 and [ADR 0004](../adr/0004-embeddings-replicate.md): embedding vectors replicate as event data; FTS does not and still never replicates (11.2, unchanged from v4).
+
+- **Who computes.** A node with the `semantic_search.compute` flag on (default off everywhere; a capable client turns it on) embeds an entry's title and body with a small, fixed, CPU-only model whenever it writes new content for that entry. A node with the flag off never computes, but can still serve hybrid search over vectors that arrived through sync.
+- **The event.** A new `part` value, `embedding`, on the existing `events` table (op `update`), carrying `{model_id, dim, vector}` as its payload. `vector` is a plain JSON array of floats; model-specific quantization or packing is left to the materialized `embeddings` table, not the event itself, so the event log stays a portable, model-agnostic record. One embedding event follows the content event that changed the text, in the same write, using the same `rev`.
+- **Materializing.** Applying an `embedding` event upserts the `embeddings` table (4), keyed by `(entry_id, model_id)`: a later vector for the same entry and model replaces the earlier one (current content only, matching how FTS always reflects current content, not history). A vector for a different `model_id` is kept alongside, never overwritten, so a model change is additive and detectable rather than a silent mix of incompatible vector spaces in one `sqlite-vec` table.
+- **Never conflicts.** Two nodes computing with the same `model_id` for the same text produce the same vector, so there is nothing to merge; [Replication v5](../prd/components/PRD-replication-v5.md) section 5 lists this explicitly. No `entry_siblings` row is ever created for an `embedding` part.
+- **Purge.** A purge (7.6) deletes every `embeddings` row for the purged entry, on every node, same as it deletes the entry's other content.
+- **Access.** An `embedding` event carries the same scope and vendor policy as the entry it describes; a sealed pool's embeddings are encrypted the same way as its content before they leave the enrolled machine.
+
+`events.part`'s `CHECK` constraint (4) gains `'embedding'` alongside `'content','status','relations','claim','meta'`. `entry_siblings.part`'s own `CHECK` is unchanged (still `'content','status','relations'` only), since an embedding never produces a sibling.
 
 ### 11.3 Importance
 

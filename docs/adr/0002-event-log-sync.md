@@ -1,6 +1,7 @@
 # ADR 0002: Append-only event log with pull-based sync
 
-- **Status:** Accepted
+- **Status:** Accepted; partially amended by [ADR 0004](0004-embeddings-replicate.md), which
+  makes embedding vectors (not FTS) replicated event data rather than purely local and derived.
 - **Date:** 2026-10-16
 
 ## Context
