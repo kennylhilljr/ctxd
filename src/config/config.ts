@@ -58,6 +58,15 @@ export const configSchema = z.object({
       dir: z.string().default("~/Library/Application Support/ctxd/mirror"),
     })
     .default({ enabled: false, dir: "~/Library/Application Support/ctxd/mirror" }),
+  /** Weekly digest (SPEC v8 11.5): only digest_node writes digests, on digest_weekday after 18:00 local. */
+  journal: z
+    .object({
+      digest_node: z.string().default(""),
+      digest_weekday: z
+        .enum(["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"])
+        .default("sunday"),
+    })
+    .default({ digest_node: "", digest_weekday: "sunday" }),
   /** Feature flags (PRD-feature-flags-v1 section 2): per machine, never synced. */
   features: z.record(z.string(), z.boolean()).default({}),
 });
