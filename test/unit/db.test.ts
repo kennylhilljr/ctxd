@@ -1,9 +1,9 @@
-import { mkdtempSync } from "node:fs";
+import { closeSync, mkdtempSync, openSync, writeSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
-import { openDatabase } from "../../src/store/db.js";
+import { checkDatabaseIntegrity, openDatabase } from "../../src/store/db.js";
 import { SCHEMA_VERSION } from "../../src/store/schema.js";
 
 function tmpDbPath(): string {
@@ -70,6 +70,38 @@ describe("openDatabase (SPEC v6 section 4)", () => {
     const path = tmpDbPath();
     const db = openDatabase(path, { create: true });
     expect(db).toBeInstanceOf(Database);
+    db.close();
+  });
+});
+
+describe("checkDatabaseIntegrity (SPEC v8 section 12's startup integrity)", () => {
+  it("reports ok for a freshly initialized database", () => {
+    const db = openDatabase(tmpDbPath(), { create: true });
+    expect(checkDatabaseIntegrity(db)).toEqual({ ok: true });
+    db.close();
+  });
+
+  it("reports ok after real data has been written", () => {
+    const db = openDatabase(tmpDbPath(), { create: true });
+    db.prepare("INSERT INTO nodes (node_id, name, role, created_at) VALUES ('n1','air','home','t')").run();
+    expect(checkDatabaseIntegrity(db).ok).toBe(true);
+    db.close();
+  });
+
+  it("fails and points to ctxd doctor and ctxd restore when the file is corrupted", () => {
+    const path = tmpDbPath();
+    openDatabase(path, { create: true }).close();
+    // Corrupt the file on disk directly, bypassing SQLite entirely, same as real disk damage would.
+    const fd = openSync(path, "r+");
+    const garbage = Buffer.from("not a valid sqlite page");
+    writeSync(fd, garbage, 0, garbage.length, 100);
+    closeSync(fd);
+
+    const db = new Database(path);
+    const result = checkDatabaseIntegrity(db);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain("ctxd doctor");
+    expect(result.reason).toContain("ctxd restore");
     db.close();
   });
 });

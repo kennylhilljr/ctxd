@@ -22,8 +22,29 @@ export function loadClient(db: Database.Database, clientId: string): ClientInfo 
   return { id: row.client_id, vendor: row.vendor, tags: JSON.parse(row.tags) as string[] };
 }
 
+/**
+ * A client's display name, falling back to its raw id rather than crashing when the row isn't
+ * local: clients never replicate (each node issues its own tokens, Spec 7.1), so a client id that
+ * arrived here only via a replicated event (a claim holder, an entry's created_by, ...) has no
+ * local row to read a name from. Found via M3 slice 7's N-node property suite, the first test to
+ * exercise a claim contended across genuinely separate nodes' own clients.
+ */
 export function loadClientName(db: Database.Database, clientId: string): string {
-  return (db.prepare("SELECT name FROM clients WHERE client_id = ?").get(clientId) as { name: string }).name;
+  const row = db.prepare("SELECT name FROM clients WHERE client_id = ?").get(clientId) as { name: string } | undefined;
+  return row?.name ?? clientId;
+}
+
+/**
+ * The client's currently issued, unrevoked persona token's pools, or `[]` if it has none (SPEC
+ * v6 section 3: no persona means _me-only). Used by the hook CLI, which identifies a client by
+ * `--client <name>` and presents no token of its own to resolve by hash the way the MCP server's
+ * auth.ts does; this is the same "assumed pools" fact, looked up by client instead.
+ */
+export function resolveAssumedPools(db: Database.Database, clientId: string): string[] {
+  const row = db
+    .prepare("SELECT pools FROM persona_tokens WHERE client_id = ? AND revoked_at IS NULL ORDER BY created_at DESC LIMIT 1")
+    .get(clientId) as { pools: string } | undefined;
+  return row ? (JSON.parse(row.pools) as string[]) : [];
 }
 
 interface ScopeRow {
