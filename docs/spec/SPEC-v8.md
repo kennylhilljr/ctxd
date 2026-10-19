@@ -10,7 +10,7 @@
 
 ## Changes in v8
 
-Earlier changes are listed in [Spec v7](SPEC-v7.md), [v6](SPEC-v6.md), [v5](SPEC-v5.md), [v4](SPEC-v4.md), [v3](SPEC-v3.md) and [v2](SPEC-v2.md). v8 is written across M3's slices (`docs/build/M3-M6-kickoff-v1.md`), collecting each one's changes as it lands rather than waiting for the milestone to finish. Slice 1 added the feature-flag registry; slice 2 (this update) adds the sync listener and pull protocol.
+Earlier changes are listed in [Spec v7](SPEC-v7.md), [v6](SPEC-v6.md), [v5](SPEC-v5.md), [v4](SPEC-v4.md), [v3](SPEC-v3.md) and [v2](SPEC-v2.md). v8 is written across M3's slices (`docs/build/M3-M6-kickoff-v1.md`), collecting each one's changes as it lands rather than waiting for the milestone to finish. Slice 1 added the feature-flag registry; slice 2 added the sync listener and pull protocol; slice 3 (this update) adds the conflict policies.
 
 | Section | Change |
 |---|---|
@@ -23,6 +23,10 @@ Earlier changes are listed in [Spec v7](SPEC-v7.md), [v6](SPEC-v6.md), [v5](SPEC
 | 7.3 | Slice 2: implements the fast-forward and already-known rows, plus relations (never conflict, 7.4); the missing-parent and concurrent rows, and every `claim`/`meta` event, are logged but not yet materialized (slices 3 and 5) |
 | 4 | Slice 2: `_me`'s `scope_id` is now the fixed constant `"_me"` on every node instead of a random id (`src/core/kinds.ts`'s `ME_SCOPE_ID`), found while writing the end-to-end sync test: two independently initialized nodes could not otherwise converge on personal-scope entries at all. Named project scopes are a separate, still-open gap (closed by slice 6) |
 | 13 | Slice 2: new CLI rows: `ctxd node add-peer`, `ctxd node revoke`, `ctxd sync` |
+| 7.3, 7.4 | Slice 3: `src/store/materialize.ts` now resolves genuinely concurrent content and status events (the "Concurrent" row of 7.3, and 7.4's policies), shared with `ctxd rebuild` so a replay reaches the same state live sync apply did; `claim`/`meta` events and missing-parent content/status events are still only logged (slices 4 and 5) |
+| 4, 5 | Slice 3: `makeRev` (src/core/ids.ts) now takes the *last* 10 characters of an event's ULID instead of the first 10, fixing a real rev collision between two events minted in the same millisecond, found while testing conflict resolution |
+| 13 | Slice 3: `ctxd review`'s `conflicted` and `auto_resolved` categories are now populated by real sync traffic, not placeholders |
+| 4 | Slice 3: a new `events(entry_id, rev)` index backs the conflict lookup; schema bumped to 9 |
 
 ### Traceability
 
@@ -566,7 +570,7 @@ CREATE TABLE commits (                 -- local facts recorded by the PostToolUs
 
 **Field notes:**
 
-- **Parts and revisions** ([Knowledge model](../prd/components/PRD-knowledge-model-v3.md) section 4). Each part has its own revision, `"<version>-<first 10 chars of event_id>"`, CouchDB style: `content_rev`, `status_rev` and `relations_rev`. The claim part lives in `leases`. An event changes exactly one part (`events.part`), and its `parent_revs` refer to that part's revisions. Clients pass `expected_rev` for the part they change, which for `context_write` updates is the content revision.
+- **Parts and revisions** ([Knowledge model](../prd/components/PRD-knowledge-model-v3.md) section 4). Each part has its own revision, `"<version>-<10 chars of event_id>"`, CouchDB style: `content_rev`, `status_rev` and `relations_rev`. The 10 characters are the *last* 10 of the event's ULID, inside its random suffix, not the first 10 (a ULID's timestamp, which two events minted in the same millisecond would share); found as a real collision while building M3 slice 3's conflict policies, src/core/ids.ts's `makeRev`. The claim part lives in `leases`. An event changes exactly one part (`events.part`), and its `parent_revs` refer to that part's revisions. Clients pass `expected_rev` for the part they change, which for `context_write` updates is the content revision.
 - **`parent_revs`** is the rev (or revs, for `resolve`) an event was based on. Creates have `[]`.
 - **`payload`** holds the changed fields only; **`prev`** holds their prior values, so history, diffs and review never need to replay the log.
 - **`slug`** is computed once at create (4.2) and never changes, so paths are stable across renames and machines. It replicates in the create event's payload.

@@ -3,13 +3,12 @@
  * policies and 7.6's drift notice): the human-only review queue, approvals and review-rule
  * management.
  *
- * Two of the report's categories are legitimately always empty in this build, not a bug:
  * `conflicted` and `auto_resolved` are both artifacts of a *concurrent* event arriving from
  * another node (SPEC 7.4's "Content of status, brief: last writer wins... listed in review as
  * 'auto-resolved'," and "Content of convention, fact, lesson, note, task: the entry moves to
- * conflicted"). Sync between nodes is M3; a single-node build never receives a concurrent event,
- * so nothing ever reaches either status. The query for each is still correct and ready for when
- * M3 lands, rather than a stub.
+ * conflicted"), populated by src/store/materialize.ts's conflict policies since M3 slice 3; a
+ * single node that has never synced still sees both as empty, correctly, since it never receives
+ * a concurrent event.
  *
  * Review rules (`--rules`, `--add-rule`, `--remove-rule`) read and write `scopes.review_policy`
  * directly, the same way `ctxd grant` and `ctxd pool` already mutate `client_grants`/`pool_grants`
