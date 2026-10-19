@@ -444,6 +444,43 @@ describe("writeEntry (SPEC v6 section 6)", () => {
   });
 });
 
+describe("writeEntry's review_after defaults (Knowledge model 3.1, SPEC 7.6.7)", () => {
+  function reviewAfter(f: Fixture, entryId: string): string | null {
+    return (f.db.prepare("SELECT review_after FROM entries WHERE entry_id = ?").get(entryId) as { review_after: string | null }).review_after;
+  }
+
+  /** The exact ISO date defaultReviewAfter would compute right now, within the same millisecond's date truncation defaultReviewAfter itself uses. */
+  function expectedDate(days: number): string {
+    return new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
+  }
+
+  it("sets status to 14 days, handoff to 30, fact and lesson to 180, preference to 365", () => {
+    const f = setup();
+    const cases: [kind: string, days: number][] = [
+      ["status", 14],
+      ["handoff", 30],
+      ["fact", 180],
+      ["lesson", 180],
+      ["preference", 365],
+    ];
+    for (const [kind, days] of cases) {
+      const result = writeEntry(ctxFor(f, f.humanId), { scope: "notes", kind, title: kind, body: "x", request_id: requestId() } as never);
+      if ("held" in result) throw new Error("unexpected hold");
+      expect(reviewAfter(f, result.id)).toBe(expectedDate(days));
+    }
+  });
+
+  it("never sets review_after for kinds with no default, e.g. decision and convention", () => {
+    const f = setup();
+    for (const kind of ["decision", "convention", "note", "pointer", "task", "skill"]) {
+      const input = kind === "skill" ? { scope: "notes", kind, title: "a-skill", body: "---\nname: a-skill\ndescription: d\n---\nbody", request_id: requestId() } : { scope: "notes", kind, title: kind, body: "x", request_id: requestId() };
+      const result = writeEntry(ctxFor(f, f.humanId), input as never);
+      if ("held" in result) throw new Error("unexpected hold");
+      expect(reviewAfter(f, result.id)).toBeNull();
+    }
+  });
+});
+
 function dumpHash(db: Database.Database): string {
   const rows = (table: string, order: string) => JSON.stringify(db.prepare(`SELECT * FROM ${table} ORDER BY ${order}`).all());
   const dump = [rows("entries", "entry_id"), rows("relations", "link_id"), rows("signals", "entry_id, source")].join("\u0000");
