@@ -54,6 +54,7 @@ const COMMAND_RUNNERS: Record<string, (argv: string[]) => number | Promise<numbe
   persona: runPersonaCommand,
   server: runServerCommand,
   mcp: runMcpCommand,
+  stdio: runMcpCommand, // SPEC v8 calls the same command "ctxd stdio" in 9.6/16.3 and "ctxd mcp" in 8.4; both names stay live (src/cli/mcp.ts's own header)
   flag: runFlagCommand,
   purge: runPurgeCommand,
   quarantine: runQuarantineCommand,
