@@ -9,6 +9,9 @@ import { checkDatabaseIntegrity, openDatabase } from "../store/db.js";
 import { startServer } from "../server/mcp.js";
 import { startSyncServer } from "../server/sync.js";
 import { runSync } from "./sync.js";
+import { HlcClock } from "../core/hlc.js";
+import type { WriteContext } from "../store/write.js";
+import { runDueDigests } from "../journal/digest.js";
 
 export async function run(argv: string[]): Promise<number> {
   const { values } = parseArgs({
@@ -96,11 +99,31 @@ export async function run(argv: string[]): Promise<number> {
     }, config.sync.interval_seconds * 1000);
   }
 
+  // Runs once immediately (the offline-catch-up case) and then hourly: cheap enough to check
+  // every tick, since digestAlreadyWritten makes every call but the first a no-op.
+  let digestInterval: NodeJS.Timeout | undefined;
+  if (isFlagOn(flags, "digest")) {
+    const human = db.prepare("SELECT client_id FROM clients WHERE name = 'human'").get() as { client_id: string } | undefined;
+    if (human) {
+      const digestCtx: WriteContext = { db, clock: new HlcClock(node.node_id), nodeId: node.node_id, clientId: human.client_id };
+      const tick = (): void => {
+        try {
+          runDueDigests(digestCtx, config, Date.now());
+        } catch (err) {
+          console.error(`ctxd server: weekly digest check failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      };
+      tick();
+      digestInterval = setInterval(tick, 3_600_000);
+    }
+  }
+
   let stopping = false;
   const stop = (): void => {
     if (stopping) return;
     stopping = true;
     if (pullInterval) clearInterval(pullInterval);
+    if (digestInterval) clearInterval(digestInterval);
     void Promise.all([server.close(), syncServer?.close()]).then(() => {
       db.close();
       process.exit(0);

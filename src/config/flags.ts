@@ -38,6 +38,7 @@ export const FLAG_REGISTRY: readonly FlagDef[] = [
   { name: "semantic_search", default: false, milestone: "M5", description: "Hybrid search blending FTS with embedding vectors (reciprocal rank fusion)", offMeans: "Full-text search only" },
   { name: "semantic_search.compute", default: false, milestone: "M5", description: "Compute an embedding for this machine's own writes and replicate it", offMeans: "This machine never computes embeddings itself; it still serves hybrid search over vectors that arrive through sync", parent: "semantic_search" },
   { name: "importance", default: true, milestone: "M5", description: "Importance-weighted ranking in briefs and search (SPEC 11.3)", offMeans: "Briefs and search fall back to the Spec v6 ranking without importance" },
+  { name: "digest", default: true, milestone: "M5", description: "Automatic weekly digest on journal.digest_weekday (SPEC 11.5)", offMeans: "No weekly digests from this machine; ctxd digest still works manually" },
 ];
 
 const FLAGS_BY_NAME = new Map(FLAG_REGISTRY.map((def) => [def.name, def]));
