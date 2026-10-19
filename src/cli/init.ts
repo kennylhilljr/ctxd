@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { stringify } from "smol-toml";
 import { DEFAULT_CONFIG_PATH, configSchema, expandHome } from "../config/config.js";
 import { newId } from "../core/ids.js";
-import { ME_SCOPE_ID } from "../core/kinds.js";
+import { ME_SCOPE_ID, SYSTEM_SCOPE_ID } from "../core/kinds.js";
 import { nowIso } from "../core/time.js";
 import { newToken } from "../core/hash.js";
 import { openDatabase } from "../store/db.js";
@@ -58,13 +58,16 @@ export function runInit(opts: InitOptions = {}): number {
         config.node.role,
         nowIso(),
       );
-      // The node, the human client and _me are bootstrapped directly: there is no prior node,
-      // client or _system scope yet to author an `acl` event for them (SPEC v6 section 4).
+      // The node, the human client, _me and _system are bootstrapped directly: there is no prior
+      // node, client or _system scope yet to author an `acl` event for them (SPEC v6 section 4).
       // Flagged for SPEC-v7 as a genesis exception to ADR 0002 ("never mutate materialized
       // state without an event"), which otherwise governs every later write.
       db.prepare(
         "INSERT INTO scopes (scope_id, name, kind, replication, vendor_policy, created_at) VALUES (?, '_me', 'me', 'all', 'any', ?)",
       ).run(ME_SCOPE_ID, nowIso());
+      db.prepare(
+        "INSERT INTO scopes (scope_id, name, kind, replication, vendor_policy, created_at) VALUES (?, '_system', 'system', 'all', 'local-only', ?)",
+      ).run(SYSTEM_SCOPE_ID, nowIso());
       db.prepare(
         "INSERT INTO clients (client_id, name, vendor, node_id, token_hash, created_at) VALUES (?, 'human', 'human', ?, ?, ?)",
       ).run(newId(), nodeId, hash, nowIso());

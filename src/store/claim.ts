@@ -4,7 +4,9 @@ import { makeRev, newId } from "../core/ids.js";
 import { nowIso } from "../core/time.js";
 import { CtxdError } from "../core/errors.js";
 import { formatRef, parseRef } from "../model/refs.js";
-import { IntentError, computeDrift, intentOverlaps, normalizeChangedPath, normalizeIntent, type OverlapPair } from "../claims/intent.js";
+import { IntentError, computeDrift, normalizeChangedPath, normalizeIntent, type OverlapPair } from "../claims/intent.js";
+import { persistOverlaps, scanOverlappingLeases } from "../claims/overlap.js";
+import { syncFreshness } from "../sync/freshness.js";
 import { canonicalJson, requestHash } from "./idempotency.js";
 import { applyEvent } from "./materialize.js";
 import { loadAccessSnapshot, loadClient, loadClientName, loadScopeByName } from "./snapshot.js";
@@ -60,6 +62,7 @@ interface LeaseRow {
   expires_at: string;
   changed_files: string | null;
   drift: string | null;
+  tentative: number;
 }
 
 interface LeaseOut {
@@ -107,7 +110,7 @@ function toLeaseOut(db: Database.Database, scope: { name: string }, row: LeaseRo
     state: row.state,
     paths: row.paths !== null ? (JSON.parse(row.paths) as string[]) : null,
     expires_at: row.expires_at,
-    tentative: false,
+    tentative: row.tentative === 1,
   };
 }
 
@@ -153,6 +156,11 @@ function sessionHead(db: Database.Database, sessionRef: string): string | null {
   return row?.head ?? null;
 }
 
+/** Spec 7.4: "Claims made while a node has had no successful sync for 10 minutes are flagged tentative." Same check the brief header's stale-sync notice uses (M3 slice 7, src/sync/freshness.ts). */
+function isTentative(db: Database.Database): boolean {
+  return syncFreshness(db).stale;
+}
+
 function claimTask(ctx: WriteContext, input: ClaimInput, scope: { id: string; name: string }, client: ClientInfo): unknown {
   const { db } = ctx;
   const claimHash = (): string =>
@@ -190,22 +198,9 @@ function claimTask(ctx: WriteContext, input: ClaimInput, scope: { id: string; na
   const myPaths = input.paths !== undefined ? normalizePathsOrThrow(input.paths) : existing?.paths ? (JSON.parse(existing.paths) as string[]) : undefined;
 
   // Suspended leases (SPEC 7.6.2 step 4) no longer block other agents: overlap detection ignores them.
-  const otherActive = db
-    .prepare("SELECT task_id, holder, paths FROM leases WHERE scope_id = ? AND state = 'active' AND task_id != ? AND suspended_at IS NULL")
-    .all(scope.id, task.id) as { task_id: string; holder: string; paths: string | null }[];
-  const overlaps: OverlapOut[] = [];
-  const intentUnknown: string[] = [];
-  for (const other of otherActive) {
-    const otherPaths = other.paths !== null ? (JSON.parse(other.paths) as string[]) : undefined;
-    if (myPaths === undefined || otherPaths === undefined) {
-      intentUnknown.push(other.task_id);
-      continue;
-    }
-    const pairs = intentOverlaps(myPaths, otherPaths);
-    if (pairs.length > 0) {
-      overlaps.push({ task_id: other.task_id, ref: formatRef(scope.name, other.task_id), holder: loadClientName(db, other.holder), patterns: pairs });
-    }
-  }
+  const scan = scanOverlappingLeases(db, scope.id, task.id, myPaths);
+  const overlaps: OverlapOut[] = scan.overlaps.map((o) => ({ task_id: o.taskId, ref: formatRef(scope.name, o.taskId), holder: loadClientName(db, o.holder), patterns: o.pairs }));
+  const intentUnknown = scan.intentUnknown;
 
   const intentPolicy = (db.prepare("SELECT intent_policy FROM scopes WHERE scope_id = ?").get(scope.id) as { intent_policy: string }).intent_policy;
   if (intentPolicy === "strict" && overlaps.length > 0 && !(client.vendor === "human" && input.take_over)) {
@@ -216,15 +211,53 @@ function claimTask(ctx: WriteContext, input: ClaimInput, scope: { id: string; na
   const hlc = ctx.clock.tick();
   const sessionRef = input.session ?? null;
   const baseHead = sessionRef ? sessionHead(db, sessionRef) : null;
-  const payload = { holder: ctx.clientId, paths: myPaths ?? null, ttl_minutes: input.ttl_minutes, session_ref: sessionRef, base_head: baseHead, taken_over_from: takenOverFrom };
+  // Spec 7.3's parent-vs-head check (src/sync/apply.ts's `decide`) needs a real parent to tell a
+  // genuinely concurrent claim (made offline, unaware of this one) from a renewal, take-over or
+  // reclaim of this exact lease: the prior claim_hlc whenever this node has ANY local row for the
+  // task, active or closed, nothing only when it has never seen one at all. Referencing the row
+  // even when closed is what lets a receiving node tell a proven, locally-observed reclaim (this
+  // node's own parentRevs names the exact claim_hlc it saw) from a claim made in total ignorance
+  // of this task's history (parentRevs=[] while a row already exists locally): only the latter
+  // must be compared against the task's all-time earliest claim (Spec 7.4), not whichever HLC it
+  // happens to carry relative to a clock it never synced with.
+  const parentRevs = existing ? [existing.claim_hlc] : [];
+  const payload = {
+    holder: ctx.clientId,
+    paths: myPaths ?? null,
+    ttl_minutes: input.ttl_minutes,
+    session_ref: sessionRef,
+    base_head: baseHead,
+    taken_over_from: takenOverFrom,
+    tentative: isTentative(db),
+  };
   const rev = makeRev(1, eventId);
 
   db.transaction(() => {
     db.prepare(
       `INSERT INTO events (event_id, origin_node, origin_seq, hlc, scope_id, entry_id, op, part, parent_revs, rev, client_id, session_ref, request_id, request_hash, payload, prev, received_at)
-       VALUES (?, ?, ?, ?, ?, ?, 'claim', 'claim', '[]', ?, ?, ?, ?, ?, ?, NULL, ?)`,
-    ).run(eventId, ctx.nodeId, nextOriginSeq(db, ctx.nodeId), hlc, scope.id, task.id, rev, ctx.clientId, sessionRef, input.request_id ?? null, input.request_id ? claimHash() : null, canonicalJson(payload), nowIso());
+       VALUES (?, ?, ?, ?, ?, ?, 'claim', 'claim', ?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
+    ).run(
+      eventId,
+      ctx.nodeId,
+      nextOriginSeq(db, ctx.nodeId),
+      hlc,
+      scope.id,
+      task.id,
+      canonicalJson(parentRevs),
+      rev,
+      ctx.clientId,
+      sessionRef,
+      input.request_id ?? null,
+      input.request_id ? claimHash() : null,
+      canonicalJson(payload),
+      nowIso(),
+    );
     applyEvent(db, { eventId, scopeId: scope.id, entryId: task.id, op: "claim", part: "claim", rev, clientId: ctx.clientId, hlc, payload, prev: null });
+    // Persisted here too, not just when a replicated claim finds the same thing (Spec 7.4,
+    // src/store/materialize.ts's recordClaimOverlaps): so `ctxd rebuild`, which replays every
+    // event through the replicated path regardless of where it first originated, reproduces
+    // these same rows instead of creating ones this live claim never wrote.
+    persistOverlaps(db, task.id, hlc, intentPolicy, scan.overlaps, "claim");
   })();
 
   const lease = db.prepare("SELECT * FROM leases WHERE task_id = ?").get(task.id) as LeaseRow;

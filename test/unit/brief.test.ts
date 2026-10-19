@@ -136,6 +136,48 @@ describe("assembleBrief (SPEC v6 section 11.1)", () => {
     expect(result.brief).toContain("BLOCKER");
     expect(result.brief).toContain(created.ref);
   });
+
+  describe("sync freshness header and stale-sync notice (M3 slice 7)", () => {
+    it("reports sync: null and no notice when this node has no peers at all", () => {
+      const f = setup();
+      const result = assembleBrief(requestCtx(f, f.humanId, "human"), { scope: "notes", size: "normal" }) as { sync: unknown; notices: string[] };
+      expect(result.sync).toBeNull();
+      expect(result.notices).toEqual([]);
+    });
+
+    it("reports sync.stale: false and no notice when a peer synced recently", () => {
+      const f = setup();
+      f.db
+        .prepare(
+          "INSERT INTO peers (peer_id, name, url, role, incoming_token_hash, created_at, last_synced_at) VALUES (?, 'laptop', 'https://laptop.example/ctxd-sync', 'home', ?, ?, ?)",
+        )
+        .run(newId(), newId(), now(), now());
+
+      const result = assembleBrief(requestCtx(f, f.humanId, "human"), { scope: "notes", size: "normal" }) as {
+        sync: { last_synced_at: string; stale: boolean } | null;
+        notices: string[];
+      };
+      expect(result.sync?.stale).toBe(false);
+      expect(result.notices).toEqual([]);
+    });
+
+    it("reports sync.stale: true and a stale-sync notice when no peer has synced in over 10 minutes", () => {
+      const f = setup();
+      const staleSync = new Date(Date.now() - 11 * 60_000).toISOString();
+      f.db
+        .prepare(
+          "INSERT INTO peers (peer_id, name, url, role, incoming_token_hash, created_at, last_synced_at) VALUES (?, 'laptop', 'https://laptop.example/ctxd-sync', 'home', ?, ?, ?)",
+        )
+        .run(newId(), newId(), now(), staleSync);
+
+      const result = assembleBrief(requestCtx(f, f.humanId, "human"), { scope: "notes", size: "normal" }) as {
+        sync: { last_synced_at: string; stale: boolean } | null;
+        notices: string[];
+      };
+      expect(result.sync?.stale).toBe(true);
+      expect(result.notices).toContain("No successful sync in over 10 minutes; this brief may be missing recent changes from other machines.");
+    });
+  });
 });
 
 describe("assembleBrief's importance ranking (SPEC 11.3, M5): the importance feature flag", () => {

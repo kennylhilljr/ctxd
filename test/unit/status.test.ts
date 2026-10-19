@@ -54,10 +54,10 @@ describe("gatherStatus", () => {
     const scopeId = randomUUID();
     db.prepare("INSERT INTO scopes (scope_id, name, created_at) VALUES (?, 'notes', datetime('now'))").run(scopeId);
     db.prepare(
-      "INSERT INTO leases (task_id, scope_id, holder, state, claim_event, claim_hlc, expires_at, last_activity_hlc) VALUES (?, ?, 'agent-1', 'active', 'e1', 'h1', datetime('now', '+1 hour'), 'h1')",
+      "INSERT INTO leases (task_id, scope_id, holder, state, claim_event, claim_hlc, earliest_claim_hlc, expires_at, last_activity_hlc) VALUES (?, ?, 'agent-1', 'active', 'e1', 'h1', 'h1', datetime('now', '+1 hour'), 'h1')",
     ).run(randomUUID(), scopeId);
     db.prepare(
-      "INSERT INTO leases (task_id, scope_id, holder, state, claim_event, claim_hlc, expires_at, last_activity_hlc) VALUES (?, ?, 'agent-1', 'released', 'e2', 'h2', datetime('now', '+1 hour'), 'h2')",
+      "INSERT INTO leases (task_id, scope_id, holder, state, claim_event, claim_hlc, earliest_claim_hlc, expires_at, last_activity_hlc) VALUES (?, ?, 'agent-1', 'released', 'e2', 'h2', 'h2', datetime('now', '+1 hour'), 'h2')",
     ).run(randomUUID(), scopeId);
 
     const config = baseConfig({ scope_map: { "/tmp/notes-project": "notes" } });

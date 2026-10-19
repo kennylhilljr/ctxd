@@ -3,20 +3,18 @@
  * policies and 7.6's drift notice): the human-only review queue, approvals and review-rule
  * management.
  *
- * Two of the report's categories are legitimately always empty in this build, not a bug:
  * `conflicted` and `auto_resolved` are both artifacts of a *concurrent* event arriving from
  * another node (SPEC 7.4's "Content of status, brief: last writer wins... listed in review as
  * 'auto-resolved'," and "Content of convention, fact, lesson, note, task: the entry moves to
- * conflicted"). Sync between nodes is M3; a single-node build never receives a concurrent event,
- * so nothing ever reaches either status. The query for each is still correct and ready for when
- * M3 lands, rather than a stub.
+ * conflicted"), populated by src/store/materialize.ts's conflict policies since M3 slice 3; a
+ * single node that has never synced still sees both as empty, correctly, since it never receives
+ * a concurrent event.
  *
- * Review rules (`--rules`, `--add-rule`, `--remove-rule`) read and write `scopes.review_policy`
- * directly, the same way `ctxd grant` and `ctxd pool` already mutate `client_grants`/`pool_grants`
- * without an event: these are local configuration, not replicated scope content, in this build
- * (SPEC v6 10.4 says rules "travel through scope metadata events" once sync exists; that is the
- * same cross-cutting gap already present in `src/cli/grant.ts` and `src/cli/pool.ts`, not
- * something to solve only for review rules).
+ * Review rules (`--rules`, `--add-rule`, `--remove-rule`) read `scopes.review_policy` and write
+ * it through an `acl` event (`saveRules`, M3 slice 6), the same mechanism `src/cli/grant.ts` and
+ * `src/cli/pool.ts` now use for `client_grants`/`pool_grants`/`pool_members`/scope creation: SPEC
+ * v6 10.4's "Rules travel through scope metadata events" closed the cross-cutting gap that used
+ * to apply to all of them (SPEC v8 4; `src/store/materialize.ts`'s `applyAclEvent`).
  */
 import type Database from "better-sqlite3";
 import { makeRev, newId, revVersion } from "../core/ids.js";
@@ -25,6 +23,7 @@ import { CtxdError } from "../core/errors.js";
 import { KINDS } from "../core/kinds.js";
 import { canonicalJson } from "./idempotency.js";
 import { formatRef, parseRef } from "../model/refs.js";
+import { appendAclEvent } from "./acl.js";
 import { applyEvent } from "./materialize.js";
 import { loadClient, loadClientName, loadScopeByName } from "./snapshot.js";
 import type { WriteContext } from "./write.js";
@@ -241,8 +240,9 @@ function loadRules(db: Database.Database, scopeId: string): ReviewRule[] {
   return Array.isArray(parsed) ? (parsed as ReviewRule[]) : [];
 }
 
-function saveRules(db: Database.Database, scopeId: string, rules: ReviewRule[]): void {
-  db.prepare("UPDATE scopes SET review_policy = ? WHERE scope_id = ?").run(JSON.stringify(rules), scopeId);
+/** Replaces a scope's whole review policy via an `acl` event (SPEC v8 4, 10.4: "Rules travel through scope metadata events, and only the human client can create or change them"). */
+function saveRules(ctx: WriteContext, scopeId: string, rules: ReviewRule[]): void {
+  appendAclEvent(ctx, scopeId, { action: "scope_review_policy_set", review_policy: rules });
 }
 
 export function listRules(db: Database.Database, scopeName: string): ReviewRule[] {
@@ -268,7 +268,7 @@ export function addRule(ctx: WriteContext, scopeName: string, rule: ReviewRule):
   }
 
   const rules = [...loadRules(db, scope.id), { ...rule, action: "auto-accept" as const }];
-  saveRules(db, scope.id, rules);
+  saveRules(ctx, scope.id, rules);
   return rules;
 }
 
@@ -283,6 +283,6 @@ export function removeRule(ctx: WriteContext, scopeName: string, index: number):
   const rules = loadRules(db, scope.id);
   if (index < 0 || index >= rules.length) throw new CtxdError("VALIDATION", `index must be between 0 and ${rules.length - 1}`, {}, "index");
   rules.splice(index, 1);
-  saveRules(db, scope.id, rules);
+  saveRules(ctx, scope.id, rules);
   return rules;
 }
