@@ -38,6 +38,8 @@ export interface HookContext {
   config: CtxdConfig | undefined;
   /** Optional so pre-M3 test fixtures that build a HookContext literal without one keep working: isFlagOn treats a missing map as "every flag on". */
   flags?: Map<string, boolean>;
+  /** The resolved --config path, passed through to a detached `ctxd worker` (SPEC 9.7) so it reads the same config as this hook. Optional for the same reason flags is: older HookContext literals in tests still work, and a spawned worker with no path falls back to its own default. */
+  configPath?: string;
 }
 
 export type HookResult = { text?: string; block?: { reason: string } } | undefined;
@@ -110,6 +112,7 @@ export async function dispatchWithDb(
   dataDir = "",
   config: CtxdConfig | undefined = undefined,
   flags: Map<string, boolean> = resolveFlags(config),
+  configPath = "",
 ): Promise<HookResult> {
   const client = db.prepare("SELECT client_id FROM clients WHERE name = ?").get(clientName) as { client_id: string } | undefined;
   const node = db.prepare("SELECT node_id FROM nodes LIMIT 1").get() as { node_id: string } | undefined;
@@ -159,6 +162,7 @@ export async function dispatchWithDb(
     dataDir,
     config,
     flags,
+    configPath,
   };
   return await handler(ctx);
 }
@@ -173,6 +177,7 @@ async function dispatch(
   config: CtxdConfig | undefined,
 ): Promise<HookResult> {
   const dataDir = resolveDataDir({ dataDir: args["data-dir"], configPath: args.config });
+  const configPath = resolveConfigPath({ configPath: args.config });
   let db: Database.Database;
   try {
     db = openDatabase(join(dataDir, "ctxd.db"));
@@ -182,7 +187,7 @@ async function dispatch(
   try {
     // dispatchWithDb derives flags from config itself (its own default parameter); config is
     // already the single source dispatch needs to pass down, so flags is not threaded separately.
-    return await dispatchWithDb(db, event, adapter, clientName, args.scope, processCwd, input, config?.scope_map ?? {}, dataDir, config);
+    return await dispatchWithDb(db, event, adapter, clientName, args.scope, processCwd, input, config?.scope_map ?? {}, dataDir, config, undefined, configPath);
   } finally {
     db.close();
   }

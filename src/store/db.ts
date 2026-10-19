@@ -13,6 +13,32 @@ export interface OpenDatabaseOptions {
  * one is checked against SCHEMA_VERSION (there is only one version yet, so a
  * mismatch is an error rather than a migration).
  */
+export interface IntegrityResult {
+  ok: boolean;
+  /** Set when `ok` is false: human-readable, pointing to `ctxd doctor` and `ctxd restore`. */
+  reason?: string;
+}
+
+/**
+ * `PRAGMA quick_check` (SPEC v8 section 12's startup integrity): fast, catches most corruption
+ * without a full `PRAGMA integrity_check` scan. Severe corruption can make SQLite throw before
+ * it ever returns a row (confirmed by directly corrupting a page in a test), so this never lets
+ * that propagate; either way is reported the same way, never a crash.
+ */
+export function checkDatabaseIntegrity(db: Database.Database): IntegrityResult {
+  let text: string;
+  try {
+    const rows = db.prepare("PRAGMA quick_check").all() as { quick_check: string }[];
+    text = rows.length === 1 ? rows[0]!.quick_check : rows.map((r) => r.quick_check).join("; ") || "no result";
+  } catch (err) {
+    text = err instanceof Error ? err.message : String(err);
+  }
+  if (text !== "ok") {
+    return { ok: false, reason: `Database integrity check failed (${text}). Run "ctxd doctor" for details, or "ctxd restore <file>" from a backup.` };
+  }
+  return { ok: true };
+}
+
 export function openDatabase(path: string, { create = false }: OpenDatabaseOptions = {}): Database.Database {
   if (!create && !existsSync(path)) {
     throw new Error(`Database not found at ${path}. Run "ctxd init" to create one.`);

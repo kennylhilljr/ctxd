@@ -261,11 +261,18 @@ export function uninstallClaudeCodeHooks(path: string = claudeCodeSettingsPath()
   return writeClaudeCodeSettings(path, (hooks) => withoutCtxdGroups(hooks));
 }
 
+/** For `ctxd doctor`'s "hook installation per client" check: true if any event has a ctxd group. */
+export function isClaudeCodeHooksInstalled(path: string = claudeCodeSettingsPath()): boolean {
+  const settings = readJsonObject(path);
+  const hooks = (typeof settings.hooks === "object" && settings.hooks !== null && !Array.isArray(settings.hooks) ? settings.hooks : {}) as ClaudeHooksByEvent;
+  return Object.values(hooks).some((groups) => (groups ?? []).some(isCtxdGroup));
+}
+
 // ---------------------------------------------------------------------------
 // Codex: a single marked, replaceable block in config.toml
 // ---------------------------------------------------------------------------
 
-const CTXD_BLOCK_START = "# >>> ctxd managed block (added by `ctxd install-hooks --client codex`) >>>";
+export const CTXD_BLOCK_START = "# >>> ctxd managed block (added by `ctxd install-hooks --client codex`) >>>";
 const CTXD_BLOCK_END = "# <<< ctxd managed block (remove with `ctxd install-hooks --client codex --uninstall`) <<<";
 
 function ctxdBlockText(): string {
@@ -318,6 +325,11 @@ export function uninstallCodexHooks(path: string = codexConfigPath()): WriteOutc
     const before = split.before.endsWith("\n\n") ? split.before.slice(0, -1) : split.before;
     return `${before}${split.after}`;
   });
+}
+
+/** For `ctxd doctor`'s "hook installation per client" check. */
+export function isCodexHooksInstalled(path: string = codexConfigPath()): boolean {
+  return existsSync(path) && readFileSync(path, "utf8").includes(CTXD_BLOCK_START);
 }
 
 // ---------------------------------------------------------------------------
