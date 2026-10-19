@@ -1,14 +1,22 @@
 /**
- * `ctxd mcp --client <id>`: the stdio MCP launcher every client starts from its single,
- * user-level MCP entry (SPEC v6 section 8.4). Resolves the session's persona, reads its
- * token from the Keychain (held only in memory here, never on disk/env/logs), and proxies
- * MCP messages between stdio and the local HTTP server over loopback.
+ * `ctxd mcp --client <id>` (also reachable as `ctxd stdio --client <id>`, M5 slice 2: SPEC v8
+ * calls the same command by both names across different sections, e.g. 8.4's "`ctxd mcp` is a
+ * stdio MCP server..." versus 9.6's Claude Desktop config using `["stdio", "--client", ...]`;
+ * both real deploy files, `deploy/clients/claude-code-mcp.md`/`codex-config.toml` and
+ * `deploy/clients/claude-desktop-config.json`, already shipped with one name each, so both stay
+ * live rather than picking one and breaking the other). The stdio MCP launcher every client
+ * starts from its single, user-level MCP entry (SPEC v8 section 8.4). Resolves the session's
+ * persona, reads its token from the Keychain (held only in memory here, never on disk/env/logs),
+ * and proxies MCP messages between stdio and the local HTTP server over loopback.
  *
- * M1 scope note: resolveScope's git-origin lookup lands with hooks in M2, so persona
- * resolution here uses only CTXD_POOL and an explicit --scope; it also assumes `ctxd server`
- * is already running (launchd auto-start is an M4 operational concern), and fails with a
- * clear message if it isn't.
+ * M5 resolves SPEC open issue 3 ("decide whether `ctxd stdio` should embed the database directly
+ * when the server is not running, or always proxy; current choice: always proxy, and start the
+ * server if it is absent"): `ensureServerRunning` probes `/healthz` once at startup and spawns
+ * `ctxd server` detached if it is unreachable, the same technique `src/hooks/writeMoments.ts`'s
+ * `spawnWorker` uses for its own detached process. This matters most for Claude Desktop, which
+ * has no launchd-adjacent setup step of its own and no hook to have started the server earlier.
  */
+import { spawn } from "node:child_process";
 import { parseArgs } from "node:util";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -139,6 +147,55 @@ function proxyLine(listen: string, token: string, line: string): Promise<string 
   });
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** A bare GET /healthz; resolves false on any error rather than rejecting, since "unreachable" is the expected case this exists to detect. */
+export function probeServer(listen: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const { host, port } = parseListen(listen);
+    const req = httpRequest({ host, port, path: "/healthz", method: "GET" }, (res) => {
+      res.resume();
+      resolve(res.statusCode === 200);
+    });
+    req.on("error", () => resolve(false));
+    req.end();
+  });
+}
+
+const SERVER_START_TIMEOUT_MS = 3000;
+const SERVER_START_POLL_MS = 100;
+
+export type ServerSpawner = (dataDir: string, configPath: string) => void;
+
+/** The real spawn: a detached `ctxd server` against the exact binary and node runtime already running this process (same technique `src/hooks/writeMoments.ts`'s `spawnWorker` uses). */
+export function spawnServer(dataDir: string, configPath: string): void {
+  spawn(process.execPath, [process.argv[1]!, "server", "--data-dir", dataDir, "--config", configPath], {
+    detached: true,
+    stdio: "ignore",
+  }).unref();
+}
+
+/**
+ * SPEC open issue 3's resolved design: always proxy, starting the server first if it is not
+ * already up. Spawning a server when one is already running (a benign race between two stdio
+ * launchers starting at once) just fails to bind the port and exits; it never disturbs the
+ * server that got there first, so this never needs to coordinate with another launcher.
+ * `spawnFn` is overridable only for tests; production dispatch always uses the real `spawnServer`.
+ */
+export async function ensureServerRunning(listen: string, dataDir: string, configPath: string, spawnFn: ServerSpawner = spawnServer): Promise<void> {
+  if (await probeServer(listen)) return;
+  spawnFn(dataDir, configPath);
+  const deadline = Date.now() + SERVER_START_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    await sleep(SERVER_START_POLL_MS);
+    if (await probeServer(listen)) return;
+  }
+  // Not up after the timeout: proceed anyway. proxyLine's own per-line error handling already
+  // answers the calling client instead of hanging if the server truly never comes up.
+}
+
 export async function run(argv: string[]): Promise<number> {
   const { values } = parseArgs({
     args: argv,
@@ -178,6 +235,8 @@ export async function run(argv: string[]): Promise<number> {
     console.error(`ctxd mcp: ${(err as Error).message}`);
     return 1;
   }
+
+  await ensureServerRunning(listen, dataDir, configPath);
 
   return new Promise<number>((resolve) => {
     let buffer = "";
