@@ -19,9 +19,8 @@ export const configSchema = z.object({
     .object({
       listen: listen.default("127.0.0.1:7412"),
       interval_seconds: z.number().int().min(15).default(120),
-      peers: z.array(z.object({ name: z.string(), url: z.url() })).default([]),
     })
-    .default({ listen: "127.0.0.1:7412", interval_seconds: 120, peers: [] }),
+    .default({ listen: "127.0.0.1:7412", interval_seconds: 120 }),
   brief: z
     .object({
       micro_tokens: z.number().int().default(300),

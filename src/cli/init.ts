@@ -1,14 +1,14 @@
 /** `ctxd init`: create config, data dir, node identity and the human client (SPEC v6 13, 1515, 1577). */
 import { parseArgs } from "node:util";
-import { randomBytes } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { dirname, join } from "node:path";
 import { stringify } from "smol-toml";
 import { DEFAULT_CONFIG_PATH, configSchema, expandHome } from "../config/config.js";
 import { newId } from "../core/ids.js";
+import { ME_SCOPE_ID } from "../core/kinds.js";
 import { nowIso } from "../core/time.js";
-import { sha256Hex } from "../core/hash.js";
+import { newToken } from "../core/hash.js";
 import { openDatabase } from "../store/db.js";
 
 export interface InitOptions {
@@ -16,12 +16,6 @@ export interface InitOptions {
   name?: string;
   role?: "home" | "roaming";
   dataDir?: string;
-}
-
-function newToken(): { raw: string; hash: string } {
-  const raw = randomBytes(32).toString("hex");
-  const hash = sha256Hex(raw);
-  return { raw, hash };
 }
 
 export function runInit(opts: InitOptions = {}): number {
@@ -70,7 +64,7 @@ export function runInit(opts: InitOptions = {}): number {
       // state without an event"), which otherwise governs every later write.
       db.prepare(
         "INSERT INTO scopes (scope_id, name, kind, replication, vendor_policy, created_at) VALUES (?, '_me', 'me', 'all', 'any', ?)",
-      ).run(newId(), nowIso());
+      ).run(ME_SCOPE_ID, nowIso());
       db.prepare(
         "INSERT INTO clients (client_id, name, vendor, node_id, token_hash, created_at) VALUES (?, 'human', 'human', ?, ?, ?)",
       ).run(newId(), nodeId, hash, nowIso());

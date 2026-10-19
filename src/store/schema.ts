@@ -1,19 +1,30 @@
 /**
- * Database schema (SPEC v7 section 4). Keep in sync with the spec.
+ * Database schema (SPEC v8 section 4). Keep in sync with the spec.
  * The event log is the source of truth; everything else is materialized. Sealed pools use the same schema in their own encrypted file (SPEC v7 10.6).
- * Bumped to 7 for SPEC-v7's resolutions: review_policy defaults to '[]' (10.4), and the new
- * commits table (7.5) for commit facts recorded by a later M2 slice's PostToolUse hook.
+ * Bumped to 8 for M3 slice 2 (replication, Spec 7.1): the new `peers` table replaces the unused
+ * `nodes.peer_token_hash` placeholder, since peers are never rows in `nodes` (that table's many
+ * `SELECT node_id FROM nodes LIMIT 1` call sites assume exactly one row: the local node).
  */
-export const SCHEMA_VERSION = 7;
+export const SCHEMA_VERSION = 8;
 
 export const SCHEMA_SQL = `
 CREATE TABLE nodes (
   node_id      TEXT PRIMARY KEY,
   name         TEXT NOT NULL UNIQUE,
   role         TEXT NOT NULL CHECK (role IN ('home','roaming')),
-  peer_token_hash TEXT,
   revoked_at   TEXT,
   created_at   TEXT NOT NULL
+);
+
+CREATE TABLE peers (                   -- a machine we sync with (Spec 7.1); never a row in nodes
+  peer_id             TEXT PRIMARY KEY,
+  name                TEXT NOT NULL UNIQUE,
+  url                 TEXT NOT NULL,     -- e.g. https://laptop.TAILNET.ts.net/ctxd-sync
+  role                TEXT NOT NULL CHECK (role IN ('home','roaming')), -- the peer's own role, for the 7.2 filter when it pulls from us
+  incoming_token_hash TEXT NOT NULL,     -- hash of the token this peer must present to pull from us
+  outgoing_token      TEXT,              -- the token we present when pulling from this peer; NULL until supplied
+  revoked_at          TEXT,
+  created_at          TEXT NOT NULL
 );
 
 CREATE TABLE clients (

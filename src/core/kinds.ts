@@ -86,4 +86,16 @@ export type AccessLevel = "none" | "read" | "propose" | "write";
 export const GRANT_LEVELS: readonly Exclude<AccessLevel, "none">[] = ["read", "propose", "write"];
 export type ScopeKind = "project" | "me" | "profile" | "hold";
 export const FLAG_PROBLEMS = ["wrong", "stale", "duplicate", "unsafe"] as const;
+
+/**
+ * `_me`'s scope_id is this fixed constant, not a random id, on every node (PRD-replication-v4
+ * section 1: "every machine works fully offline and converges with the others"). `_me` is the
+ * one scope every `ctxd init` creates without a prior event to derive an id from (SPEC genesis
+ * exception, src/cli/init.ts); giving it a random id per node would mean a person's own personal
+ * scope never converges across their own machines, since nothing yet replicates scope identity
+ * itself (that lands with ACL/scope metadata events, M3 slice 6). Every other scope is created
+ * locally by name (`ctxd scope add`) and does not need this: cross-node convergence for named
+ * project scopes is exactly what that later slice adds.
+ */
+export const ME_SCOPE_ID = "_me";
 export type FlagProblem = (typeof FLAG_PROBLEMS)[number];

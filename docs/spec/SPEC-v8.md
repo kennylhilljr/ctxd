@@ -10,14 +10,19 @@
 
 ## Changes in v8
 
-Earlier changes are listed in [Spec v7](SPEC-v7.md), [v6](SPEC-v6.md), [v5](SPEC-v5.md), [v4](SPEC-v4.md), [v3](SPEC-v3.md) and [v2](SPEC-v2.md). v8 is written in M3's first slice (`docs/build/M3-M6-kickoff-v1.md`): it adds the feature-flag registry and resolution rules that govern every optional behavior M1 and M2 built, plus the `hooks.prompt_search` flag's own new handler.
+Earlier changes are listed in [Spec v7](SPEC-v7.md), [v6](SPEC-v6.md), [v5](SPEC-v5.md), [v4](SPEC-v4.md), [v3](SPEC-v3.md) and [v2](SPEC-v2.md). v8 is written across M3's slices (`docs/build/M3-M6-kickoff-v1.md`), collecting each one's changes as it lands rather than waiting for the milestone to finish. Slice 1 added the feature-flag registry; slice 2 (this update) adds the sync listener and pull protocol.
 
 | Section | Change |
 |---|---|
-| 3.1 (new) | The feature-flag registry: three resolution layers, parent/child nesting, live reload, and `ctxd features` |
-| 9.1 | A new UserPromptSubmit handler (R7, PRD-hooks-v5 7.2): up to 3 matching entry titles from full-text search on the prompt, gated by `hooks.prompt_search` (default off) |
-| 13 | New CLI row: `ctxd features` / `ctxd features set <name> on\|off` |
-| 14 | New testing row: the flag registry's resolution layers, parent cascade, and each flag's off-path/on-resume pair |
+| 3.1 (new) | Slice 1: the feature-flag registry: three resolution layers, parent/child nesting, live reload, and `ctxd features` |
+| 9.1 | Slice 1: a new UserPromptSubmit handler (R7, PRD-hooks-v5 7.2): up to 3 matching entry titles from full-text search on the prompt, gated by `hooks.prompt_search` (default off) |
+| 13 | Slice 1: new CLI row: `ctxd features` / `ctxd features set <name> on\|off` |
+| 14 | Slice 1: new testing row: the flag registry's resolution layers, parent cascade, and each flag's off-path/on-resume pair |
+| 4 | Slice 2: `nodes.peer_token_hash` (never read anywhere) replaced by a new `peers` table: one row per machine we sync with, with its own role (for the 7.2 filter), an incoming token hash and an optional outgoing token |
+| 7.1 | Slice 2: implemented as specified, with one narrowing: "on reconnect" triggering is approximated by the scheduled interval's own retry on the next tick, since detecting a reachability *change* needs a persistent connection or active probing this slice does not add; `/v1/notify` triggers an immediate pull with a per-peer 5-second debounce |
+| 7.3 | Slice 2: implements the fast-forward and already-known rows, plus relations (never conflict, 7.4); the missing-parent and concurrent rows, and every `claim`/`meta` event, are logged but not yet materialized (slices 3 and 5) |
+| 4 | Slice 2: `_me`'s `scope_id` is now the fixed constant `"_me"` on every node instead of a random id (`src/core/kinds.ts`'s `ME_SCOPE_ID`), found while writing the end-to-end sync test: two independently initialized nodes could not otherwise converge on personal-scope entries at all. Named project scopes are a separate, still-open gap (closed by slice 6) |
+| 13 | Slice 2: new CLI rows: `ctxd node add-peer`, `ctxd node revoke`, `ctxd sync` |
 
 ### Traceability
 
@@ -103,7 +108,9 @@ listen = "127.0.0.1:7411"
 [sync]
 listen = "127.0.0.1:7412"
 interval_seconds = 120
-peers = [{ name = "laptop", url = "https://laptop.TAILNET.ts.net/ctxd-sync" }]
+# Peers live in the database (`ctxd node add-peer`), not here: each one needs a token hash
+# this machine can verify, which a config file is the wrong place to carry (3.1's notion of
+# "per machine, never synced" config is for behavior flags, not secrets).
 
 [brief]
 micro_tokens = 300
@@ -207,9 +214,19 @@ CREATE TABLE nodes (
   node_id      TEXT PRIMARY KEY,
   name         TEXT NOT NULL UNIQUE,
   role         TEXT NOT NULL CHECK (role IN ('home','roaming')),
-  peer_token_hash TEXT,
   revoked_at   TEXT,
   created_at   TEXT NOT NULL
+);
+
+CREATE TABLE peers (                   -- a machine we sync with (7.1); never a row in `nodes`
+  peer_id             TEXT PRIMARY KEY,
+  name                TEXT NOT NULL UNIQUE,
+  url                 TEXT NOT NULL,
+  role                TEXT NOT NULL CHECK (role IN ('home','roaming')), -- the peer's own role, for the 7.2 filter when it pulls from us
+  incoming_token_hash TEXT NOT NULL,     -- hash of the token this peer must present to pull from us
+  outgoing_token      TEXT,              -- the token we present when pulling from this peer; NULL until supplied
+  revoked_at          TEXT,
+  created_at          TEXT NOT NULL
 );
 
 CREATE TABLE clients (

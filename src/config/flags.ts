@@ -4,8 +4,9 @@ import { CtxdError } from "../core/errors.js";
  * Feature flag registry (PRD-feature-flags-v1, Spec v8 section 3.1): one entry per flag, with
  * its default, the milestone that introduced it, a description, its off-behavior and an optional
  * parent whose own "off" silences it regardless of its own value (FF-4). Nothing reads a flag
- * that is not listed here (FF-1); `sync`/`sync.serve` are added when replication lands later in
- * M3, not here, so the registry only ever lists flags whose feature already exists.
+ * that is not listed here (FF-1); the registry only ever lists flags whose feature already
+ * exists, which is why `sync`/`sync.serve` are added below rather than in M3's first slice: the
+ * sync listener and puller they gate are this later slice's own work.
  */
 export interface FlagDef {
   name: string;
@@ -29,6 +30,8 @@ export const FLAG_REGISTRY: readonly FlagDef[] = [
   { name: "claims.mechanical_release", default: true, milestone: "M2", description: "Automatic claim release when a session's work is committed and clean", offMeans: "Claims are released only explicitly" },
   { name: "review.remembered_rules", default: true, milestone: "M2", description: "Review rules that auto-accept matching writes", offMeans: "Remembered approval rules are ignored; everything proposed waits for review" },
   { name: "metering", default: true, milestone: "M1", description: "Per-response size and token metering", offMeans: "Response sizes are not recorded" },
+  { name: "sync", default: false, milestone: "M3", description: "Pull from peers on schedule, reconnect and demand", offMeans: "This machine neither pulls from nor serves peers; its log keeps growing locally and catches up when switched on" },
+  { name: "sync.serve", default: true, milestone: "M3", description: "Serve POST /v1/pull and /v1/notify to peers", offMeans: "Peers cannot pull from this machine (it still pulls, if sync is on)", parent: "sync" },
 ];
 
 const FLAGS_BY_NAME = new Map(FLAG_REGISTRY.map((def) => [def.name, def]));
