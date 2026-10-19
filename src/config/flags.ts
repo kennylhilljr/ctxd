@@ -32,6 +32,8 @@ export const FLAG_REGISTRY: readonly FlagDef[] = [
   { name: "metering", default: true, milestone: "M1", description: "Per-response size and token metering", offMeans: "Response sizes are not recorded" },
   { name: "sync", default: false, milestone: "M3", description: "Pull from peers on schedule, reconnect and demand", offMeans: "This machine neither pulls from nor serves peers; its log keeps growing locally and catches up when switched on" },
   { name: "sync.serve", default: true, milestone: "M3", description: "Serve POST /v1/pull and /v1/notify to peers", offMeans: "Peers cannot pull from this machine (it still pulls, if sync is on)", parent: "sync" },
+  { name: "backups", default: true, milestone: "M4", description: "ctxd backup: VACUUM INTO, age encryption, pruning to the newest copies", offMeans: "ctxd backup refuses to run" },
+  { name: "backups.copy", default: true, milestone: "M4", description: "Copy the encrypted backup to [backup] copy_to", offMeans: "Backups stay in the local backups directory only", parent: "backups" },
 ];
 
 const FLAGS_BY_NAME = new Map(FLAG_REGISTRY.map((def) => [def.name, def]));
