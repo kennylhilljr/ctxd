@@ -68,7 +68,7 @@ interface MemberRow {
   outcome: string | null;
 }
 
-interface SelEvent {
+export interface SelEvent {
   event_id: string;
   scope_id: string;
   entry_id: string;
@@ -94,7 +94,8 @@ interface HygieneEventSpec {
   hlc: string;
 }
 
-function requireHuman(db: Database.Database, clientId: string, what: string): void {
+/** Exported for src/store/rollback.ts (SPEC 7.6.5), which selects and reverts in one step rather than two separate human actions, and reuses this same human-only check at batch-creation time. */
+export function requireHuman(db: Database.Database, clientId: string, what: string): void {
   const client = loadClient(db, clientId);
   if (!client) throw new CtxdError("UNAUTHORIZED", "Unknown or revoked client");
   if (client.vendor !== "human") throw new CtxdError("NOT_ALLOWED", `${what} is human only`);
@@ -171,7 +172,8 @@ function loadBatch(db: Database.Database, batchId: string): BatchRow {
   return row;
 }
 
-function isWithin(t: number, from: number | undefined, to: number): boolean {
+/** Exported for src/store/rollback.ts. */
+export function isWithin(t: number, from: number | undefined, to: number): boolean {
   return (from === undefined || t >= from) && t <= to;
 }
 

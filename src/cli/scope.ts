@@ -1,13 +1,15 @@
-/** `ctxd scope add|bind|unbind`: manage scopes (SPEC v6 section 13). */
+/** `ctxd scope add|bind|unbind|rollback`: manage scopes (SPEC v6 section 13, v8 7.6.5). */
 import { parseArgs } from "node:util";
 import { join } from "node:path";
 import type Database from "better-sqlite3";
-import { resolveDataDir } from "./common.js";
+import { resolveDataDir, resolveHumanWriteContext } from "./common.js";
 import { openDatabase } from "../store/db.js";
 import { newId } from "../core/ids.js";
 import { nowIso } from "../core/time.js";
 import { REPLICATIONS, VENDOR_POLICIES, type Replication, type VendorPolicy } from "../core/kinds.js";
 import { bindScope, unbindScope } from "../store/scopeRepos.js";
+import { previewRollback, executeRollback } from "../store/rollback.js";
+import { CtxdError } from "../core/errors.js";
 
 export function addScope(db: Database.Database, name: string, replication: Replication, vendorPolicy: VendorPolicy): number {
   if (db.prepare("SELECT 1 FROM scopes WHERE name = ?").get(name)) {
@@ -43,11 +45,52 @@ export function unbindScopeCommand(db: Database.Database, repo: string): number 
   return 0;
 }
 
+/** `ctxd scope rollback <scope> --to <time> [--yes]` (SPEC v8 7.6.5): preview first, confirm with --yes. */
+function rollbackCommand(db: Database.Database, scopeName: string, to: string, yes: boolean | undefined): number {
+  try {
+    const preview = previewRollback(db, scopeName, to);
+    if (!yes) {
+      console.log(`About to revert ${preview.entries.length} entry(ies) in "${preview.scope}" to their state before ${preview.since}:`);
+      for (const e of preview.entries.slice(0, 20)) console.log(`  ${e.ref}: "${e.title}"`);
+      if (preview.entries.length > 20) console.log(`  (and ${preview.entries.length - 20} more)`);
+      console.log(`Re-run with --yes to confirm.`);
+      return 1;
+    }
+    const result = executeRollback(resolveHumanWriteContext(db), scopeName, to);
+    console.log(`ctxd scope rollback: batch ${result.batch_id}, ${result.entries} entry(ies), ${result.reverted} reverted, ${result.conflicted} conflicted (see ctxd review).`);
+    return 0;
+  } catch (err) {
+    console.error(`ctxd scope rollback: ${err instanceof CtxdError ? err.message : String(err)}`);
+    return 1;
+  }
+}
+
 export function run(argv: string[]): number {
   const [sub, ...rest] = argv;
-  if (sub !== "add" && sub !== "bind" && sub !== "unbind") {
-    console.error(`ctxd scope: unknown subcommand "${sub}". Use add, bind or unbind.`);
+  if (sub !== "add" && sub !== "bind" && sub !== "unbind" && sub !== "rollback") {
+    console.error(`ctxd scope: unknown subcommand "${sub}". Use add, bind, unbind or rollback.`);
     return 2;
+  }
+
+  if (sub === "rollback") {
+    const { values, positionals } = parseArgs({
+      args: rest,
+      options: { to: { type: "string" }, yes: { type: "boolean" }, "data-dir": { type: "string" }, config: { type: "string" } },
+      allowPositionals: true,
+      strict: true,
+    });
+    const name = positionals[0];
+    if (!name || !values.to) {
+      console.error("Usage: ctxd scope rollback <scope> --to <time> [--yes]");
+      return 1;
+    }
+    const dataDir = resolveDataDir({ dataDir: values["data-dir"], configPath: values.config });
+    const db = openDatabase(join(dataDir, "ctxd.db"));
+    try {
+      return rollbackCommand(db, name, values.to, values.yes);
+    } finally {
+      db.close();
+    }
   }
 
   if (sub === "bind") {
