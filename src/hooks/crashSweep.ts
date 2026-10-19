@@ -5,20 +5,26 @@
  * `ended_by: 'sweep'`, keeping `recovery` so the next brief for that client/scope still shows the
  * interrupted-work notice (SPEC 9.2).
  *
- * Deferred to later M2 slices, not silently skipped:
+ * `sweepLeftoverTickets` below closes this file's own previously-documented gap: a SessionEnd
+ * work ticket (SPEC 9.7) left behind by a reboot before its worker ran, or a worker that crashed
+ * mid-run, is picked up here rather than sitting forever. It is a separate exported function, not
+ * folded into `crashSweep` itself, since the two work on different things (sessions vs. ticket
+ * files) and `crashSweep`'s own signature and tests should not need to change to gain it.
+ *
+ * Still deferred, not silently skipped:
  * - The mechanical session journal entry (SPEC 9.1's SessionEnd row, "write the mechanical
- *   session log if missing") needs the same git facts (duration, branch, changed-file count) that
- *   M2 slice 8 (write moments) is building for a real SessionEnd; duplicating a partial version
- *   here would diverge from that path. Once slice 8 lands, this sweep should call its helper.
- * - Mechanical claim release (SPEC 7.5.4) needs a lease's `session_ref` and `base_head`, which
- *   `claimTask` (src/store/claim.ts) does not populate yet (both always null/absent); that's
- *   M2 slice 9 (claims, complete). Until it does, there is nothing a crashed session's leases
- *   query could correctly match against, so it is left for that slice to add alongside the fix.
- * - Leftover worker tickets (detached hook work, SPEC 9.7) have no writer yet; no M2 slice has
- *   added `ctxd worker` or ticket files, so there is nothing to sweep.
+ *   session log if missing") for a session that crashes without ever reaching SessionEnd (so no
+ *   ticket is ever written) needs the same git facts a real SessionEnd's ticket carries (branch,
+ *   HEAD, changed-file count) from a `cwd` a crashed session no longer has a live process to read.
+ * - Mechanical claim release for that same crashed-with-no-ticket case has the identical problem:
+ *   "is the working tree clean" has no answer without a live `cwd` to check it against.
  */
+import { existsSync, readdirSync, statSync, unlinkSync } from "node:fs";
+import { join } from "node:path";
 import type Database from "better-sqlite3";
 import { decodeHlc } from "../core/hlc.js";
+import { readStateFile, withLock } from "./stateFile.js";
+import { applySessionEndTicket, type SessionEndTicket } from "./writeMoments.js";
 
 export interface SweptSession {
   sessionRef: string;
@@ -42,6 +48,38 @@ export function crashSweep(db: Database.Database, nodeId: string, graceMinutes: 
     if (decodeHlc(row.last_seen_hlc).physical >= cutoff) continue;
     finalize.run(row.session_ref);
     swept.push({ sessionRef: row.session_ref, clientId: row.client_id });
+  }
+  return swept;
+}
+
+/**
+ * SessionEnd ticket files (`sessions/*.ticket.json`) older than `graceMinutes`: a fresh one is
+ * left alone, since its own spawned worker is most likely still running. Each is processed under
+ * its own lock, same as `ctxd worker` itself uses, so the two never race on the same ticket.
+ */
+export async function sweepLeftoverTickets(db: Database.Database, nodeId: string, dataDir: string, graceMinutes: number, flags?: Map<string, boolean>): Promise<string[]> {
+  const sessionsDir = join(dataDir, "sessions");
+  if (!existsSync(sessionsDir)) return [];
+  const cutoff = Date.now() - graceMinutes * 60_000;
+  const swept: string[] = [];
+
+  for (const file of readdirSync(sessionsDir)) {
+    if (!file.endsWith(".ticket.json")) continue;
+    const path = join(sessionsDir, file);
+    let mtimeMs: number;
+    try {
+      mtimeMs = statSync(path).mtimeMs;
+    } catch {
+      continue; // vanished between readdir and stat (its own worker just finished it)
+    }
+    if (mtimeMs > cutoff) continue; // fresh enough that its own worker may still be running
+
+    await withLock(path, () => {
+      const ticket = readStateFile<SessionEndTicket>(path);
+      if (ticket) applySessionEndTicket(db, nodeId, ticket, flags);
+      if (existsSync(path)) unlinkSync(path);
+    });
+    swept.push(file);
   }
   return swept;
 }

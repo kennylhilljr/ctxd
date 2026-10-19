@@ -7,7 +7,15 @@ import { describe, expect, it } from "vitest";
 import { HlcClock } from "../../src/core/hlc.js";
 import { newId } from "../../src/core/ids.js";
 import { openDatabase } from "../../src/store/db.js";
-import { preCompactHandler, sessionEndHandler, stopHandler, postToolUseHandler } from "../../src/hooks/writeMoments.js";
+import {
+  performSessionEnd,
+  preCompactHandler,
+  sessionEndHandler,
+  stopHandler,
+  postToolUseHandler,
+  type SessionEndParams,
+  type SessionEndTicket,
+} from "../../src/hooks/writeMoments.js";
 import { handleClaim } from "../../src/store/claim.js";
 import type { HookContext } from "../../src/cli/hook.js";
 import { CLAUDE_CODE_ADAPTER } from "../../src/hooks/adapters.js";
@@ -161,15 +169,69 @@ describe("stopHandler (W1)", () => {
   });
 });
 
-describe("sessionEndHandler (W3)", () => {
+function sessionEndParams(f: Fixture, overrides: Partial<SessionEndParams> = {}): SessionEndParams {
+  return {
+    db: f.db,
+    nodeId: f.nodeId,
+    clientId: f.clientId,
+    clientName: "claude-code",
+    sessionRef: "claude-code:s1",
+    scope: "notes",
+    scopeId: f.scopeId,
+    cwd: "",
+    startedAtMs: null,
+    ...overrides,
+  };
+}
+
+describe("sessionEndHandler (W3, SPEC 9.7): writes a ticket and spawns ctxd worker, rather than doing the work inline", () => {
+  it("writes a session-end ticket naming the scope and cwd, and spawns a worker for it", async () => {
+    const f = setup();
+    const repo = initGitRepo();
+    initSession(f, "claude-code:s1");
+    let spawnedArgs: [string, string, string] | undefined;
+    const fakeSpawn = (ticketPath: string, dataDir: string, configPath: string): void => {
+      spawnedArgs = [ticketPath, dataDir, configPath];
+    };
+
+    const result = await sessionEndHandler(baseCtx(f, { event: "session-end", scope: "notes", input: { cwd: repo } }), fakeSpawn);
+    expect(result).toBeUndefined();
+
+    expect(spawnedArgs).toBeDefined();
+    const [ticketPath, dataDir] = spawnedArgs!;
+    expect(dataDir).toBe(f.dataDir);
+    expect(existsSync(ticketPath)).toBe(true);
+    const ticket = JSON.parse(readFileSync(ticketPath, "utf8")) as SessionEndTicket;
+    expect(ticket.kind).toBe("session-end");
+    expect(ticket.sessionRef).toBe("claude-code:s1");
+    expect(ticket.clientName).toBe("claude-code");
+    expect(ticket.scope).toBe("notes");
+    expect(ticket.cwd).toBe(repo);
+
+    // No work happens inline; that is performSessionEnd's job once ctxd worker picks the ticket up.
+    const row = f.db.prepare("SELECT COUNT(*) AS n FROM entries WHERE scope_id = ? AND kind = 'journal'").get(f.scopeId) as { n: number };
+    expect(row.n).toBe(0);
+  });
+
+  it("writes no ticket and spawns nothing without a bound scope", async () => {
+    const f = setup();
+    let spawned = false;
+    const fakeSpawn = (): void => {
+      spawned = true;
+    };
+    expect(await sessionEndHandler(baseCtx(f, { event: "session-end", scope: null }), fakeSpawn)).toBeUndefined();
+    expect(spawned).toBe(false);
+  });
+});
+
+describe("performSessionEnd (W3, SPEC 9.7): the work a session-end ticket defers onto ctxd worker", () => {
   it("writes a mechanical journal entry with client, branch, HEAD and changed-file count", () => {
     const f = setup();
     const repo = initGitRepo();
     writeFileSync(join(repo, "untracked.txt"), "x");
     initSession(f, "claude-code:s1");
 
-    const result = sessionEndHandler(baseCtx(f, { event: "session-end", scope: "notes", input: { cwd: repo } }));
-    expect(result).toBeUndefined();
+    performSessionEnd(sessionEndParams(f, { cwd: repo }));
 
     const row = f.db.prepare("SELECT title, body, significance, tags FROM entries WHERE scope_id = ? AND kind = 'journal'").get(f.scopeId) as {
       title: string;
@@ -183,14 +245,9 @@ describe("sessionEndHandler (W3)", () => {
     expect(row.significance).toBe("routine");
     expect(JSON.parse(row.tags)).toEqual(["auto"]);
   });
-
-  it("does nothing without a bound scope", () => {
-    const f = setup();
-    expect(sessionEndHandler(baseCtx(f, { event: "session-end", scope: null }))).toBeUndefined();
-  });
 });
 
-describe("sessionEndHandler's mechanical claim release (M2 slice 9)", () => {
+describe("performSessionEnd's mechanical claim release (M2 slice 9)", () => {
   function claimWithBaseHead(f: Fixture, sessionRef: string, head: string): string {
     f.db
       .prepare("INSERT INTO sessions (session_ref, client_id, scope_id, state, started_at, last_seen_hlc, head) VALUES (?, ?, ?, 'active', ?, ?, ?)")
@@ -212,7 +269,7 @@ describe("sessionEndHandler's mechanical claim release (M2 slice 9)", () => {
     const taskId = claimWithBaseHead(f, "claude-code:s1", execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf8" }).trim());
 
     execFileSync("git", ["commit", "--allow-empty", "-m", "more work", "-q"], { cwd: repo });
-    sessionEndHandler(baseCtx(f, { event: "session-end", scope: "notes", input: { cwd: repo } }));
+    performSessionEnd(sessionEndParams(f, { cwd: repo }));
 
     expect(leaseState(f, taskId)).toBe("released");
   });
@@ -224,7 +281,7 @@ describe("sessionEndHandler's mechanical claim release (M2 slice 9)", () => {
 
     execFileSync("git", ["commit", "--allow-empty", "-m", "more work", "-q"], { cwd: repo });
     writeFileSync(join(repo, "dirty.txt"), "uncommitted");
-    sessionEndHandler(baseCtx(f, { event: "session-end", scope: "notes", input: { cwd: repo } }));
+    performSessionEnd(sessionEndParams(f, { cwd: repo }));
 
     expect(leaseState(f, taskId)).toBe("active");
   });
@@ -234,7 +291,7 @@ describe("sessionEndHandler's mechanical claim release (M2 slice 9)", () => {
     const repo = initGitRepo();
     const taskId = claimWithBaseHead(f, "claude-code:s1", execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf8" }).trim());
 
-    sessionEndHandler(baseCtx(f, { event: "session-end", scope: "notes", input: { cwd: repo } }));
+    performSessionEnd(sessionEndParams(f, { cwd: repo }));
 
     expect(leaseState(f, taskId)).toBe("active");
   });
@@ -245,7 +302,7 @@ describe("sessionEndHandler's mechanical claim release (M2 slice 9)", () => {
     const taskId = claimWithBaseHead(f, "claude-code:s1", execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf8" }).trim());
 
     execFileSync("git", ["commit", "--allow-empty", "-m", "more work", "-q"], { cwd: repo });
-    sessionEndHandler(baseCtx(f, { event: "session-end", scope: "notes", input: { cwd: repo }, flags: new Map([["claims.mechanical_release", false]]) }));
+    performSessionEnd(sessionEndParams(f, { cwd: repo, flags: new Map([["claims.mechanical_release", false]]) }));
 
     expect(leaseState(f, taskId)).toBe("active");
     const row = f.db.prepare("SELECT COUNT(*) AS n FROM entries WHERE scope_id = ? AND kind = 'journal'").get(f.scopeId) as { n: number };
@@ -295,11 +352,11 @@ describe("postToolUseHandler (W4)", () => {
 });
 
 describe("regression: a pool-granted scope is reachable via the client's issued persona token", () => {
-  it("sessionEndHandler's mechanical journal write applies, not held, for a pool-only grant", () => {
-    // Same root cause as read-moments.test.ts's regression test: writeCtxOf had no assumedPools
-    // lookup, so a client onboarded via `ctxd pool grant` + `ctxd persona issue` (not `ctxd
-    // grant`) silently got its mechanical SessionEnd journal entry held for review instead of
-    // applied, since the pool grant never counted.
+  it("performSessionEnd's mechanical journal write applies, not held, for a pool-only grant", () => {
+    // Same root cause as read-moments.test.ts's regression test: buildWriteContext (formerly
+    // writeCtxOf) had no assumedPools lookup, so a client onboarded via `ctxd pool grant` +
+    // `ctxd persona issue` (not `ctxd grant`) silently got its mechanical SessionEnd journal
+    // entry held for review instead of applied, since the pool grant never counted.
     const f = setup();
     const repo = initGitRepo();
     initSession(f, "claude-code:s1");
@@ -311,7 +368,7 @@ describe("regression: a pool-granted scope is reachable via the client's issued 
       .prepare("INSERT INTO persona_tokens (token_hash, client_id, pools, node_id, created_at) VALUES (?, ?, '[\"pool-dev\"]', ?, ?)")
       .run(newId(), f.clientId, f.nodeId, now());
 
-    sessionEndHandler(baseCtx(f, { event: "session-end", scope: "notes", input: { cwd: repo } }));
+    performSessionEnd(sessionEndParams(f, { cwd: repo }));
 
     const row = f.db.prepare("SELECT status FROM entries WHERE scope_id = ? AND kind = 'journal'").get(f.scopeId) as { status: string } | undefined;
     expect(row?.status).toBe("active"); // "held" or undefined (never applied) would both mean the regression is back

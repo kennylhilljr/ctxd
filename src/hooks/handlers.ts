@@ -4,7 +4,7 @@
  */
 import { HOOK_HANDLERS, withDeadline, type HookContext, type HookResult } from "../cli/hook.js";
 import { isFlagOn } from "../config/flags.js";
-import { crashSweep } from "./crashSweep.js";
+import { crashSweep, sweepLeftoverTickets } from "./crashSweep.js";
 import { checkPathGuard } from "./pathGuard.js";
 import { promptSearchHandler, sessionStartBrief, subagentStartBrief } from "./readMoments.js";
 import { postToolUseHandler, preCompactHandler, sessionEndHandler, stopHandler } from "./writeMoments.js";
@@ -23,7 +23,10 @@ function gated<H extends (ctx: HookContext) => HookResult | Promise<HookResult>>
 HOOK_HANDLERS["session-start"] = async (ctx: HookContext): Promise<HookResult> => {
   if (isFlagOn(ctx.flags, "hooks.crash_sweep")) {
     const graceMinutes = ctx.config?.hooks.crash_grace_minutes ?? 30;
-    await withDeadline(300, async () => crashSweep(ctx.db, ctx.nodeId, graceMinutes));
+    await withDeadline(300, async () => {
+      crashSweep(ctx.db, ctx.nodeId, graceMinutes);
+      await sweepLeftoverTickets(ctx.db, ctx.nodeId, ctx.dataDir, graceMinutes, ctx.flags);
+    });
   }
   return gated("hooks.session_start", sessionStartBrief)(ctx);
 };
