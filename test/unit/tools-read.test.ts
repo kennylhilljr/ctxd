@@ -75,7 +75,7 @@ function requestCtx(f: Fixture, clientId: string, clientName: string, vendor: "h
 }
 
 describe("contextSearch (SPEC v6 section 11.2)", () => {
-  it("finds a matching entry by full-text query, scoped to a readable scope", () => {
+  it("finds a matching entry by full-text query, scoped to a readable scope", async () => {
     const f = setup();
     writeEntry(writeCtx(f, f.humanId), {
       scope: "notes",
@@ -85,18 +85,18 @@ describe("contextSearch (SPEC v6 section 11.2)", () => {
       request_id: newId(),
     } as never);
 
-    const result = contextSearch(requestCtx(f, f.humanId, "human", "human"), {
+    const result = (await contextSearch(requestCtx(f, f.humanId, "human", "human"), {
       scope: "notes",
       query: "SQLite",
       limit: 10,
       max_tokens: 4000,
       include_proposed: true,
-    }) as { results: { title: string }[] };
+    })) as { results: { title: string }[] };
     expect(result.results).toHaveLength(1);
     expect(result.results[0]!.title).toBe("Use SQLite for local storage");
   });
 
-  it("excludes results from a scope the client has no access to (default deny)", () => {
+  it("excludes results from a scope the client has no access to (default deny)", async () => {
     const f = setup();
     writeEntry(writeCtx(f, f.humanId), {
       scope: "private-a",
@@ -106,32 +106,32 @@ describe("contextSearch (SPEC v6 section 11.2)", () => {
       request_id: newId(),
     } as never);
 
-    const result = contextSearch(requestCtx(f, f.agentId, f.agentName, "openai", ["pool-dev"]), {
+    const result = (await contextSearch(requestCtx(f, f.agentId, f.agentName, "openai", ["pool-dev"]), {
       scope: "private-a",
       query: "Secret",
       limit: 10,
       max_tokens: 4000,
       include_proposed: true,
-    }) as { results: unknown[] };
+    })) as { results: unknown[] };
     expect(result.results).toHaveLength(0);
   });
 
-  it("lists by recency instead of relevance when query is '*'", () => {
+  it("lists by recency instead of relevance when query is '*'", async () => {
     const f = setup();
     writeEntry(writeCtx(f, f.humanId), { scope: "notes", kind: "note", title: "First", body: "a", request_id: newId() } as never);
     writeEntry(writeCtx(f, f.humanId), { scope: "notes", kind: "note", title: "Second", body: "b", request_id: newId() } as never);
 
-    const result = contextSearch(requestCtx(f, f.humanId, "human", "human"), {
+    const result = (await contextSearch(requestCtx(f, f.humanId, "human", "human"), {
       scope: "notes",
       query: "*",
       limit: 10,
       max_tokens: 4000,
       include_proposed: true,
-    }) as { results: { title: string }[] };
+    })) as { results: { title: string }[] };
     expect(result.results.map((r) => r.title)).toEqual(["Second", "First"]);
   });
 
-  it("excludes a proposed agent decision by default and includes it with include_proposed", () => {
+  it("excludes a proposed agent decision by default and includes it with include_proposed", async () => {
     const f = setup();
     writeEntry(writeCtx(f, f.agentId), {
       scope: "notes",
@@ -142,29 +142,29 @@ describe("contextSearch (SPEC v6 section 11.2)", () => {
     } as never);
 
     const ctx = requestCtx(f, f.agentId, f.agentName, "openai", ["pool-dev"]);
-    const excluded = contextSearch(ctx, { scope: "notes", query: "proposed", limit: 10, max_tokens: 4000, include_proposed: false }) as {
+    const excluded = (await contextSearch(ctx, { scope: "notes", query: "proposed", limit: 10, max_tokens: 4000, include_proposed: false })) as {
       results: unknown[];
     };
     expect(excluded.results).toHaveLength(0);
 
-    const included = contextSearch(ctx, { scope: "notes", query: "proposed", limit: 10, max_tokens: 4000, include_proposed: true }) as {
+    const included = (await contextSearch(ctx, { scope: "notes", query: "proposed", limit: 10, max_tokens: 4000, include_proposed: true })) as {
       results: unknown[];
     };
     expect(included.results).toHaveLength(1);
   });
 
-  it("restricts results to a path's folder prefix, deriving the scope from the path", () => {
+  it("restricts results to a path's folder prefix, deriving the scope from the path", async () => {
     const f = setup();
     writeEntry(writeCtx(f, f.humanId), { scope: "notes", kind: "decision", title: "In decisions", body: "SQLite here", request_id: newId() } as never);
     writeEntry(writeCtx(f, f.humanId), { scope: "notes", kind: "note", title: "In notes", body: "SQLite there too", request_id: newId() } as never);
 
-    const result = contextSearch(requestCtx(f, f.humanId, "human", "human"), {
+    const result = (await contextSearch(requestCtx(f, f.humanId, "human", "human"), {
       path: "ctxd://notes/decisions/",
       query: "SQLite",
       limit: 10,
       max_tokens: 4000,
       include_proposed: true,
-    }) as { results: { title: string }[] };
+    })) as { results: { title: string }[] };
     expect(result.results).toHaveLength(1);
     expect(result.results[0]!.title).toBe("In decisions");
   });

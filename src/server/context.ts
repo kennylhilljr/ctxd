@@ -22,4 +22,6 @@ export interface RequestContext {
    * map as "every flag on", matching the pre-M3 behavior those fixtures exercise.
    */
   flags?: Map<string, boolean>;
+  /** The node's data directory, for loading the local embedding model at query time (SPEC v8 11.2). Optional for the same reason as `flags`. */
+  dataDir?: string;
 }

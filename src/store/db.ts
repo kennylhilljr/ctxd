@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import Database from "better-sqlite3";
 import { SCHEMA_SQL, SCHEMA_VERSION } from "./schema.js";
+import { loadVecExtension, VEC0_TABLE_SQL } from "../embed/vec.js";
 
 export interface OpenDatabaseOptions {
   /** Allow initializing a fresh database. Only `ctxd init` passes true (SPEC v6 section 12). */
@@ -46,6 +47,10 @@ export function openDatabase(path: string, { create = false }: OpenDatabaseOptio
   const db = new Database(path);
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
+  // Loaded unconditionally, independent of semantic_search.compute: every node must be able to
+  // store and query vectors that arrive through sync, even one that never computes its own
+  // (ADR 0004). No model and no network dependency, so this is always cheap and safe.
+  loadVecExtension(db);
   const version = db.pragma("user_version", { simple: true }) as number;
   if (version === 0) {
     if (!create) {
@@ -54,6 +59,7 @@ export function openDatabase(path: string, { create = false }: OpenDatabaseOptio
     }
     db.transaction(() => {
       db.exec(SCHEMA_SQL);
+      db.exec(VEC0_TABLE_SQL);
       db.pragma(`user_version = ${SCHEMA_VERSION}`);
     })();
   } else if (version !== SCHEMA_VERSION) {

@@ -55,7 +55,7 @@ function requestCtx(f: Fixture, flags?: Map<string, boolean>): RequestContext {
 }
 
 describe("runSearch's importance ranking (SPEC 11.2/11.3, M5): the importance feature flag", () => {
-  it("list mode (query '*') orders by importance when on, and by time alone when off", () => {
+  it("list mode (query '*') orders by importance when on, and by time alone when off", async () => {
     const f = setup();
     const older = writeEntry(writeCtx(f), { scope: "notes", kind: "note", title: "Older note", body: "x", request_id: newId() } as never);
     const newer = writeEntry(writeCtx(f), { scope: "notes", kind: "note", title: "Newer note", body: "y", request_id: newId() } as never);
@@ -70,11 +70,11 @@ describe("runSearch's importance ranking (SPEC 11.2/11.3, M5): the importance fe
         .run(newId(), newId(), olderRef, newId());
     }
 
-    const withImportance = runSearch(requestCtx(f), { scope: "notes", query: "*", limit: 10, max_tokens: 2000, include_proposed: true });
+    const withImportance = await runSearch(requestCtx(f), { scope: "notes", query: "*", limit: 10, max_tokens: 2000, include_proposed: true });
     const refsOn = withImportance.results.map((r) => r.ref);
     expect(refsOn.indexOf(older.ref)).toBeLessThan(refsOn.indexOf(newer.ref)); // importance on: links outweigh the 180-day recency gap
 
-    const withoutImportance = runSearch(requestCtx(f, new Map([["importance", false]])), {
+    const withoutImportance = await runSearch(requestCtx(f, new Map([["importance", false]])), {
       scope: "notes",
       query: "*",
       limit: 10,
