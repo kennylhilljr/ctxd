@@ -316,7 +316,7 @@ If capturing from phone chat apps proves important, add a minimal cloud inbox, n
 | Q2 | Final project name and GitHub repo name (working name `ctxd`). |
 | Q3 | Which scopes are `home`-only and which are `local-only`? |
 | Q4 | Should confirmed decisions auto-accept in some scopes, or always go to review? |
-| Q5 | **Resolved.** A small, CPU-friendly local embedding model, computed on the daily-driver machine (not the hub) and replicated as event data; see [ADR 0004](../adr/0004-embeddings-replicate.md). Exact model to be pinned in the M5 implementation. |
+| Q5 | **Resolved.** A small, CPU-friendly local embedding model, computed on the daily-driver machine (not the hub) and replicated as event data; see [ADR 0004](../adr/0004-embeddings-replicate.md). Pinned in the M5 implementation to `Xenova/all-MiniLM-L6-v2` at commit `751bff37182d3f1213fa05d7196b954e230abad9`, quantized, 384 dimensions. |
 | Q6 | Run Beads alongside ctxd for task tracking, or keep tasks native? |
 | Q7 | Default nudge thresholds (30 minutes, 20 turns) after a week of real use. |
 | Q8 | Should ctxd integrate with coordinate-agents if I use it (for example, recording its review decisions and task results as pointers in ctxd), or stay independent? |
