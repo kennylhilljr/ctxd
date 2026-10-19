@@ -1,6 +1,7 @@
 import type Database from "better-sqlite3";
 import { accessLevel, atLeast } from "../access/level.js";
 import { loadAccessSnapshot } from "../store/snapshot.js";
+import { isFlagOn } from "../config/flags.js";
 import { CtxdError } from "../core/errors.js";
 import { nowIso } from "../core/time.js";
 import { parseSkill, catalogLine, buildCatalog } from "../skills/skillmd.js";
@@ -65,18 +66,23 @@ function fitLines(lines: readonly string[], maxChars: number, moreHint?: string)
   return kept;
 }
 
-/** Sort entries so ones past review_after sort last, each marked; otherwise by importance desc. */
-function byImportanceReviewLast(db: Database.Database, rows: EntryRow[], now: number): { row: EntryRow; reviewDue: boolean }[] {
+/** Sort entries so ones past review_after sort last, each marked; otherwise by importance desc, or by recency desc when the importance flag is off (SPEC v6 ranking). */
+function byImportanceReviewLast(db: Database.Database, rows: EntryRow[], now: number, importanceOn: boolean): { row: EntryRow; reviewDue: boolean }[] {
   const nowDate = nowIso().slice(0, 10);
   return rows
-    .map((row) => ({ row, reviewDue: row.review_after !== null && row.review_after <= nowDate, imp: entryImportance(db, row, now) }))
-    .sort((a, b) => (a.reviewDue !== b.reviewDue ? (a.reviewDue ? 1 : -1) : b.imp - a.imp))
+    .map((row) => ({
+      row,
+      reviewDue: row.review_after !== null && row.review_after <= nowDate,
+      rank: importanceOn ? entryImportance(db, row, now) : hlcToMs(row.updated_hlc),
+    }))
+    .sort((a, b) => (a.reviewDue !== b.reviewDue ? (a.reviewDue ? 1 : -1) : b.rank - a.rank))
     .map(({ row, reviewDue }) => ({ row, reviewDue }));
 }
 
 export function assembleBrief(ctx: RequestContext, input: BriefInput): unknown {
   const { db } = ctx;
   const now = Date.now();
+  const importanceOn = isFlagOn(ctx.flags, "importance");
   const snapshot = loadAccessSnapshot(db);
   const client = clientInfoOf(ctx);
   const scopes = loadScopeInfos(db);
@@ -218,7 +224,7 @@ export function assembleBrief(ctx: RequestContext, input: BriefInput): unknown {
     const rows = db
       .prepare(`SELECT ${entryColumns("e")} FROM entries e WHERE e.scope_id = ? AND e.kind = 'convention' AND e.status IN ${activeStatuses}`)
       .all(named.row.scope_id) as EntryRow[];
-    const ranked = byImportanceReviewLast(db, rows, now);
+    const ranked = byImportanceReviewLast(db, rows, now, importanceOn);
     if (ranked.length) {
       const lines = ranked.map(({ row, reviewDue }) => `- ${row.summary}${reviewDue ? " (review due)" : ""}`);
       ranked.forEach(({ row }) => touchBriefed(row.entry_id));
@@ -253,7 +259,7 @@ export function assembleBrief(ctx: RequestContext, input: BriefInput): unknown {
           )
           .all(...meProfileIds) as EntryRow[])
       : [];
-    const ranked = byImportanceReviewLast(db, rows, now);
+    const ranked = byImportanceReviewLast(db, rows, now, importanceOn);
     if (ranked.length) {
       const lines = ranked.map(({ row, reviewDue }) => `- ${row.summary}${reviewDue ? " (review due)" : ""}`);
       ranked.forEach(({ row }) => touchBriefed(row.entry_id));

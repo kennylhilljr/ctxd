@@ -1,6 +1,7 @@
 import type Database from "better-sqlite3";
 import { accessLevel, atLeast, type AccessSnapshot, type ScopeInfo } from "../access/level.js";
 import { loadAccessSnapshot } from "../store/snapshot.js";
+import { isFlagOn } from "../config/flags.js";
 import type { Kind, Status } from "../core/kinds.js";
 import {
   hlcToMs,
@@ -130,6 +131,7 @@ export function runSearch(ctx: RequestContext, input: SearchInput): { results: S
 
   const maxBm25 = isListMode ? 1 : Math.max(1e-9, ...rows.map((r) => -(r.bm25 ?? 0)));
   const now = Date.now();
+  const importanceOn = isFlagOn(ctx.flags, "importance");
 
   const scored: (SearchResultRow & { _score: number })[] = [];
   for (const row of rows) {
@@ -150,7 +152,7 @@ export function runSearch(ctx: RequestContext, input: SearchInput): { results: S
 
     const scopeInfo = scopes.find((s) => s.id === row.scope_id)!;
     const relevance = isListMode ? 0 : Math.max(0, -(row.bm25 ?? 0)) / maxBm25;
-    const imp = entryImportance(db, row, now);
+    const imp = importanceOn ? entryImportance(db, row, now) : 0;
     let s = isListMode ? imp : score(relevance, imp);
     s *= scopeInfo.multiplier;
     if (flagged) s *= 0.5;

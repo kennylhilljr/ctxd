@@ -1,7 +1,7 @@
 import type Database from "better-sqlite3";
 import { decodeHlc } from "../core/hlc.js";
 import { nowIso } from "../core/time.js";
-import { importance } from "../model/importance.js";
+import { importance, type Importance } from "../model/importance.js";
 import { accessLevel, atLeast, effectivePools, type ClientInfo, type ScopeInfo } from "../access/level.js";
 import { loadAccessSnapshot } from "../store/snapshot.js";
 import type { RequestContext } from "../server/context.js";
@@ -55,8 +55,8 @@ export function hlcToMs(hlc: string): number {
   return decodeHlc(hlc).physical;
 }
 
-/** Importance (SPEC v6 section 11.3) computed from this entry's real inbound relations and read_stats. */
-export function entryImportance(db: Database.Database, row: EntryRow, nowMs: number): number {
+/** Importance (SPEC v6 section 11.3), full score plus its four parts, from this entry's real inbound relations and read_stats. Used directly by `ctxd show --why`; entryImportance below is the score-only shortcut every ranking call site actually needs. */
+export function entryImportanceDetailed(db: Database.Database, row: EntryRow, nowMs: number): Importance {
   const inbound = (
     db.prepare("SELECT type FROM relations WHERE target LIKE ? AND removed_event IS NULL").all(`%/${row.entry_id}`) as {
       type: RelationType;
@@ -73,7 +73,12 @@ export function entryImportance(db: Database.Database, row: EntryRow, nowMs: num
     now: nowMs,
     reads: stats?.reads ?? 0,
     briefed: stats?.briefed ?? 0,
-  }).score;
+  });
+}
+
+/** Importance (SPEC v6 section 11.3) computed from this entry's real inbound relations and read_stats. */
+export function entryImportance(db: Database.Database, row: EntryRow, nowMs: number): number {
+  return entryImportanceDetailed(db, row, nowMs).score;
 }
 
 export function bumpRead(db: Database.Database, entryId: string): void {
