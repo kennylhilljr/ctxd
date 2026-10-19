@@ -4,8 +4,27 @@
  * Bumped to 8 for M3 slice 2 (replication, Spec 7.1): the new `peers` table replaces the unused
  * `nodes.peer_token_hash` placeholder, since peers are never rows in `nodes` (that table's many
  * `SELECT node_id FROM nodes LIMIT 1` call sites assume exactly one row: the local node).
+ * Bumped to 9 for M3 slice 3 (conflict policies, Spec 7.4): a new `events(entry_id, rev)` index
+ * backs the conflict lookup `eventHoldingRev` (src/store/materialize.ts) added that slice.
+ * Bumped to 10 for M3 slice 5 (claims across nodes, Spec 7.4, 7.5): `entry_siblings.part`'s CHECK
+ * now allows `'claim'`, so a claim event that loses a concurrent-claim race can be recorded the
+ * same way a losing content/status event already is; `peers.last_synced_at` records when a pull
+ * from that peer last completed successfully, backing the "no successful sync for 10 minutes"
+ * tentative-claim check (src/store/claim.ts).
+ * Bumped to 11 for M3 slice 6 (ACL and scope metadata as events, Spec v8 4): `scopes.kind`'s
+ * CHECK now allows `'system'`, for the reserved `_system` scope `acl` events travel in; the new
+ * `acl_cursors` table backs an HLC guard (found during `/simplify`) so a grant and a revoke of
+ * the same pool/scope applied out of causal order converge on whichever is actually later,
+ * instead of letting a stale grant silently un-revoke what a later revoke already took away.
+ * Bumped to 12 for M3 slice 7 (sync freshness and the N-node partition property suite, Spec
+ * 7.1-7.4): `events.materialized` marks a stored event that `src/sync/apply.ts`'s `decide`
+ * deferred as missing-parent (per-origin pull batching does not guarantee cross-origin causal
+ * delivery order), retried once a sibling event for the same entry materializes
+ * (`retryPendingFor`); `leases.earliest_claim_hlc` tracks a task's smallest claim_hlc across every
+ * epoch, so a late-arriving concurrent claim is always resolved against the task's true earliest
+ * claimant, not whichever claim happens to be current right now.
  */
-export const SCHEMA_VERSION = 8;
+export const SCHEMA_VERSION = 12;
 
 export const SCHEMA_SQL = `
 CREATE TABLE nodes (
@@ -24,7 +43,8 @@ CREATE TABLE peers (                   -- a machine we sync with (Spec 7.1); nev
   incoming_token_hash TEXT NOT NULL,     -- hash of the token this peer must present to pull from us
   outgoing_token      TEXT,              -- the token we present when pulling from this peer; NULL until supplied
   revoked_at          TEXT,
-  created_at          TEXT NOT NULL
+  created_at          TEXT NOT NULL,
+  last_synced_at      TEXT                -- set when a pull from this peer last completed successfully (Spec 7.4's tentative-claim check)
 );
 
 CREATE TABLE clients (
@@ -41,7 +61,7 @@ CREATE TABLE clients (
 CREATE TABLE scopes (
   scope_id      TEXT PRIMARY KEY,
   name          TEXT NOT NULL UNIQUE,
-  kind          TEXT NOT NULL DEFAULT 'project' CHECK (kind IN ('project','me','profile','hold')),
+  kind          TEXT NOT NULL DEFAULT 'project' CHECK (kind IN ('project','me','profile','hold','system')),
   owner         TEXT,                  -- pool_id for kind 'profile'; client_id for kind 'hold'
   description   TEXT NOT NULL DEFAULT '',
   replication   TEXT NOT NULL DEFAULT 'all' CHECK (replication IN ('all','home','local')),
@@ -70,10 +90,16 @@ CREATE TABLE events (
   payload      TEXT NOT NULL,
   prev         TEXT,                   -- JSON: prior values of the changed fields of this part (NULL on create)
   received_at  TEXT NOT NULL,
+  materialized INTEGER NOT NULL DEFAULT 1, -- 0: stored but deferred, sync/apply.ts's "missing-parent"
+                                            -- row (its own create, or an earlier rev, hasn't arrived
+                                            -- yet); retried once a sibling event for the same entry
+                                            -- materializes (its own real apply, every local write and
+                                            -- rebuild, always sets this to 1 up front)
   UNIQUE (origin_node, origin_seq),
   UNIQUE (client_id, request_id)
 );
 CREATE INDEX events_entry ON events(entry_id, hlc);
+CREATE INDEX events_entry_rev ON events(entry_id, rev);  -- the conflict-policy lookup, eventHoldingRev (Spec 7.4)
 
 CREATE TABLE entries (
   entry_id     TEXT PRIMARY KEY,
@@ -114,7 +140,7 @@ CREATE INDEX entries_journal ON entries(scope_id, created_hlc) WHERE kind = 'jou
 
 CREATE TABLE entry_siblings (
   entry_id     TEXT NOT NULL,
-  part         TEXT NOT NULL CHECK (part IN ('content','status','relations')),
+  part         TEXT NOT NULL CHECK (part IN ('content','status','relations','claim')),
   rev          TEXT NOT NULL,
   event_id     TEXT NOT NULL,
   reason       TEXT NOT NULL,
@@ -188,6 +214,17 @@ CREATE TABLE client_grants (           -- temporary grants
   expires_at   TEXT NOT NULL,
   granted_by   TEXT NOT NULL,          -- always the human client
   PRIMARY KEY (client_id, scope_id)
+);
+
+-- HLC guard for acl events (Spec v8 4, M3 slice 6): one row per mutable access-metadata target
+-- (a pool+scope grant, a pool+principal membership, a client+scope grant, a scope's review
+-- policy), so a grant and a revoke of the same target applied out of causal order converge on
+-- whichever carries the later HLC, not on arrival order (src/store/materialize.ts's
+-- applyAclEvent). target is a free-form composite key, not a foreign key to any one table,
+-- since it names whichever table's row the acl action actually touches.
+CREATE TABLE acl_cursors (
+  target       TEXT PRIMARY KEY,
+  updated_hlc  TEXT NOT NULL
 );
 
 CREATE TABLE access_requests (
@@ -302,6 +339,11 @@ CREATE TABLE leases (
   paths        TEXT,                 -- JSON array of normalized patterns; NULL = unknown, '[]' = no writes
   claim_event  TEXT NOT NULL,
   claim_hlc    TEXT NOT NULL,
+  earliest_claim_hlc TEXT NOT NULL, -- the smallest claim_hlc this task has EVER contended (7.4): a
+                                     -- late-arriving concurrent claim from a closed-and-reclaimed
+                                     -- epoch is still compared against this, not the current
+                                     -- (possibly much later) claim_hlc, so "earliest wins" holds
+                                     -- regardless of delivery order even across a release/reclaim
   session_ref  TEXT,
   base_head    TEXT,                 -- git HEAD when claimed, for the drift audit
   expires_at   TEXT NOT NULL,

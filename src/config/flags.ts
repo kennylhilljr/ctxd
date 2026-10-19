@@ -39,6 +39,7 @@ export const FLAG_REGISTRY: readonly FlagDef[] = [
   { name: "semantic_search.compute", default: false, milestone: "M5", description: "Compute an embedding for this machine's own writes and replicate it", offMeans: "This machine never computes embeddings itself; it still serves hybrid search over vectors that arrive through sync", parent: "semantic_search" },
   { name: "importance", default: true, milestone: "M5", description: "Importance-weighted ranking in briefs and search (SPEC 11.3)", offMeans: "Briefs and search fall back to the Spec v6 ranking without importance" },
   { name: "digest", default: true, milestone: "M5", description: "Automatic weekly digest on journal.digest_weekday (SPEC 11.5)", offMeans: "No weekly digests from this machine; ctxd digest still works manually" },
+  { name: "skills.native_sync", default: false, milestone: "M5", description: "Write approved skills into a client's personal skills folder (SPEC 12.2)", offMeans: "Skills are not written into client skill folders, and nothing already synced is changed; ctxd skills sync itself refuses to run, since unlike sync/digest this flag gates files outside ctxd's own data folder" },
 ];
 
 const FLAGS_BY_NAME = new Map(FLAG_REGISTRY.map((def) => [def.name, def]));

@@ -42,6 +42,7 @@ import { runStatus, runStatusline } from "./status.js";
 import { run as runWorkerCommand } from "./worker.js";
 import { run as runTidyCommand } from "./tidy.js";
 import { run as runDigestCommand } from "./digest.js";
+import { run as runSkillsCommand } from "./skills.js";
 
 /** Each command's parsed-args entry point, added as its milestone lands. */
 const COMMAND_RUNNERS: Record<string, (argv: string[]) => number | Promise<number>> = {
@@ -86,6 +87,7 @@ const COMMAND_RUNNERS: Record<string, (argv: string[]) => number | Promise<numbe
   worker: runWorkerCommand,
   tidy: runTidyCommand,
   digest: runDigestCommand,
+  skills: runSkillsCommand,
 };
 
 const COMMANDS: Record<string, { milestone: string; summary: string }> = {
@@ -129,7 +131,7 @@ const COMMANDS: Record<string, { milestone: string; summary: string }> = {
   open: { milestone: "M6", summary: "Open an entry's mirror file in $EDITOR" },
   mirror: { milestone: "M6", summary: "Start, stop or check the Markdown mirror" },
   import: { milestone: "M6", summary: "Import Markdown files as proposed entries" },
-  skills: { milestone: "M2", summary: "List, show, sync or import skills" },
+  skills: { milestone: "M5", summary: "List, show, sync or import skills" },
   remember: { milestone: "M2", summary: "Record a preference, convention or fact in _me" },
   log: { milestone: "M2", summary: "Add a journal entry" },
   journal: { milestone: "M2", summary: "Read the journal by day or time" },
