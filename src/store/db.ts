@@ -70,15 +70,22 @@ export function openDatabase(path: string, { create = false }: OpenDatabaseOptio
     })();
   }
   const migratedVersion = db.pragma("user_version", { simple: true }) as number;
-  if (migratedVersion === 14 && SCHEMA_VERSION === 15) {
+  if (migratedVersion === 14 && SCHEMA_VERSION >= 15) {
     db.transaction(() => {
       db.exec("CREATE TABLE mirror_conflicts (path TEXT PRIMARY KEY, entry_id TEXT NOT NULL, file_rev TEXT, current_rev TEXT NOT NULL, reason TEXT NOT NULL, created_at TEXT NOT NULL)");
       db.exec("CREATE TABLE archive_requests (entry_id TEXT PRIMARY KEY, path TEXT NOT NULL, created_at TEXT NOT NULL)");
       db.pragma("user_version = 15");
     })();
-  } else if (migratedVersion !== SCHEMA_VERSION) {
+  }
+  const mirrorVersion = db.pragma("user_version", { simple: true }) as number;
+  if (mirrorVersion === 15 && SCHEMA_VERSION === 16) {
+    db.transaction(() => {
+      db.exec("CREATE TABLE sealed_purge_queue (pool_id TEXT NOT NULL, entry_id TEXT NOT NULL, requested_at TEXT NOT NULL, PRIMARY KEY (pool_id, entry_id))");
+      db.pragma("user_version = 16");
+    })();
+  } else if (mirrorVersion !== SCHEMA_VERSION) {
     db.close();
-    throw new Error(`Database schema version ${migratedVersion} does not match ${SCHEMA_VERSION}; no migration is defined yet.`);
+    throw new Error(`Database schema version ${mirrorVersion} does not match ${SCHEMA_VERSION}; no migration is defined yet.`);
   }
   return db;
 }

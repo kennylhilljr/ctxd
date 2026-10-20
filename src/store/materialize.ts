@@ -726,6 +726,8 @@ type AclPayload =
   | { action: "pool_revoke"; scope_id: string }
   | { action: "pool_add_member"; principal: string }
   | { action: "pool_remove_member"; principal: string }
+  | { action: "pool_seal"; sealed_file: string }
+  | { action: "pool_enroll"; node_id: string }
   | { action: "client_grant"; scope_id: string; level: string; expires_at: string; granted_by: string };
 
 /**
@@ -802,6 +804,14 @@ function applyAclEvent(db: Database.Database, e: EventForMaterialize): void {
     case "pool_remove_member":
       if (!aclGuardPasses(db, `pool_member:${e.entryId}:${p.principal}`, e.hlc)) return;
       db.prepare("DELETE FROM pool_members WHERE pool_id = ? AND principal = ?").run(e.entryId, p.principal);
+      return;
+    case "pool_seal":
+      if (!aclGuardPasses(db, `pool_storage:${e.entryId}`, e.hlc)) return;
+      db.prepare("UPDATE pools SET storage = 'sealed', sealed_file = ? WHERE pool_id = ?").run(p.sealed_file, e.entryId);
+      return;
+    case "pool_enroll":
+      if (!aclGuardPasses(db, `pool_enrollment:${e.entryId}:${p.node_id}`, e.hlc)) return;
+      db.prepare("INSERT OR REPLACE INTO pool_enrollments (pool_id, node_id, enrolled_at) VALUES (?, ?, ?)").run(e.entryId, p.node_id, createdAt);
       return;
     case "client_grant":
       if (!aclGuardPasses(db, `client_grant:${e.entryId}:${p.scope_id}`, e.hlc)) return;

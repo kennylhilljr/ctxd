@@ -31,8 +31,9 @@
  * Ed25519 signatures, and trusted per-origin public keys survive purge and verify on replay.
  * Bumped to 15 for M6 slice 2: mirror conflicts and deletion archive requests are local review
  * records. Successful edits and imports still travel through ordinary events.
+ * Bumped to 16 for M6 slice 3: sealed purge work may wait for its pool key.
  */
-export const SCHEMA_VERSION = 15;
+export const SCHEMA_VERSION = 16;
 
 export const SCHEMA_SQL = `
 CREATE TABLE nodes (
@@ -222,6 +223,13 @@ CREATE TABLE pool_enrollments (        -- machines allowed to hold a sealed pool
   node_id      TEXT NOT NULL,
   enrolled_at  TEXT NOT NULL,
   PRIMARY KEY (pool_id, node_id)
+);
+
+CREATE TABLE sealed_purge_queue (
+  pool_id      TEXT NOT NULL,
+  entry_id     TEXT NOT NULL,
+  requested_at TEXT NOT NULL,
+  PRIMARY KEY (pool_id, entry_id)
 );
 
 CREATE TABLE client_grants (           -- temporary grants

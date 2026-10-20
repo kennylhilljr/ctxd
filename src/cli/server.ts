@@ -15,6 +15,7 @@ import { runDueDigests } from "../journal/digest.js";
 import { embedPendingEntries, ensureEmbedClient } from "../embed/compute.js";
 import { syncMirror } from "../mirror/markdown.js";
 import { expandHome } from "../config/config.js";
+import { KeyHelperProvider } from "../sealed/key-provider.js";
 
 export async function run(argv: string[]): Promise<number> {
   const { values } = parseArgs({
@@ -82,10 +83,11 @@ export async function run(argv: string[]): Promise<number> {
   // existence), so there is no live-reload property to preserve for these two flags.
   const flags = resolveFlags(config);
   const syncServeOn = isFlagOn(flags, "sync.serve");
+  const sealedKeys = isFlagOn(flags, "sealed_pools") ? new KeyHelperProvider(config.sealed.key_helper) : undefined;
 
   const [server, syncServer] = await Promise.all([
     startServer({ db, nodeId: node.node_id, listen: config.mcp.listen, configPath }),
-    syncServeOn ? startSyncServer({ db, nodeId: node.node_id, listen: config.sync.listen }) : undefined,
+    syncServeOn ? startSyncServer({ db, nodeId: node.node_id, listen: config.sync.listen, sealedKeys }) : undefined,
   ]);
   console.log(`ctxd server listening on ${config.mcp.listen}`);
   if (syncServeOn) console.log(`ctxd server: sync listener on ${config.sync.listen}`);
@@ -96,7 +98,7 @@ export async function run(argv: string[]): Promise<number> {
     pullInterval = setInterval(() => {
       if (pulling) return;
       pulling = true;
-      void runSync(db, node.node_id, undefined).finally(() => {
+      void runSync(db, node.node_id, undefined, sealedKeys).finally(() => {
         pulling = false;
       });
     }, config.sync.interval_seconds * 1000);

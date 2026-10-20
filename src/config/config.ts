@@ -58,6 +58,9 @@ export const configSchema = z.object({
       dir: z.string().default("~/Library/Application Support/ctxd/mirror"),
     })
     .default({ enabled: false, dir: "~/Library/Application Support/ctxd/mirror" }),
+  sealed: z
+    .object({ unlock_minutes: z.number().int().min(1).default(60), key_helper: z.string().default("ctxd-keyhelper") })
+    .default({ unlock_minutes: 60, key_helper: "ctxd-keyhelper" }),
   /** Weekly digest (SPEC v8 11.5): only digest_node writes digests, on digest_weekday after 18:00 local. */
   journal: z
     .object({

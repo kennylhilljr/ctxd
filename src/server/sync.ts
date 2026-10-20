@@ -4,6 +4,7 @@ import { assertLoopback } from "../security/policy.js";
 import { resolvePeerAuth } from "./auth.js";
 import { extractBearerToken, parseListen, readJsonBody } from "./http.js";
 import { servePull, pullFromPeer, type PullRequest } from "../sync/pull.js";
+import type { SealedKeyProvider } from "../sealed/key-provider.js";
 
 /**
  * The sync listener (Spec v8 7.1): a second HTTP server on `sync.listen` (127.0.0.1:7412 by
@@ -16,6 +17,7 @@ export interface StartSyncServerOptions {
   db: Database.Database;
   nodeId: string;
   listen: string;
+  sealedKeys?: SealedKeyProvider;
 }
 
 export interface RunningSyncServer {
@@ -30,7 +32,7 @@ export async function startSyncServer(opts: StartSyncServerOptions): Promise<Run
   const notifyTimers = new Map<string, NodeJS.Timeout>();
 
   const httpServer = createHttpServer((req, res) => {
-    handleRequest(req, res, opts.db, opts.nodeId, notifyTimers).catch((err) => {
+    handleRequest(req, res, opts.db, opts.nodeId, notifyTimers, opts.sealedKeys).catch((err) => {
       if (!res.headersSent) res.writeHead(500, { "content-type": "application/json" });
       res.end(JSON.stringify({ error: (err as Error).message }));
     });
@@ -56,6 +58,7 @@ async function handleRequest(
   db: Database.Database,
   nodeId: string,
   notifyTimers: Map<string, NodeJS.Timeout>,
+  sealedKeys?: SealedKeyProvider,
 ): Promise<void> {
   if (req.method !== "POST" || (req.url !== "/v1/pull" && req.url !== "/v1/notify")) {
     res.writeHead(404, { "content-type": "application/json" }).end(JSON.stringify({ error: "not found" }));
@@ -75,17 +78,17 @@ async function handleRequest(
       res.writeHead(400, { "content-type": "application/json" }).end(JSON.stringify({ error: "invalid pull request" }));
       return;
     }
-    const response = servePull(db, auth.peerRole, { node: body.node, vector: body.vector, limit: body.limit });
+    const response = servePull(db, auth.peerRole, { node: body.node, vector: body.vector, limit: body.limit }, sealedKeys);
     res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(response));
     return;
   }
 
   // /v1/notify: debounced immediate pull from the notifying peer (Spec 7.1's "on demand" trigger).
-  scheduleNotifyPull(db, nodeId, auth.peerId, auth.peerName, notifyTimers);
+  scheduleNotifyPull(db, nodeId, auth.peerId, auth.peerName, notifyTimers, sealedKeys);
   res.writeHead(202, { "content-type": "application/json" }).end(JSON.stringify({ accepted: true }));
 }
 
-function scheduleNotifyPull(db: Database.Database, selfNodeId: string, peerId: string, peerName: string, notifyTimers: Map<string, NodeJS.Timeout>): void {
+function scheduleNotifyPull(db: Database.Database, selfNodeId: string, peerId: string, peerName: string, notifyTimers: Map<string, NodeJS.Timeout>, sealedKeys?: SealedKeyProvider): void {
   if (notifyTimers.has(peerId)) return; // already scheduled; the burst collapses into one pull
   const timer = setTimeout(() => {
     notifyTimers.delete(peerId);
@@ -93,7 +96,7 @@ function scheduleNotifyPull(db: Database.Database, selfNodeId: string, peerId: s
       | { url: string; outgoing_token: string | null }
       | undefined;
     if (!peer?.outgoing_token) return; // no outgoing token yet: can't pull from this peer
-    void pullFromPeer(db, selfNodeId, { peerId, name: peerName, url: peer.url, outgoingToken: peer.outgoing_token }).catch(() => {
+    void pullFromPeer(db, selfNodeId, { peerId, name: peerName, url: peer.url, outgoingToken: peer.outgoing_token }, fetch, sealedKeys).catch(() => {
       // A failed notify-triggered pull is not fatal: the scheduled interval loop (src/cli/server.ts) retries it.
     });
   }, NOTIFY_DEBOUNCE_MS);

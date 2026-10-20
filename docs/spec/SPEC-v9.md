@@ -413,6 +413,13 @@ CREATE TABLE pool_enrollments (        -- machines allowed to hold a sealed pool
   PRIMARY KEY (pool_id, node_id)
 );
 
+CREATE TABLE sealed_purge_queue (      -- local only: purge requests waiting for an unlock
+  pool_id      TEXT NOT NULL,
+  entry_id     TEXT NOT NULL,
+  requested_at TEXT NOT NULL,
+  PRIMARY KEY (pool_id, entry_id)
+);
+
 CREATE TABLE client_grants (           -- temporary grants
   client_id    TEXT NOT NULL,
   scope_id     TEXT NOT NULL,
@@ -1515,7 +1522,7 @@ Implements [PRD-pools-access-v2](../prd/components/PRD-pools-access-v2.md) secti
 Implements [PRD-pools-access-v2](../prd/components/PRD-pools-access-v2.md) section 7.1.
 
 - **Separate file, same schema.** `ctxd pool seal <pool>` moves the pool's scopes, their entries, events, relations, flags, FTS and vector rows into a new database file under `sealed/`, named from the pool id. It uses the same schema, so the access layer and queries are unchanged apart from the database prefix.
-- **Encryption at rest.** The file is encrypted with SQLCipher-compatible encryption (candidate library: `better-sqlite3-multiple-ciphers`; verify). The key is 32 random bytes.
+- **Encryption at rest.** The file uses `better-sqlite3-multiple-ciphers` in SQLCipher compatibility mode. The key is 32 random bytes. Database construction is injected so tests use the same lifecycle with an isolated test provider.
 - **Key storage.** The key is stored as a macOS Keychain item with a user-presence access control (Touch ID or password), created and read through a small signed helper, `ctxd-keyhelper`, that uses the LocalAuthentication framework.
   - The server asks the helper for the key the first time a session whose assumed pools include the sealed pool makes a call. I approve on the Mac.
   - The key is held in memory for the unlock window (`sealed.unlock_minutes`, default 60).

@@ -3,6 +3,8 @@ import type { NodeRole, Replication } from "../core/kinds.js";
 import { nowIso } from "../core/time.js";
 import { mayReplicate } from "../security/policy.js";
 import { applyEvent, toWireEvent, type EventRow, type WireEvent } from "./apply.js";
+import type { SealedKeyProvider } from "../sealed/key-provider.js";
+import { decryptSealed, encryptSealed, type CiphertextEnvelope } from "../sealed/crypto.js";
 
 /** POST /v1/pull's request and response bodies (Spec v8 7.1). */
 export interface PullRequest {
@@ -12,13 +14,15 @@ export interface PullRequest {
 }
 
 export interface PullResponse {
-  events: WireEvent[];
+  events: (WireEvent | EncryptedWireEvent)[];
   through: Record<string, number>;
   more: boolean;
 }
 
+export interface EncryptedWireEvent { sealed: true; pool_id: string; event_id: string; envelope: CiphertextEnvelope }
+
 /** `EventRow` plus the one extra column only this query's own replication filter needs. */
-type PullRow = EventRow & { scope_replication: Replication };
+type PullRow = EventRow & { scope_replication: Replication; sealed_pool_id: string | null };
 
 /**
  * Serve POST /v1/pull (Spec 7.1, 7.2): events the requester hasn't seen, filtered by its role,
@@ -27,7 +31,7 @@ type PullRow = EventRow & { scope_replication: Replication };
  * reports the highest origin_seq *considered* per origin in this page, including events filtered
  * out by the replication policy, so the puller's cursor advances past what it will never receive.
  */
-export function servePull(db: Database.Database, requesterRole: NodeRole, req: PullRequest): PullResponse {
+export function servePull(db: Database.Database, requesterRole: NodeRole, req: PullRequest, sealedKeys?: SealedKeyProvider): PullResponse {
   const origins = db.prepare("SELECT origin_node, MAX(origin_seq) AS max_seq FROM events GROUP BY origin_node").all() as {
     origin_node: string;
     max_seq: number;
@@ -41,7 +45,9 @@ export function servePull(db: Database.Database, requesterRole: NodeRole, req: P
     .prepare(
       `SELECT e.event_id, e.origin_node, e.origin_seq, e.hlc, e.scope_id, e.entry_id, e.op, e.part, e.parent_revs, e.rev,
               e.client_id, e.session_ref, e.request_id, e.request_hash, e.payload, e.prev, e.payload_hash, e.signature, e.public_key,
-              s.replication AS scope_replication
+              s.replication AS scope_replication,
+              (SELECT pg.pool_id FROM pool_grants pg JOIN pools p ON p.pool_id = pg.pool_id
+               WHERE pg.scope_id = e.scope_id AND p.storage = 'sealed' LIMIT 1) AS sealed_pool_id
        FROM events e JOIN scopes s ON s.scope_id = e.scope_id
        WHERE ${whereParts.join(" OR ")}
        ORDER BY e.origin_node, e.origin_seq
@@ -53,10 +59,16 @@ export function servePull(db: Database.Database, requesterRole: NodeRole, req: P
   const page = more ? rows.slice(0, req.limit) : rows;
 
   const through: Record<string, number> = {};
-  const events: WireEvent[] = [];
+  const events: (WireEvent | EncryptedWireEvent)[] = [];
   for (const row of page) {
     through[row.origin_node] = Math.max(through[row.origin_node] ?? 0, row.origin_seq);
-    if (mayReplicate(row.scope_replication, requesterRole)) events.push(toWireEvent(row));
+    if (!mayReplicate(row.scope_replication, requesterRole)) continue;
+    if (row.sealed_pool_id) {
+      const enrolled = db.prepare("SELECT 1 FROM pool_enrollments WHERE pool_id = ? AND node_id = ?").get(row.sealed_pool_id, req.node);
+      if (!enrolled || !sealedKeys) continue;
+      const wire = toWireEvent(row);
+      events.push({ sealed: true, pool_id: row.sealed_pool_id, event_id: row.event_id, envelope: encryptSealed(Buffer.from(JSON.stringify(wire)), sealedKeys.get(row.sealed_pool_id), row.event_id) });
+    } else events.push(toWireEvent(row));
   }
   return { events, through, more };
 }
@@ -79,6 +91,7 @@ export async function pullFromPeer(
   selfNodeId: string,
   peer: { peerId: string; name: string; url: string; outgoingToken: string },
   fetchImpl: typeof fetch = fetch,
+  sealedKeys?: SealedKeyProvider,
 ): Promise<PullOutcome> {
   const vector = currentVector(db, peer.name);
   let pulled = 0;
@@ -97,7 +110,10 @@ export async function pullFromPeer(
     if (!res.ok) throw new Error(`pull from ${peer.name} failed: HTTP ${res.status}`);
     const body = (await res.json()) as PullResponse;
 
-    for (const event of body.events) {
+    for (const incoming of body.events) {
+      const event = "sealed" in incoming && incoming.sealed
+        ? JSON.parse(decryptSealed(incoming.envelope, sealedKeys?.get(incoming.pool_id) ?? Buffer.alloc(0), incoming.event_id).toString("utf8")) as WireEvent
+        : incoming as WireEvent;
       const result = applyEvent(db, event);
       if (result.outcome === "fast-forward") pulled++;
       else if (result.outcome === "conflict-resolved") conflicts++;
