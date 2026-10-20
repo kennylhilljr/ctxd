@@ -30,6 +30,8 @@ describe("envVarName", () => {
     expect(envVarName("hooks")).toBe("CTXD_FEATURE_HOOKS");
     expect(envVarName("hooks.nudge")).toBe("CTXD_FEATURE_HOOKS_NUDGE");
     expect(envVarName("review.remembered_rules")).toBe("CTXD_FEATURE_REVIEW_REMEMBERED_RULES");
+    expect(envVarName("mobile_inbox")).toBe("CTXD_FEATURE_MOBILE_INBOX");
+    expect(envVarName("mobile_inbox.publish_briefs")).toBe("CTXD_FEATURE_MOBILE_INBOX_PUBLISH_BRIEFS");
   });
 });
 
@@ -43,6 +45,10 @@ describe("resolveFlags: three layers, last one wins", () => {
   it("a config value overrides the default", () => {
     const flags = resolveFlags({ features: { "hooks.nudge": false } }, {});
     expect(isFlagOn(flags, "hooks.nudge")).toBe(false);
+
+    const inboxFlags = resolveFlags({ features: { mobile_inbox: false, "mobile_inbox.publish_briefs": true } }, {});
+    expect(isFlagOn(inboxFlags, "mobile_inbox")).toBe(false);
+    expect(isFlagOn(inboxFlags, "mobile_inbox.publish_briefs")).toBe(false);
   });
 
   it("an environment value overrides both the default and the config file", () => {

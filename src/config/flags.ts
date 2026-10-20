@@ -44,6 +44,8 @@ export const FLAG_REGISTRY: readonly FlagDef[] = [
   { name: "mirror", default: false, milestone: "M6", description: "Write and read the editable Markdown mirror", offMeans: "The Markdown mirror is neither written nor read" },
   { name: "sealed_pools", default: false, milestone: "M6", description: "Store selected pools in encrypted database files", offMeans: "Sealing, enrollment and unlocking are unavailable; existing sealed files are left unchanged" },
   { name: "local_model", default: false, milestone: "M6", description: "Ask a loopback model for summary and lesson proposals", offMeans: "No model calls or model-authored proposals; deterministic summaries remain unchanged" },
+  { name: "mobile_inbox", default: false, milestone: "M7", description: "Pull and apply captured mobile inbox entries", offMeans: "This machine makes no network calls to any mobile inbox and ignores inbox configuration" },
+  { name: "mobile_inbox.publish_briefs", default: false, milestone: "M7", description: "Publish allowlisted non-sensitive briefs to cloud inbox", offMeans: "No briefs or context are published to the cloud inbox", parent: "mobile_inbox" },
 ];
 
 const FLAGS_BY_NAME = new Map(FLAG_REGISTRY.map((def) => [def.name, def]));
