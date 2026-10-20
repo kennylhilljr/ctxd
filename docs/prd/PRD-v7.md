@@ -6,7 +6,7 @@
 | **Owner** | Kenny Hill |
 | **Date** | 2026-10-18 |
 | **Supersedes** | [PRD v6](PRD-v6.md) |
-| **Component PRDs** | [Knowledge model](components/PRD-knowledge-model-v3.md), [Persona pools and access](components/PRD-pools-access-v2.md), [Hooks](components/PRD-hooks-v5.md), [Claims](components/PRD-claims-v3.md), [Trust and safety](components/PRD-trust-safety-v4.md), [Context hygiene](components/PRD-context-hygiene-v1.md), [Replication](components/PRD-replication-v5.md), [Briefs and search](components/PRD-briefs-search-v4.md), [Filesystem view](components/PRD-filesystem-view-v1.md), [Skills](components/PRD-skills-v1.md), [Memory and journal](components/PRD-memory-journal-v1.md), [Feature flags](components/PRD-feature-flags-v1.md) |
+| **Component PRDs** | [Knowledge model](components/PRD-knowledge-model-v3.md), [Persona pools and access](components/PRD-pools-access-v2.md), [Hooks](components/PRD-hooks-v5.md), [Claims](components/PRD-claims-v3.md), [Trust and safety](components/PRD-trust-safety-v4.md), [Context hygiene](components/PRD-context-hygiene-v1.md), [Replication](components/PRD-replication-v5.md), [Briefs and search](components/PRD-briefs-search-v4.md), [Filesystem view](components/PRD-filesystem-view-v1.md), [Skills](components/PRD-skills-v2.md), [Memory and journal](components/PRD-memory-journal-v1.md), [Feature flags](components/PRD-feature-flags-v1.md) |
 | **Companion docs** | [Technical spec v7](../spec/SPEC-v7.md) (v8 adds feature flags), [Prior art v4](../research/prior-art-v4.md), [ADRs](../adr/) |
 
 ## Changes in v7
@@ -130,7 +130,7 @@ This parent PRD sets the product's goals, scope and cross-cutting requirements. 
 | [Replication and offline work](components/PRD-replication-v5.md) | Per-machine replicas, scope replication, sync over Tailscale, per-part conflicts, idempotent retries, hub migration | FR-4, FR-13 to FR-15 | RP- | 4, 5, 7, 12 |
 | [Briefs and search](components/PRD-briefs-search-v4.md) | Detail tiers, brief contents and caps (including open signals, the skill catalog and journal highlights), lessons, interrupted-work wording, search scope and filters, tool footprint, agent ergonomics, semantic search | FR-2, FR-5, FR-6, FR-20, FR-56 | BS- | 8.2, 8.5, 11 |
 | [Filesystem view](components/PRD-filesystem-view-v1.md) | `ctxd://` paths, folder summaries, browsing for agents and me, the editable Markdown mirror, import | FR-19, FR-43 to FR-45 | FS- | 4.2, 8.2, 12.1, 13 |
-| [Skills](components/PRD-skills-v1.md) | Shared, versioned, approved procedures; the skill catalog; native sync into Claude Code and Codex | FR-46 to FR-49 | SK- | 4.3, 6, 10.4, 11.1, 12.2, 13 |
+| [Skills](components/PRD-skills-v2.md) | Shared, versioned, approved procedures; the skill catalog; native sync into Claude Code and Codex | FR-46 to FR-49 | SK- | 4.3, 6, 10.4, 11.1, 12.2, 13 |
 | [Memory and journal](components/PRD-memory-journal-v1.md) | Preferences and the `_me` layout; the journal, digests and time queries; open signals; importance; causal links | FR-50 to FR-55 | MJ- | 4.1, 4.3, 9.2, 11.1 to 11.5, 13 |
 | [Feature flags](components/PRD-feature-flags-v1.md) | Switching optional behavior off per machine: the registry, layers (default, config, environment), live reload, safety rules, the flag list | FR-57; NFR-11 | FF- | 3, 13 (Spec v8) |
 | Mobile inbox (future) | Section 12; becomes its own component PRD only if pursued | FR-22 | MI- | none yet |
@@ -218,10 +218,10 @@ The full definition is in [Hooks and agent lifecycle](components/PRD-hooks-v5.md
 | FR-43 | Stable `ctxd://` paths for entries and folders, with generated folder summaries, filtered by persona | P0 | [Filesystem view](components/PRD-filesystem-view-v1.md) |
 | FR-44 | Paths accepted by `context_get` and `context_search`; CLI `ls`, `tree`, `read`, `grep`, `open` | P1 | [Filesystem view](components/PRD-filesystem-view-v1.md) |
 | FR-45 | Optional two-way Markdown mirror for me, with revision checks; never for sealed pools or agents | P2 | [Filesystem view](components/PRD-filesystem-view-v1.md) |
-| FR-46 | `skill` kind in `SKILL.md` form, scoped to `_me`, pool profiles or projects | P0 | [Skills](components/PRD-skills-v1.md) |
-| FR-47 | Skill catalog in briefs; skills fetched on demand by name | P0 | [Skills](components/PRD-skills-v1.md) |
-| FR-48 | Optional native sync of approved global skills into Claude Code and Codex skill folders | P1 | [Skills](components/PRD-skills-v1.md) |
-| FR-49 | Agent-written skills always need my approval; flagged skills are withdrawn everywhere | P0 | [Skills](components/PRD-skills-v1.md) |
+| FR-46 | `skill` kind in `SKILL.md` form, scoped to `_me`, pool profiles or projects | P0 | [Skills](components/PRD-skills-v2.md) |
+| FR-47 | Skill catalog in briefs; skills fetched on demand by name | P0 | [Skills](components/PRD-skills-v2.md) |
+| FR-48 | Optional native sync of approved global skills into Claude Code and Codex skill folders | P1 | [Skills](components/PRD-skills-v2.md) |
+| FR-49 | Agent-written skills always need my approval; flagged skills are withdrawn everywhere | P0 | [Skills](components/PRD-skills-v2.md) |
 | FR-50 | `preference` kind; "remember that..." proposes memory; `ctxd remember` | P0 | [Memory and journal](components/PRD-memory-journal-v1.md) |
 | FR-51 | `journal` kind with significance, written by hooks, agents and me | P0 | [Memory and journal](components/PRD-memory-journal-v1.md) |
 | FR-52 | Weekly digest per scope; `since` and `until` search filters | P1 | [Memory and journal](components/PRD-memory-journal-v1.md) |
@@ -294,7 +294,7 @@ The full definition is in [Hooks and agent lifecycle](components/PRD-hooks-v5.md
 | Pool setup becomes tedious | Tags for membership, pool default policies, `ctxd access` to explain effective access |
 | Purge leaves copies in old backups | Backups expire in 14 days; optional backup rewrite on purge |
 | Work data leaks into a personal tool | Non-goal; no install on employer devices; scope naming conventions |
-| A bad skill steers every agent | Agent-written skills always need my approval and no rule can auto-accept them; provenance in the catalog; flagging withdraws a skill everywhere, including synced copies; synced skills never pre-approve tools ([Skills](components/PRD-skills-v1.md)) |
+| A bad skill steers every agent | Agent-written skills always need my approval and no rule can auto-accept them; provenance in the catalog; flagging withdraws a skill everywhere, including synced copies; synced skills never pre-approve tools ([Skills](components/PRD-skills-v2.md)) |
 | The journal becomes noise | Automatic entries are `routine` and rank low; briefs show only highlights and open signals; weekly digests summarize |
 | Memory about me reaches cloud vendors | Memory holds only what I would put in any prompt; anything sensitive belongs in a sealed pool |
 | Mirror edits race agents' writes | Revision checks on every edit; conflicts become side files and review items, never silent overwrites |
@@ -327,7 +327,7 @@ If capturing from phone chat apps proves important, add a minimal cloud inbox, n
 | Q13 | Should repeated redaction rejections or flags from one agent quarantine it automatically ([Context hygiene](components/PRD-context-hygiene-v1.md) HQ2-2)? |
 | Q14 | One Markdown mirror tree, or one per persona ([Filesystem view](components/PRD-filesystem-view-v1.md) FQ-1)? |
 | Q15 | Journal retention: keep routine entries forever, or roll old ones into monthly digests ([Memory and journal](components/PRD-memory-journal-v1.md) MQ-2)? |
-| Q16 | Allow skill supporting files (references, scripts) later, and under what review ([Skills](components/PRD-skills-v1.md) SQ-1)? |
+| Q16 | Allow skill supporting files (references, scripts) later, and under what review ([Skills](components/PRD-skills-v2.md) SQ-1)? |
 
 ## Appendix A: references
 

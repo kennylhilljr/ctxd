@@ -35,12 +35,18 @@
  * Bumped to 17 for M6 hardening: signatures cover the immutable envelope and separate retained
  * payload hashes; peer records bind authenticated tokens to remote node identities and keys.
  * Bumped to 18: payload_stripped is trusted stored state for verified purge erasure.
- * Bumped to 20 for W3: `peer_watermarks` records, per peer and origin, the highest origin_seq
+ * Bumped to 20 for W5 slice 2: `sessions.cwd`, recorded at SessionStart and kept for that
+ * session's lifetime, so the crash sweep can run the same mechanical release and journal entry a
+ * real SessionEnd runs, for a session that crashed and never got there (SPEC 9.10).
+ * Bumped to 21 for W2: `node_encryption_keys` holds each node's long-lived signed X25519
+ * encryption prekey; `sealed_key_transfers` tracks the state of an authenticated sealed pool key
+ * transfer to a newly enrolled node, from request through one-time-use fetch.
+ * Bumped to 22 for W3: `peer_watermarks` records, per peer and origin, the highest origin_seq
  * this node has served that peer (POST /v1/pull is otherwise stateless on the serving side), so
  * `ctxd doctor` and `ctxd status`/`statusline` can report real sync age and unsynced counts
  * instead of "not tracked yet."
  */
-export const SCHEMA_VERSION = 20;
+export const SCHEMA_VERSION = 22;
 
 export const SCHEMA_SQL = `
 CREATE TABLE nodes (
@@ -242,6 +248,26 @@ CREATE TABLE pool_enrollments (        -- machines allowed to hold a sealed pool
   PRIMARY KEY (pool_id, node_id)
 );
 
+CREATE TABLE node_encryption_keys (    -- W2: each node's long-lived X25519 prekey, signed by its own Ed25519 identity (node_keys)
+  node_id      TEXT PRIMARY KEY,
+  public_key   TEXT NOT NULL,          -- base64 SPKI
+  signature    TEXT NOT NULL,          -- base64 Ed25519 signature over node_id||public_key, by this node's own node_keys identity
+  created_at   TEXT NOT NULL
+);
+
+CREATE TABLE sealed_key_transfers (    -- W2: one authenticated sealed pool key transfer, request through one-time-use fetch
+  transfer_id       TEXT PRIMARY KEY,
+  pool_id           TEXT NOT NULL,
+  requester_node_id TEXT NOT NULL,     -- the new node asking to be enrolled
+  source_node_id    TEXT NOT NULL,     -- the node currently holding the key, approving
+  status            TEXT NOT NULL CHECK (status IN ('pending','approved','fetched','refused')),
+  wrapped_key       TEXT,              -- CiphertextEnvelope JSON, set on approval; null until then
+  created_at        TEXT NOT NULL,
+  expires_at        TEXT NOT NULL,
+  approved_at       TEXT,
+  fetched_at        TEXT               -- set exactly once, at the first successful fetch (replay protection)
+);
+
 CREATE TABLE sealed_purge_queue (
   pool_id      TEXT NOT NULL,
   entry_id     TEXT NOT NULL,
@@ -373,7 +399,7 @@ CREATE TABLE tool_metrics (            -- local only: response metering (8.5)
 CREATE INDEX tool_metrics_at ON tool_metrics(at);
 
 CREATE TABLE scope_repos (
-  repo         TEXT PRIMARY KEY,       -- normalized origin, e.g. github.com/kennylhilljr/ctxd
+  repo         TEXT PRIMARY KEY,       -- normalized origin, e.g. github.com/example/sample-app
   scope_id     TEXT NOT NULL REFERENCES scopes(scope_id)
 );
 
@@ -433,6 +459,7 @@ CREATE TABLE sessions (
   started_at   TEXT NOT NULL,
   last_seen_hlc TEXT NOT NULL,
   head         TEXT,                  -- latest observed git HEAD
+  cwd          TEXT,                  -- recorded at SessionStart, kept for the session's life (9.10's crash sweep)
   recovery     TEXT,                  -- JSON: {task_id?, phase, last_request_summary}; no transcript content
   ended_by     TEXT                   -- NULL for a real client end hook; 'sweep' when the crash sweep finalized it (9.10)
 );

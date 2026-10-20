@@ -16,7 +16,7 @@ Branch `done/w3-sync-observability`, one commit on top of `main` at `d0fe584`. N
 
 No feature flag was added: this is reporting only, under the existing `sync` flag, as the kickoff plan specifies.
 
-Spec changes are in [docs/spec/SPEC-v10-draft.md](../spec/SPEC-v10-draft.md), which M7 slice 8 folds into the numbered Spec v10.
+Spec changes are in [docs/spec/SPEC-v10-draft.md](../spec/SPEC-v10.md#changes-in-v10), which M7 slice 8 folds into the numbered Spec v10.
 
 ## Verification
 

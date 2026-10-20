@@ -28,6 +28,7 @@ interface EntryRow {
   tags: string;
   created_hlc: string;
   updated_hlc: string;
+  approved_hlc: string | null;
 }
 
 function within(hlc: string | null, from: number, to: number): boolean {
@@ -50,7 +51,7 @@ export function assembleDigest(db: Database.Database, scopeId: string, scopeName
   const { from, to } = isoWeekBounds(weekId, timeZone);
 
   const entries = db
-    .prepare("SELECT entry_id, kind, significance, title, tags, created_hlc, updated_hlc FROM entries WHERE scope_id = ? AND status = 'active'")
+    .prepare("SELECT entry_id, kind, significance, title, tags, created_hlc, updated_hlc, approved_hlc FROM entries WHERE scope_id = ? AND status = 'active'")
     .all(scopeId) as EntryRow[];
   const createdThisWeek = entries.filter((e) => within(e.created_hlc, from, to));
 
@@ -62,10 +63,13 @@ export function assembleDigest(db: Database.Database, scopeId: string, scopeName
     .filter((e) => e.kind === "journal" && (e.significance === "milestone" || e.significance === "breakthrough"))
     .map((e) => `${e.significance}: ${e.title}`);
 
-  // "Decisions made": entries.approved_hlc/approved_by exist in the schema but nothing in the
-  // write or review path ever sets them, so updated_hlc (which review-approval genuinely does
-  // update when a proposed decision becomes active) is the best available signal for "made."
-  const decisionLines = entries.filter((e) => e.kind === "decision" && within(e.updated_hlc, from, to)).map((e) => e.title);
+  // "Decisions made": approved_hlc (W5.1) is the real "became active" moment for a decision that
+  // went through review or an auto-accept rule. A decision written directly as active (the human
+  // client, or a kind whose unreviewed default is active) never gets an approval event, so there
+  // approved_hlc stays NULL and created_hlc is the only "made" moment it ever has.
+  const decisionLines = entries
+    .filter((e) => e.kind === "decision" && within(e.approved_hlc ?? e.created_hlc, from, to))
+    .map((e) => e.title);
 
   const addedLines = createdThisWeek
     .filter((e) => e.kind === "lesson" || e.kind === "preference" || e.kind === "skill")
