@@ -6,6 +6,8 @@ export interface SealedKeyProvider {
   create(poolId: string): Buffer;
   get(poolId: string): Buffer;
   remove(poolId: string): void;
+  /** W2: installs a key received via an authenticated transfer, rather than generating a new one. Overwrites any existing key for this pool, same as a fresh enrollment would. */
+  store(poolId: string, key: Buffer): void;
 }
 
 export class TestKeyProvider implements SealedKeyProvider {
@@ -23,15 +25,20 @@ export class TestKeyProvider implements SealedKeyProvider {
     return Buffer.from(key);
   }
   remove(poolId: string): void { this.keys.delete(poolId); }
+  store(poolId: string, key: Buffer): void {
+    if (key.length !== 32) throw new CtxdError("VALIDATION", "Sealed pool key must be 32 bytes");
+    this.keys.set(poolId, Buffer.from(key));
+  }
 }
 
 export class KeyHelperProvider implements SealedKeyProvider {
   constructor(private readonly executable = "ctxd-keyhelper") {}
-  private run(action: "create" | "get" | "remove", poolId: string): Buffer {
-    const result = spawnSync(this.executable, [action, poolId], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  private run(action: "create" | "get" | "remove" | "store", poolId: string, extraArg?: string): Buffer {
+    const args = extraArg === undefined ? [action, poolId] : [action, poolId, extraArg];
+    const result = spawnSync(this.executable, args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
     if (result.status !== 0) throw new CtxdError("NOT_ALLOWED", result.stderr.trim() || `Key helper failed for ${poolId}`);
     const value = result.stdout.trim();
-    if (action === "remove") return Buffer.alloc(0);
+    if (action === "remove" || action === "store") return Buffer.alloc(0);
     const key = Buffer.from(value, "base64");
     if (key.length !== 32) throw new CtxdError("VALIDATION", "Key helper returned an invalid sealed pool key");
     return key;
@@ -39,4 +46,8 @@ export class KeyHelperProvider implements SealedKeyProvider {
   create(poolId: string): Buffer { return this.run("create", poolId); }
   get(poolId: string): Buffer { return this.run("get", poolId); }
   remove(poolId: string): void { this.run("remove", poolId); }
+  store(poolId: string, key: Buffer): void {
+    if (key.length !== 32) throw new CtxdError("VALIDATION", "Sealed pool key must be 32 bytes");
+    this.run("store", poolId, key.toString("base64"));
+  }
 }
