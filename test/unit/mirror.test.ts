@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, writeFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync, existsSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -6,7 +6,7 @@ import { HlcClock } from "../../src/core/hlc.js";
 import { newId } from "../../src/core/ids.js";
 import { openDatabase } from "../../src/store/db.js";
 import { writeEntry, type WriteContext } from "../../src/store/write.js";
-import { confirmArchiveRequest, exportMarkdown, parseMarkdown, syncMirror } from "../../src/mirror/markdown.js";
+import { confirmArchiveRequest, exportMarkdown, importMarkdown, parseMarkdown, syncMirror } from "../../src/mirror/markdown.js";
 
 const scratch: string[] = [];
 afterEach(() => { for (const dir of scratch.splice(0)) rmSync(dir, { recursive: true, force: true }); });
@@ -61,6 +61,15 @@ describe("Markdown export and mirror (Spec v9 section 12.1)", () => {
     expect(f.db.prepare("SELECT op FROM events ORDER BY origin_seq").all()).toEqual([{ op: "create" }, { op: "status" }, { op: "status" }]);
   });
 
+  it("allows a status-only edit to an immutable entry using status_rev", () => {
+    const f = fixture(); createNote(f, "decision"); syncMirror(f.ctx, f.mirror);
+    const state = f.db.prepare("SELECT path FROM mirror_files").get() as { path: string };
+    const file = join(f.mirror, state.path);
+    writeFileSync(file, readFileSync(file, "utf8").replace('status: "active"', 'status: "archived"'));
+    expect(syncMirror(f.ctx, f.mirror)).toMatchObject({ applied: 1, conflicts: 0 });
+    expect(f.db.prepare("SELECT status FROM entries").get()).toEqual({ status: "archived" });
+  });
+
   it("writes a conflict copy for a stale revision and does not apply it", () => {
     const f = fixture(); createNote(f); syncMirror(f.ctx, f.mirror);
     const state = f.db.prepare("SELECT path FROM mirror_files").get() as { path: string };
@@ -109,5 +118,41 @@ describe("Markdown export and mirror (Spec v9 section 12.1)", () => {
     expect(exportMarkdown(f.db, join(f.root, "export"))).toEqual({ written: 0 });
     expect(syncMirror(f.ctx, f.mirror).written).toBe(0);
     expect(existsSync(f.mirror)).toBe(false);
+  });
+
+  it("removes stale plaintext and tracking when a tracked entry becomes sealed", () => {
+    const f = fixture(); createNote(f); syncMirror(f.ctx, f.mirror);
+    const state = f.db.prepare("SELECT path FROM mirror_files").get() as { path: string };
+    const file = join(f.mirror, state.path);
+    const poolId = newId();
+    const scopeId = (f.db.prepare("SELECT scope_id FROM scopes WHERE name = 'sample-app'").get() as { scope_id: string }).scope_id;
+    f.db.prepare("INSERT INTO pools (pool_id, name, storage, sealed_file, created_at) VALUES (?, 'pool-private', 'sealed', ?, ?)").run(poolId, `sealed/${poolId}.db`, new Date().toISOString());
+    f.db.prepare("INSERT INTO pool_grants (pool_id, scope_id, level) VALUES (?, ?, 'write')").run(poolId, scopeId);
+    syncMirror(f.ctx, f.mirror);
+    expect(existsSync(file)).toBe(false);
+    expect(f.db.prepare("SELECT COUNT(*) AS n FROM mirror_files").get()).toEqual({ n: 0 });
+  });
+
+  it("honors live mirror disablement and rejects symlink traversal", () => {
+    const f = fixture(); createNote(f);
+    f.ctx.flags = new Map([["mirror", false]]);
+    expect(syncMirror(f.ctx, f.mirror)).toEqual({ written: 0, applied: 0, conflicts: 0, archiveRequests: 0 });
+    const input = join(f.root, "input"); mkdirSync(input);
+    const outside = join(f.root, "outside.md"); writeFileSync(outside, "# Outside\n\nBody\n");
+    symlinkSync(outside, join(input, "linked.md"));
+    expect(() => importMarkdown(f.ctx, input, "sample-app", true)).toThrow(/Symbolic links/);
+    expect(f.db.prepare("SELECT COUNT(*) AS n FROM events").get()).toEqual({ n: 1 });
+  });
+
+  it("preflights sanitizer warnings and requires confirmation before import writes", () => {
+    const f = fixture();
+    const input = join(f.root, "warning-input"); mkdirSync(input);
+    writeFileSync(join(input, "note.md"), "# Import\n\nKeep <private>remove me</private> text\n");
+    const before = f.db.prepare("SELECT COUNT(*) AS n FROM events").get();
+    const preview = importMarkdown(f.ctx, input, "sample-app", false);
+    expect(preview).toMatchObject({ imported: 0, confirmationRequired: true });
+    expect(preview.warnings).toHaveLength(1);
+    expect(f.db.prepare("SELECT COUNT(*) AS n FROM events").get()).toEqual(before);
+    expect(importMarkdown(f.ctx, input, "sample-app", false, true)).toMatchObject({ imported: 1, confirmationRequired: false });
   });
 });

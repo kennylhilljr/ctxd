@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import type Database from "better-sqlite3";
 import { entryPath } from "../fsview/paths.js";
@@ -17,6 +17,8 @@ import { allocateOriginSeq } from "../store/origin-seq.js";
 import { applyEvent } from "../store/materialize.js";
 import { signStoredEvent } from "../security/event-signatures.js";
 import { setEntryStatus } from "../store/tidy.js";
+import { isFlagOn } from "../config/flags.js";
+import { detectSecrets, sanitize } from "../security/redact.js";
 
 interface MarkdownRow extends EntryRow {
   scope_name: string;
@@ -29,6 +31,7 @@ export interface Frontmatter {
   kind?: Kind;
   status?: string;
   rev?: string;
+  status_rev?: string;
   by?: string;
   updated?: string;
   review_after?: string | null;
@@ -75,6 +78,7 @@ export function renderMarkdown(row: MarkdownRow): string {
     `kind: ${yamlValue(row.kind)}`,
     `status: ${yamlValue(row.status)}`,
     `rev: ${yamlValue(row.content_rev)}`,
+    `status_rev: ${yamlValue(row.status_rev)}`,
     `by: ${yamlValue(row.author_name)}`,
     `updated: ${yamlValue(updatedIso(row.updated_hlc))}`,
     `review_after: ${yamlValue(row.review_after)}`,
@@ -174,6 +178,7 @@ function setReviewAfter(ctx: WriteContext, row: MarkdownRow, value: string | nul
 }
 
 export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: number; applied: number; conflicts: number; archiveRequests: number } {
+  if (!isFlagOn(ctx.flags, "mirror")) return { written: 0, applied: 0, conflicts: 0, archiveRequests: 0 };
   const { db } = ctx;
   const byId = new Map(rows(db).map((row) => [row.entry_id, row]));
   let applied = 0;
@@ -184,8 +189,16 @@ export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: num
   const trackedPaths = new Set(tracked.map((state) => state.path));
   for (const state of tracked) {
     const row = byId.get(state.entry_id);
-    if (!row) continue;
     const file = join(mirrorDir, state.path);
+    if (!row) {
+      if (existsSync(file)) unlinkSync(file);
+      const conflict = file.replace(/\.md$/, ".conflict.md");
+      if (existsSync(conflict)) unlinkSync(conflict);
+      db.prepare("DELETE FROM mirror_files WHERE path = ?").run(state.path);
+      db.prepare("DELETE FROM mirror_conflicts WHERE path = ?").run(state.path);
+      db.prepare("DELETE FROM archive_requests WHERE entry_id = ?").run(state.entry_id);
+      continue;
+    }
     if (!existsSync(file)) {
       db.prepare("INSERT OR IGNORE INTO archive_requests (entry_id, path, created_at) VALUES (?, ?, ?)").run(row.entry_id, state.path, nowIso());
       archiveRequests++;
@@ -194,18 +207,25 @@ export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: num
     const text = readFileSync(file, "utf8");
     if (hash(text) === state.file_hash) continue;
     const parsed = parseMarkdown(text, row.title);
-    if (parsed.meta.rev !== row.content_rev) {
+    const contentChanged = parsed.title !== row.title || parsed.body !== row.body ||
+      (parsed.meta.tags !== undefined && JSON.stringify(parsed.meta.tags) !== row.tags);
+    const statusChanged = (parsed.meta.status !== undefined && parsed.meta.status !== row.status) ||
+      (parsed.meta.review_after !== undefined && parsed.meta.review_after !== row.review_after);
+    if (contentChanged && parsed.meta.rev !== row.content_rev) {
       recordConflict(db, mirrorDir, state.path, row, parsed.meta.rev, "The entry changed after this mirror revision.", text);
       conflicts++;
       continue;
     }
-    if (IMMUTABLE.has(row.kind)) {
+    if (contentChanged && IMMUTABLE.has(row.kind)) {
       recordConflict(db, mirrorDir, state.path, row, parsed.meta.rev, `${row.kind} entries are immutable; create a superseding entry.`, text);
       conflicts++;
       continue;
     }
-    const contentChanged = parsed.title !== row.title || parsed.body !== row.body ||
-      (parsed.meta.tags !== undefined && JSON.stringify(parsed.meta.tags) !== row.tags);
+    if (statusChanged && parsed.meta.status_rev !== row.status_rev) {
+      recordConflict(db, mirrorDir, state.path, row, parsed.meta.status_rev, "The entry status changed after this mirror revision.", text);
+      conflicts++;
+      continue;
+    }
     if (contentChanged) {
       writeEntry(ctx, {
         scope: row.scope_name, id: row.entry_id, expected_rev: row.content_rev, kind: row.kind,
@@ -229,6 +249,11 @@ export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: num
       if (parsed.meta.ref) continue;
       const [scope] = path.split(/[\\/]/);
       if (!scope) continue;
+      const sealed = db.prepare(
+        `SELECT 1 FROM scopes s JOIN pool_grants pg ON pg.scope_id = s.scope_id JOIN pools p ON p.pool_id = pg.pool_id
+         WHERE s.name = ? AND p.storage = 'sealed' LIMIT 1`,
+      ).get(scope);
+      if (sealed) throw new CtxdError("SCOPE_FORBIDDEN", `Mirror writes to sealed scope ${scope} are refused`);
       const result = writeEntry(ctx, {
         scope, kind: parsed.meta.kind ?? "note", title: parsed.title, body: parsed.body,
         tags: parsed.meta.tags, request_id: newId(),
@@ -265,18 +290,29 @@ function walkMarkdown(dir: string): string[] {
   const out: string[] = [];
   for (const name of readdirSync(dir)) {
     const path = join(dir, name);
-    const stat = statSync(path);
+    const stat = lstatSync(path);
+    if (stat.isSymbolicLink()) throw new CtxdError("NOT_ALLOWED", `Symbolic links are not allowed in Markdown input: ${path}`);
     if (stat.isDirectory()) out.push(...walkMarkdown(path));
     else if (stat.isFile() && name.endsWith(".md") && !name.endsWith(".conflict.md")) out.push(path);
   }
   return out;
 }
 
-export function importMarkdown(ctx: WriteContext, dir: string, scope: string, dryRun = false): { imported: number; skipped: string[] } {
+export function importMarkdown(ctx: WriteContext, dir: string, scope: string, dryRun = false, confirmed = false): { imported: number; skipped: string[]; warnings: string[]; confirmationRequired: boolean } {
   const root = resolve(dir);
   let imported = 0;
   const skipped: string[] = [];
-  for (const path of walkMarkdown(root)) {
+  const files = walkMarkdown(root);
+  const warnings: string[] = [];
+  for (const path of files) {
+    const text = readFileSync(path, "utf8");
+    const changed = sanitize(text) !== text;
+    const secrets = detectSecrets(sanitize(text));
+    if (changed) warnings.push(`${relative(root, path)}: sanitizer will remove private or invisible content`);
+    if (secrets.length) warnings.push(`${relative(root, path)}: rejected secret patterns: ${secrets.join(", ")}`);
+  }
+  if (warnings.length && !dryRun && !confirmed) return { imported: 0, skipped, warnings, confirmationRequired: true };
+  for (const path of files) {
     try {
       const fallback = relative(root, path).replace(/\.md$/, "").split(/[\\/]/).pop() ?? "Imported note";
       const parsed = parseMarkdown(readFileSync(path, "utf8"), fallback);
@@ -291,5 +327,5 @@ export function importMarkdown(ctx: WriteContext, dir: string, scope: string, dr
       skipped.push(`${relative(root, path)}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
-  return { imported, skipped };
+  return { imported, skipped, warnings, confirmationRequired: false };
 }
