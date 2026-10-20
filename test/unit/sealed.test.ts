@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -50,6 +50,32 @@ describe("sealed pools (Spec v9 section 10.6)", () => {
 
     expect(f.keys.get(f.poolId)).toEqual(receivedKey);
     expect(f.db.prepare("SELECT 1 FROM pool_enrollments WHERE pool_id = ? AND node_id = 'node-b'").get(f.poolId)).toBeDefined();
+  });
+
+  it("the recipient unlocks the sealed pool only after enroll, once the sealed file has also arrived (W2 exit criterion)", () => {
+    const source = fixture();
+    const sealedFile = source.store.seal(source.poolId, source.nodeId);
+    source.db.prepare("UPDATE pools SET storage = 'sealed', sealed_file = ? WHERE pool_id = ?").run(sealedFile, source.poolId);
+
+    // A second local node: its own database, with the same pool metadata (as normal acl-event
+    // sync would replicate) and a copy of the sealed file (as normal sealed-event sync would
+    // eventually produce) -- but no key at all, until enroll() installs one.
+    const recipientRoot = mkdtempSync(join(tmpdir(), "ctxd-sealed-recipient-"));
+    scratch.push(recipientRoot);
+    const recipientDb = openDatabase(join(recipientRoot, "ctxd.db"), { create: true });
+    recipientDb.prepare("INSERT INTO nodes (node_id, name, role, created_at) VALUES ('node-b', 'node-b', 'home', ?)").run(new Date().toISOString());
+    recipientDb.prepare("INSERT INTO pools (pool_id, name, storage, sealed_file, created_at) VALUES (?, 'pool-private', 'sealed', ?, ?)").run(source.poolId, sealedFile, new Date().toISOString());
+    mkdirSync(join(recipientRoot, "sealed"), { recursive: true });
+    copyFileSync(join(source.root, sealedFile), join(recipientRoot, sealedFile));
+
+    const recipientKeys = new TestKeyProvider();
+    const recipientStore = new SealedPoolStore(recipientDb, recipientRoot, recipientKeys, new TestDatabaseProvider(), 1);
+
+    expect(() => recipientStore.unlock(source.poolId)).toThrow(); // the sealed file arrived, but there is still no key
+
+    recipientStore.enroll(source.poolId, "node-b", source.keys.get(source.poolId));
+    expect(() => recipientStore.unlock(source.poolId)).not.toThrow();
+    recipientStore.lock(source.poolId);
   });
   it("round trips XChaCha20-Poly1305 envelopes and authenticates event ids", () => {
     const key = Buffer.alloc(32, 7);
