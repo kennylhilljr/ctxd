@@ -120,7 +120,7 @@ Write a short plan for each and stop for the owner's approval before building:
 3. Set a real `[backup] age_recipient`, run `ctxd backup` by hand once, then install the schedule from W4.
 4. Run `ctxd model fetch` on the daily-driver Mac, turn on `semantic_search.compute` there and `semantic_search` where wanted, and confirm search works on the Intel Air hub (x64 was only checked from package metadata).
 5. Build, sign and test `ctxd-keyhelper` with Touch ID ([ctxd-keyhelper-build-v1.md](ctxd-keyhelper-build-v1.md)).
-6. Rehearse [M6-hub-migration-runbook-v1.md](M6-hub-migration-runbook-v1.md). Move the hub to the Mac Studio when it arrives, and test W2's key transfer on it.
+6. Rehearse [M6-hub-migration-runbook-v1.md](../runbooks/hub-migration-v1.md). Move the hub to the Mac Studio when it arrives, and test W2's key transfer on it.
 7. Deploy the M7 Worker from W1's runbook, create the inbox tokens, connect the phone apps, then turn on `mobile_inbox`.
 8. Run everything unattended for two weeks (M4's exit criterion) and note what broke.
 

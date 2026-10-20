@@ -395,7 +395,7 @@ CREATE TABLE tool_metrics (            -- local only: response metering (8.5)
 CREATE INDEX tool_metrics_at ON tool_metrics(at);
 
 CREATE TABLE scope_repos (
-  repo         TEXT PRIMARY KEY,       -- normalized origin, e.g. github.com/kennylhilljr/ctxd
+  repo         TEXT PRIMARY KEY,       -- normalized origin, e.g. github.com/example/sample-app
   scope_id     TEXT NOT NULL REFERENCES scopes(scope_id)
 );
 
