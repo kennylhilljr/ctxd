@@ -19,6 +19,7 @@
 - `74cf1bc` `M6 slice 16: close mirror safety gaps`
 - `10fd62a` `M6 slice 17: constrain local model writes`
 - `9089643` `M6 slice 18: make node adoption recoverable`
+- `12f711d` `M6 slice 19: update corrective handoff`
 
 Nothing was pushed and no pull request was opened.
 
@@ -46,8 +47,8 @@ The following checks require the owner’s hardware, identity or live configurat
 
 1. Build and sign `ctxd-keyhelper` using [ctxd-keyhelper-build-v1.md](ctxd-keyhelper-build-v1.md). Install it on the service path, create a scratch sealed key, confirm the user-presence prompt with Touch ID, read the key again and remove it.
 2. Rehearse [M6-hub-migration-runbook-v1.md](M6-hub-migration-runbook-v1.md), then move the real hub and the real `tailscale serve` configuration. Do not enable Funnel. Keep both application listeners on loopback.
-3. Enroll the real Mac Studio in each intended sealed pool. Verify a locked reference is opaque, an unlock prompts once, expiry locks it again, and an enrolled peer receives ciphertext.
-4. Point `local_model.endpoint` at the owner’s loopback model, enable `local_model`, run `ctxd model suggest`, and inspect the proposed entries before approval.
+3. Do not enroll the real Mac Studio yet. The command now refuses remote enrollment until authenticated key transfer is implemented. A refusal is the expected fail-closed result.
+4. Grant the `local-model` client `propose` access only to the intended scopes. Point `local_model.endpoint` at the owner’s loopback model, enable `local_model`, run `ctxd model suggest`, and inspect the proposed entries before approval.
 
 ## External production-provider blocker
 
