@@ -12,20 +12,31 @@
 - `1eddbb4` `M6 slice 8: harden sealed sync and signed purge checks`
 - `2367129` `M6 slice 9: preserve sealed ciphertext in backups`
 - `3b0aa00` `M6 slice 10: replay sealed purges on unlock`
+- `7b022e7` `M6 slice 12: bind signed event envelopes`
+- `4ac9669` `M6 slice 13: bind peer identity and keys`
+- `0ccc544` `M6 slice 14: verify purge stripping state`
+- `2684d80` `M6 slice 15: route sealed MCP scopes`
+- `74cf1bc` `M6 slice 16: close mirror safety gaps`
+- `10fd62a` `M6 slice 17: constrain local model writes`
+- `9089643` `M6 slice 18: make node adoption recoverable`
 
 Nothing was pushed and no pull request was opened.
 
 ## Delivered
 
-Signed events use one Ed25519 key per node, retain their payload hash through purge, verify raw late arrivals before stripping them, verify during sync apply and rebuild, and continue verification with the feature switched off. Markdown export, import, mirror revision checks, conflict files, archive requests, new-file ingestion and server reconciliation are present. `ctxd mirror stop` now switches the mirror feature off in the persistent config. `ctxd archive-request confirm <ref> --yes` archives a requested entry through a status event and clears the request.
+Signed events use one Ed25519 key per node. The signature covers the complete immutable event envelope and separate retained hashes for payload and prior values. Tests mutate each signed field. Authenticated peer enrollment pins remote node identities and public keys. Once a key is pinned, unsigned events at or after its cutoff are rejected. Duplicate event ids are discarded before untrusted duplicate metadata is inspected. Raw arrivals are verified before purge stripping, stripped rows carry trusted local metadata, and rebuild verifies the complete log before clearing materialized tables.
 
-Sealed pool unlock no longer copies plaintext rows into `ctxd.db`. Routed callbacks operate on the encrypted store, sealed sync reads and applies events there, and locked purge work replays through the normal purge event path on unlock. Sealing removes the main FTS copy. Mirror and export tests assert that sealed plaintext is excluded. Backups wrap each sealed database file directly with `age`, copy it with the main backup, prune it with the same generation and restore it into `sealed/`. Keys remain outside both databases. Node adoption preserves the node ID and has a migration runbook. The local model worker accepts only loopback HTTP endpoints and writes machine-labeled summary and lesson proposals through the normal write path.
+Markdown import and mirror now enforce independent content and status revisions. Status-only edits remain valid for immutable entry kinds. Mirror reconciliation removes stale plaintext, tracking rows, conflict files and archive requests when an entry disappears or becomes sealed. The live mirror flag is checked on every pass. Import rejects symbolic links, refuses sealed targets, performs no database writes during dry runs, reports sanitizer warnings, and requires `--yes` before applying warned input.
+
+Sealed pool unlock no longer copies plaintext rows into `ctxd.db`. Scope-addressed MCP calls are routed into the encrypted store after access evaluation. Sealed sync reads and applies events in that store, and locked purge work replays through the normal purge path on unlock. One durable main-database allocator issues origin sequence numbers for shared and sealed writes. Backups wrap sealed files and the stable node signing key with `age`; restore reinstates them with the main database. Remote sealed enrollment fails closed because authenticated key transfer is not implemented.
+
+The local model client receives no automatic broad grant. It reads only scopes with an explicit, unexpired `propose` or `write` grant, retries summary and lesson proposals independently, and uses separate idempotency keys. Invalid local model configuration is rejected before either listener starts. Node adoption validates DNS-label names and restores the original configuration if the database transaction fails.
 
 Spec v9 contains the shipped M6 formats and behavior. Optional M6 features are registered off by default.
 
 ## Verification
 
-Each corrective slice ran `npm run typecheck` and `npm test`. The latest run passed 684 tests across 61 files. Focused signed event, mirror, sealed pool, purge, backup and sync tests passed. The earlier `npm run build` passed. A final build remains to be run after the findings below are closed.
+Each corrective slice ran `npm run typecheck` and `npm test`. The latest run passed 703 tests across 61 files, with four sync conformance cases skipped after their setup failed in the sandbox. Focused signed event, mirror, sealed pool, purge, backup, local model, adoption and sync property tests passed.
 
 The unfiltered suite cannot pass in this sandbox. Twenty-four hook conformance cases and the real two-node sync case fail because `tsx` cannot open its local IPC socket. Three MCP tests fail because loopback listeners receive `EPERM`. One launchd test cannot load a job. These are environment failures, not assertion failures in M6 code. Scratch `ctxd node adopt` preserved its node ID and passed database integrity; `ctxd doctor` could not inspect FileVault in the sandbox.
 
@@ -38,14 +49,12 @@ The following checks require the owner’s hardware, identity or live configurat
 3. Enroll the real Mac Studio in each intended sealed pool. Verify a locked reference is opaque, an unlock prompts once, expiry locks it again, and an enrolled peer receives ciphertext.
 4. Point `local_model.endpoint` at the owner’s loopback model, enable `local_model`, run `ctxd model suggest`, and inspect the proposed entries before approval.
 
-## Unresolved findings
+## External production-provider blocker
 
 The SQLCipher package still cannot be installed because this environment cannot resolve `registry.npmjs.org`. The attempted `npm install better-sqlite3-multiple-ciphers@13.0.3 --save` ended with `ENOTFOUND`. `SqlCipherDatabaseProvider` fails closed with an installation error, while tests use `TestDatabaseProvider`. No substitute encryption was added. Before enabling sealed pools, install that exact package, record it in `package.json` and `package-lock.json`, then run the sealed tests against the production provider.
 
-The storage and sync paths now use the sealed database without copying plaintext into the main database, and queued purges replay on unlock. Ordinary MCP and CLI read and write handlers have not all been connected to `SealedPoolStore.forScope`, so an unlocked sealed entry is not yet reachable through every normal command. Origin sequence allocation is also local to each database connection, which can duplicate one node's sequence numbers across shared and sealed stores. These are engineering gaps, not section 0 stop conditions. Do not enable `sealed_pools` on real data until both are fixed.
-
-Enrollment filtering still trusts the requesting node ID in the authenticated pull body. Peer authentication is not yet pinned to a remote node ID, so a peer token holder could claim another enrolled node ID. The enrollment command also only resolves the local row in `nodes`. This must be corrected before sealed replication is safe for real data.
+No weaker encryption provider was substituted. `SqlCipherDatabaseProvider` still fails closed with a precise installation error. Remote sealed enrollment also fails closed until authenticated key transfer is implemented.
 
 ## Exit checks still to run
 
-On an unrestricted scratch machine, run the exact full suite, start two loopback servers, exchange signed events, purge the signed entry, sync again and rebuild both databases. Exercise a mirror edit and stale revision conflict through the running server. After the SQLCipher blocker is fixed, repeat the sealed convergence, duplicate delivery, lock expiry and purge tests with the production database provider. Run the tool-footprint test once more after those changes.
+On an unrestricted scratch machine, run the exact full suite, start two loopback servers, exchange signed events, purge the signed entry, sync again and rebuild both databases. Exercise a mirror edit and stale revision conflict through the running server. After the SQLCipher package is available, repeat sealed convergence, duplicate delivery, lock expiry and purge tests with the production provider.
