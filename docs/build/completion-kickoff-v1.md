@@ -150,7 +150,7 @@ Keep this table current in each workstream's PR description; the owner copies it
 
 | Workstream | Branch | Status | PR | Handoff |
 |---|---|---|---|---|
-| W1 M7 inbox | | not started | | |
+| W1 M7 inbox | done/w1-mobile-inbox | ready for merge | | docs/build/W1-handoff-v1.md |
 | W2 Sealed key transfer | | not started | | |
 | W3 Sync observability | | not started | | |
 | W4 Scheduled backups | | not started | | |
