@@ -1685,7 +1685,7 @@ Implements [Memory and journal](../prd/components/PRD-memory-journal-v1.md) sect
 - **Migration to a new hub:**
   1. Stop the old server.
   2. Copy the data directory and config.
-  3. Set the new `node.name` and keep `node_id`, or run `ctxd node adopt`.
+  3. Run `ctxd node adopt <new-name>`. It changes the config and local node name together, preserves `node_id`, and refuses a running server, an invalid local identity or an active peer name collision.
   4. Move the `tailscale serve` config.
   5. Update peers' URLs, or reuse a stable MagicDNS name via a dedicated tailnet machine name.
 

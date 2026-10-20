@@ -1,13 +1,16 @@
 /** `ctxd node add-peer|revoke`: manage sync peers (Spec v8 7.1, 13). */
 import { parseArgs } from "node:util";
-import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import type Database from "better-sqlite3";
 import { resolveConfigPath, resolveDataDir, tokensDir } from "./common.js";
 import { openDatabase } from "../store/db.js";
 import { newId } from "../core/ids.js";
 import { nowIso } from "../core/time.js";
 import { newToken } from "../core/hash.js";
+import { configSchema, loadConfig } from "../config/config.js";
+import { parse, stringify } from "smol-toml";
+import { probeServer } from "./mcp.js";
 
 export interface AddPeerOptions {
   role: "home" | "roaming";
@@ -80,7 +83,43 @@ export function revokePeer(db: Database.Database, name: string): number {
   return 0;
 }
 
-export function run(argv: string[]): number {
+export async function adoptNode(
+  db: Database.Database,
+  configPath: string,
+  newName: string,
+  probe: (listen: string) => Promise<boolean> = probeServer,
+): Promise<number> {
+  const config = loadConfig(configPath);
+  if (await probe(config.mcp.listen)) {
+    console.error("ctxd node adopt: the server is running. Stop it before adopting this data directory.");
+    return 1;
+  }
+  const node = db.prepare("SELECT node_id, name FROM nodes").all() as { node_id: string; name: string }[];
+  if (node.length !== 1) {
+    console.error("ctxd node adopt: expected exactly one local node identity.");
+    return 1;
+  }
+  if (node[0]!.name === newName && config.node.name === newName) {
+    console.log(`ctxd node adopt: already named ${newName}; node id ${node[0]!.node_id} is unchanged.`);
+    return 0;
+  }
+  if (db.prepare("SELECT 1 FROM peers WHERE name = ? AND revoked_at IS NULL").get(newName)) {
+    console.error(`ctxd node adopt: "${newName}" collides with an active peer name.`);
+    return 1;
+  }
+  const raw = parse(readFileSync(configPath, "utf8")) as Record<string, unknown>;
+  const validated = configSchema.parse({ ...raw, node: { ...(raw.node as Record<string, unknown>), name: newName } });
+  const temp = join(dirname(configPath), `.ctxd-adopt-${process.pid}.toml`);
+  writeFileSync(temp, stringify(validated), { mode: 0o600 });
+  db.transaction(() => {
+    db.prepare("UPDATE nodes SET name = ? WHERE node_id = ?").run(newName, node[0]!.node_id);
+    renameSync(temp, configPath);
+  })();
+  console.log(`ctxd node adopted: ${newName}; node id ${node[0]!.node_id} preserved.`);
+  return 0;
+}
+
+export async function run(argv: string[]): Promise<number> {
   const [sub, ...rest] = argv;
   const { values, positionals } = parseArgs({
     args: rest,
@@ -112,7 +151,12 @@ export function run(argv: string[]): number {
       }
       return revokePeer(db, name);
     }
-    console.error(`ctxd node: unknown subcommand "${sub}". Use add-peer or revoke.`);
+    if (sub === "adopt") {
+      const name = positionals[0];
+      if (!name) { console.error("Usage: ctxd node adopt <new-name>"); return 1; }
+      return await adoptNode(db, configPath, name);
+    }
+    console.error(`ctxd node: unknown subcommand "${sub}". Use add-peer, revoke or adopt.`);
     return 2;
   } finally {
     db.close();
