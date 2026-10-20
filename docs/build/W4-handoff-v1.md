@@ -14,7 +14,7 @@ Branch `done/w4-scheduled-backups`, on top of `main`. Nothing was pushed and no 
 
 No feature flag was added: both the schedule and the doctor check respect the existing `backups` flag, as the kickoff plan specifies.
 
-Spec changes are in [docs/spec/SPEC-v10-draft.md](../spec/SPEC-v10-draft.md), which M7 slice 8 folds into the numbered Spec v10.
+Spec changes are in [docs/spec/SPEC-v10-draft.md](../spec/SPEC-v10.md#changes-in-v10), which M7 slice 8 folds into the numbered Spec v10.
 
 ## Verification
 
