@@ -114,6 +114,16 @@ export function openDatabase(path: string, { create = false }: OpenDatabaseOptio
       db.pragma("user_version = 20");
     })();
   }
+  const keyTransferVersion = db.pragma("user_version", { simple: true }) as number;
+  if (keyTransferVersion === 20 && SCHEMA_VERSION >= 21) {
+    db.transaction(() => {
+      db.exec("CREATE TABLE node_encryption_keys (node_id TEXT PRIMARY KEY, public_key TEXT NOT NULL, signature TEXT NOT NULL, created_at TEXT NOT NULL)");
+      db.exec(
+        "CREATE TABLE sealed_key_transfers (transfer_id TEXT PRIMARY KEY, pool_id TEXT NOT NULL, requester_node_id TEXT NOT NULL, source_node_id TEXT NOT NULL, status TEXT NOT NULL CHECK (status IN ('pending','approved','fetched','refused')), wrapped_key TEXT, created_at TEXT NOT NULL, expires_at TEXT NOT NULL, approved_at TEXT, fetched_at TEXT)",
+      );
+      db.pragma("user_version = 21");
+    })();
+  }
   const sequenceVersion = db.pragma("user_version", { simple: true }) as number;
   if (sequenceVersion !== SCHEMA_VERSION) {
     db.close();

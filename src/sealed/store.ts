@@ -193,10 +193,18 @@ export class SealedPoolStore {
     return locked;
   }
 
-  enroll(poolId: string, nodeId: string): void {
-    void poolId;
-    void nodeId;
-    throw new Error("remote sealed key transfer is not implemented; enrollment refused");
+  /**
+   * W2: installs a key this node received through an authenticated transfer
+   * (src/sealed/keyTransfer.ts's completeKeyTransfer) and records the enrollment, so the next
+   * sync pull starts receiving this pool's sealed events (servePull's own `pool_enrollments`
+   * check) and a later `unlock` finds the key. The sealed database file itself is not written
+   * here: it arrives through that same normal event sync, not through key transfer.
+   */
+  enroll(poolId: string, nodeId: string, key: Buffer): void {
+    const pool = this.main.prepare("SELECT storage FROM pools WHERE pool_id = ?").get(poolId) as { storage: string } | undefined;
+    if (!pool || pool.storage !== "sealed") throw new Error(`pool not found or not sealed: ${poolId}`);
+    this.keys.store(poolId, key);
+    this.main.prepare("INSERT INTO pool_enrollments (pool_id, node_id, enrolled_at) VALUES (?, ?, ?) ON CONFLICT (pool_id, node_id) DO NOTHING").run(poolId, nodeId, new Date().toISOString());
   }
 
   /**
