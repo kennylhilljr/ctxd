@@ -120,7 +120,7 @@ Write a short plan for each and stop for the owner's approval before building:
 3. Set a real `[backup] age_recipient`, run `ctxd backup` by hand once, then install the schedule from W4.
 4. Run `ctxd model fetch` on the daily-driver Mac, turn on `semantic_search.compute` there and `semantic_search` where wanted, and confirm search works on the Intel Air hub (x64 was only checked from package metadata).
 5. Build, sign and test `ctxd-keyhelper` with Touch ID ([ctxd-keyhelper-build-v1.md](ctxd-keyhelper-build-v1.md)).
-6. Rehearse [M6-hub-migration-runbook-v1.md](M6-hub-migration-runbook-v1.md). Move the hub to the Mac Studio when it arrives, and test W2's key transfer on it.
+6. Rehearse [M6-hub-migration-runbook-v1.md](../runbooks/hub-migration-v1.md). Move the hub to the Mac Studio when it arrives, and test W2's key transfer on it.
 7. Deploy the M7 Worker from W1's runbook, create the inbox tokens, connect the phone apps, then turn on `mobile_inbox`.
 8. Run everything unattended for two weeks (M4's exit criterion) and note what broke.
 
@@ -150,10 +150,10 @@ Keep this table current in each workstream's PR description; the owner copies it
 
 | Workstream | Branch | Status | PR | Handoff |
 |---|---|---|---|---|
-| W1 M7 inbox | done/w1-mobile-inbox | ready for merge | | docs/build/W1-handoff-v1.md |
-| W2 Sealed key transfer | | not started | | |
-| W3 Sync observability | | not started | | |
-| W4 Scheduled backups | | not started | | |
-| W5 Correctness gaps | | not started | | |
-| W6 Search benchmark | | not started | | |
-| W7 New features | | plan only | | |
+| W1 M7 inbox | done/w1-mobile-inbox | ready for merge | #60 | docs/build/W1-handoff-v1.md |
+| W2 Sealed key transfer | (merged) | merged | #59 | docs/build/W2-handoff-v1.md |
+| W3 Sync observability | done/w3-sync-observability | ready for merge | #56 | docs/build/W3-handoff-v1.md |
+| W4 Scheduled backups | done/w4-scheduled-backups | ready for merge | #57 | docs/build/W4-handoff-v1.md |
+| W5 Correctness gaps | (merged) | merged | #55 | docs/build/W5-handoff-v1.md |
+| W6 Search benchmark | done/w6-search-benchmark | ready for merge | #58 | docs/build/W6-handoff-v1.md |
+| W7 New features | done/w7-new-features-plan | plan only, awaiting owner approval | (this PR) | docs/build/W7-plan-v1.md |

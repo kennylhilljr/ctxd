@@ -46,7 +46,7 @@ The unfiltered suite cannot pass in this sandbox. Twenty-four hook conformance c
 The following checks require the owner’s hardware, identity or live configuration, so section 0 reserves them for the owner:
 
 1. Build and sign `ctxd-keyhelper` using [ctxd-keyhelper-build-v1.md](ctxd-keyhelper-build-v1.md). Install it on the service path, create a scratch sealed key, confirm the user-presence prompt with Touch ID, read the key again and remove it.
-2. Rehearse [M6-hub-migration-runbook-v1.md](M6-hub-migration-runbook-v1.md), then move the real hub and the real `tailscale serve` configuration. Do not enable Funnel. Keep both application listeners on loopback.
+2. Rehearse [M6-hub-migration-runbook-v1.md](../runbooks/hub-migration-v1.md), then move the real hub and the real `tailscale serve` configuration. Do not enable Funnel. Keep both application listeners on loopback.
 3. Do not enroll the real Mac Studio yet. The command now refuses remote enrollment until authenticated key transfer is implemented. A refusal is the expected fail-closed result.
 4. Grant the `local-model` client `propose` access only to the intended scopes. Point `local_model.endpoint` at the owner’s loopback model, enable `local_model`, run `ctxd model suggest`, and inspect the proposed entries before approval.
 
