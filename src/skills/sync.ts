@@ -19,9 +19,17 @@ import { loadScopeByName } from "../store/snapshot.js";
 import { spawnWorker } from "../hooks/writeMoments.js";
 import { writeStateFileLocked } from "../hooks/stateFile.js";
 
-/** The client's personal skills folder, or null when it is not yet confirmed (SPEC v8 open issue 16: Codex's path is unverified, so it is never guessed). */
+/**
+ * The client's personal skills folder (W5.5 closes SPEC v8 open issue 16). Codex's path is
+ * confirmed directly from the `openai/codex` source at the pinned minimum version
+ * (`rust-v0.145.0`): `codex-rs/core-skills/src/loader.rs` resolves the user-scoped skill root as
+ * `home_dir.join(".agents").join("skills")`. A deprecated `$CODEX_HOME/skills` fallback is also
+ * still scanned by Codex itself for backward compatibility, but ctxd only ever writes to the
+ * current location.
+ */
 export function clientSkillsDir(client: InstallHooksClient, home: string = homedir()): string | null {
   if (client === "claude-code") return join(home, ".claude", "skills");
+  if (client === "codex") return join(home, ".agents", "skills");
   return null;
 }
 

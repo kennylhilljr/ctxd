@@ -159,9 +159,9 @@ function writeSkill(f: Fixture, name: string, body: string = SKILL_BODY(name)): 
 }
 
 describe("clientSkillsDir", () => {
-  it("knows claude-code's folder but not codex's (SPEC v8 open issue 16: unverified)", () => {
+  it("knows both claude-code's and codex's personal skills folder (W5.5: confirmed from openai/codex source at rust-v0.145.0)", () => {
     expect(clientSkillsDir("claude-code", "/home/x")).toBe("/home/x/.claude/skills");
-    expect(clientSkillsDir("codex", "/home/x")).toBeNull();
+    expect(clientSkillsDir("codex", "/home/x")).toBe("/home/x/.agents/skills");
   });
 });
 
@@ -178,6 +178,17 @@ describe("syncSkillsForClient", () => {
 
     const row = f.db.prepare("SELECT path FROM skill_syncs WHERE client = 'claude-code' AND skill_entry = ?").get(skill.id) as { path: string };
     expect(row.path).toBe(target);
+  });
+
+  it("writes into codex's folder too (W5.5: ~/.agents/skills, confirmed from source)", () => {
+    const f = setup();
+    const skill = writeSkill(f, "deploy-runbook");
+
+    const report = syncSkillsForClient(f.db, "codex", [ME_SCOPE_ID], new Map([[ME_SCOPE_ID, "_me"]]), false, f.home);
+    expect(report.written).toEqual(["deploy-runbook"]);
+    const target = join(f.home, ".agents", "skills", "deploy-runbook", "SKILL.md");
+    expect(existsSync(target)).toBe(true);
+    expect(readFileSync(target, "utf8")).toContain(skill.ref);
   });
 
   it("strips allowed-tools unless keep_allowed_tools is set", () => {
@@ -249,13 +260,6 @@ describe("syncSkillsForClient", () => {
     expect(row.skill_entry).toBe(first.id);
   });
 
-  it("reports codex as unsupported rather than guessing its folder", () => {
-    const f = setup();
-    writeSkill(f, "deploy-runbook");
-    const report = syncSkillsForClient(f.db, "codex", [ME_SCOPE_ID], new Map([[ME_SCOPE_ID, "_me"]]), false, f.home);
-    expect(report.written).toEqual([]);
-    expect(report.skipped[0]?.reason).toContain("not yet confirmed");
-  });
 });
 
 /** A config.toml with [skills] and the skills.native_sync flag set, for runSkillSyncTicket. */
@@ -370,5 +374,16 @@ describe("importSkillsFrom", () => {
     expect(result.imported.map((i) => i.name)).toEqual(["other-skill"]);
     expect(result.skipped[0]).toEqual({ name: "deploy-runbook", reason: expect.stringContaining("already managed by ctxd") });
     expect(f.db.prepare("SELECT COUNT(*) AS n FROM entries WHERE kind = 'skill' AND skill_name = 'deploy-runbook'").get()).toEqual({ n: 1 });
+  });
+
+  it("imports from codex's folder too (W5.5: ~/.agents/skills)", () => {
+    const f = setup();
+    const dir = join(f.home, ".agents", "skills", "deploy-runbook");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "SKILL.md"), SKILL_BODY("deploy-runbook"), "utf8");
+    const ctx = { db: f.db, clock: f.clock, nodeId: f.nodeId, clientId: ensureImportClient(f.db, f.nodeId) };
+
+    const result = importSkillsFrom(ctx, "codex", "_me", false, f.home);
+    expect(result.imported.map((i) => i.name)).toEqual(["deploy-runbook"]);
   });
 });

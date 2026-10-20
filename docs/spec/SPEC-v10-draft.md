@@ -36,3 +36,11 @@ Implements the deferred half of 12.2: previously, writing or approving a skill n
 - The actual folder write never runs inline in the write path or inside a hook's time budget; disk I/O for every configured client has no place on the critical path of an unrelated tool call.
 - The trigger fires on the entry's kind alone, not on its resulting status: scheduling a sync for a write that leaves the skill `proposed` is harmless, since the sync itself only ever selects `active` skills.
 - A no-op, not an error, if `skills.native_sync` has been turned off by the time the worker actually runs.
+
+### W5.5 Codex's skills folder confirmed
+
+Closes open issue 16 (12.2): Codex's personal skills folder is `~/.agents/skills` (`$HOME/.agents/skills`), confirmed directly from the `openai/codex` source at the pinned minimum version (`rust-v0.145.0`): `codex-rs/core-skills/src/loader.rs` resolves the user-scoped skill root as `home_dir.join(".agents").join("skills")`. SKILL.md there needs just `name` and `description` frontmatter, matching ctxd's own requirement exactly, so no format change was needed.
+
+A deprecated `$CODEX_HOME/skills` fallback is also still scanned by Codex itself for backward compatibility; ctxd writes only to the current location.
+
+`ctxd skills sync --client codex` and `ctxd skills import --from codex` both now work; `clientSkillsDir("codex", ...)` no longer returns null. See [PRD-skills-v2.md](../prd/components/PRD-skills-v2.md).
