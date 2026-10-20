@@ -164,9 +164,23 @@ describe("resolveEntry (ctxd review --approve, human only)", () => {
     const f = setup();
     const result = writeEntry(wctx(f, f.agentAId), { scope: "sample-app", kind: "decision", title: "D", body: "b", request_id: newId() } as never) as {
       ref: string;
+      id: string;
     };
     const resolved = resolveEntry(wctx(f, f.humanId), result.ref);
     expect(resolved.status).toBe("active");
+    expect(resolved.kind).toBe("decision"); // W5.4: callers (ctxd review --approve) use this to decide whether to schedule a skill sync
+  });
+
+  it("records approved_by/approved_hlc as the human who approved (W5.1)", () => {
+    const f = setup();
+    const result = writeEntry(wctx(f, f.agentAId), { scope: "sample-app", kind: "decision", title: "D", body: "b", request_id: newId() } as never) as {
+      ref: string;
+      id: string;
+    };
+    resolveEntry(wctx(f, f.humanId), result.ref);
+    const row = f.db.prepare("SELECT approved_by, approved_hlc FROM entries WHERE entry_id = ?").get(result.id) as { approved_by: string | null; approved_hlc: string | null };
+    expect(row.approved_by).toBe(f.humanId);
+    expect(row.approved_hlc).not.toBeNull();
   });
 
   it("refuses a non-human client", () => {
@@ -225,6 +239,26 @@ describe("review rules (SPEC v6 10.4, human only, narrow by construction)", () =
     };
     expect(result.status).toBe("active");
     expect(buildReviewReport(f.db).proposed).toEqual([]);
+  });
+
+  it("records approved_by/approved_hlc at creation for an auto-accepted write (W5.1)", () => {
+    const f = setup();
+    addRule(wctx(f, f.humanId), "sample-app", { kind: "decision", client: "agent-a", action: "auto-accept" });
+    const result = writeEntry(wctx(f, f.agentAId), { scope: "sample-app", kind: "decision", title: "D", body: "b", request_id: newId() } as never) as {
+      id: string;
+      status: string;
+    };
+    const row = f.db.prepare("SELECT approved_by, approved_hlc FROM entries WHERE entry_id = ?").get(result.id) as { approved_by: string | null; approved_hlc: string | null };
+    expect(row.approved_by).toBe(f.agentAId);
+    expect(row.approved_hlc).not.toBeNull();
+  });
+
+  it("leaves approved_by/approved_hlc unset for a plain unreviewed write (no rule, human or default-active kind)", () => {
+    const f = setup();
+    const human = writeEntry(wctx(f, f.humanId), { scope: "sample-app", kind: "decision", title: "D", body: "b", request_id: newId() } as never) as { id: string };
+    const row = f.db.prepare("SELECT approved_by, approved_hlc FROM entries WHERE entry_id = ?").get(human.id) as { approved_by: string | null; approved_hlc: string | null };
+    expect(row.approved_by).toBeNull();
+    expect(row.approved_hlc).toBeNull();
   });
 
   it("review.remembered_rules off (PRD-feature-flags-v1): a matching rule is ignored and the write stays proposed", () => {

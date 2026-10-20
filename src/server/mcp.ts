@@ -143,6 +143,7 @@ async function handleHttpRequest(
     assumedPools: auth.assumedPools,
     flags: currentFlags(configPath),
     dataDir: currentDataDir(configPath),
+    configPath,
     sealedStore,
   };
 

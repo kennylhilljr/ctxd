@@ -214,11 +214,17 @@ export async function runSearch(
     const flagged = flags.some((f) => f.resolved === null);
 
     const scopeInfo = scopes.find((s) => s.id === row.scope_id)!;
-    const relevance = isListMode ? 0 : rrf ? rrf.get(row.entry_id) ?? 0 : Math.max(0, -(row.bm25 ?? 0)) / maxBm25;
-    const imp = importanceOn ? entryImportance(db, row, now) : 0;
-    let s = isListMode ? imp : score(relevance, imp);
-    s *= scopeInfo.multiplier;
-    if (flagged) s *= 0.5;
+    // List mode lists strictly by time (SPEC 11.2: "results are listed newest first instead of by
+    // relevance"), whatever the importance flag: _score stays 0 for every row, so the stable sort
+    // below leaves the SQL's own time-descending order untouched. The scope multiplier and the
+    // flagged penalty are relevance adjustments and apply only to scored (non-list) search.
+    let s = 0;
+    if (!isListMode) {
+      const relevance = rrf ? rrf.get(row.entry_id) ?? 0 : Math.max(0, -(row.bm25 ?? 0)) / maxBm25;
+      const imp = importanceOn ? entryImportance(db, row, now) : 0;
+      s = score(relevance, imp) * scopeInfo.multiplier;
+      if (flagged) s *= 0.5;
+    }
 
     const ref = formatRef(scopeInfo.name, row.entry_id);
     const path = entryPath({

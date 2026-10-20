@@ -77,6 +77,14 @@ describe("upsertSession (SPEC v6 section 9.2)", () => {
     expect(JSON.parse(row.recovery)).toEqual({ phase: "x", last_request_summary: "y" });
   });
 
+  it("records cwd on the first upsert and keeps it on a later event that reports a different cwd (W5.2)", () => {
+    const f = setup();
+    upsertSession(f.db, { sessionRef: "claude-code:s3", clientId: f.clientId, scopeId: null, event: "session-start", nodeId: f.nodeId, clearRecovery: true, cwd: "/repo/a" });
+    upsertSession(f.db, { sessionRef: "claude-code:s3", clientId: f.clientId, scopeId: null, event: "stop", nodeId: f.nodeId, cwd: "/repo/b" });
+    const row = f.db.prepare("SELECT cwd FROM sessions WHERE session_ref = ?").get("claude-code:s3") as { cwd: string | null };
+    expect(row.cwd).toBe("/repo/a");
+  });
+
   it("events that don't touch session state (subagent-start, pre-tool-use, post-tool-use) leave no row and report false from eventTouchesSessionState", () => {
     const f = setup();
     upsertSession(f.db, { sessionRef: "claude-code:s2", clientId: f.clientId, scopeId: null, event: "subagent-start", nodeId: f.nodeId });
@@ -201,6 +209,13 @@ describe("dispatchWithDb records the real git HEAD on sessions (M2 slice 9)", ()
 
     const row = f.db.prepare("SELECT head FROM sessions WHERE session_ref = ?").get("claude-code:s1") as { head: string | null };
     expect(row.head).toBe(head);
+  });
+
+  it("sets sessions.cwd from the hook's cwd on session-start (W5.2)", async () => {
+    const f = setup();
+    await dispatchWithDb(f.db, "session-start", CLAUDE_CODE_ADAPTER, "claude-code", undefined, "/repo", { session_id: "s4", cwd: "/repo", source: "startup" }, {});
+    const row = f.db.prepare("SELECT cwd FROM sessions WHERE session_ref = ?").get("claude-code:s4") as { cwd: string | null };
+    expect(row.cwd).toBe("/repo");
   });
 
   it("leaves head unset for an event that doesn't touch session state, without shelling out", async () => {

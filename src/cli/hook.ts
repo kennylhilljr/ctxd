@@ -144,6 +144,7 @@ export async function dispatchWithDb(
     nodeId: node.node_id,
     clearRecovery,
     head,
+    cwd,
   });
 
   const handler = HOOK_HANDLERS[event];

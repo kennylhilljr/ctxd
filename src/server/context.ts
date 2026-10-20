@@ -25,5 +25,7 @@ export interface RequestContext {
   flags?: Map<string, boolean>;
   /** The node's data directory, for loading the local embedding model at query time (SPEC v8 11.2). Optional for the same reason as `flags`. */
   dataDir?: string;
+  /** The resolved --config path, for a tool handler that needs to spawn a detached `ctxd worker` (W5.4's skill-sync trigger). Optional for the same reason as `flags`. */
+  configPath?: string;
   sealedStore?: SealedPoolStore;
 }

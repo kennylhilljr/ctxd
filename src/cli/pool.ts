@@ -1,4 +1,5 @@
-/** `ctxd pool create|show|grant|revoke|add-member|remove-member` (SPEC v6 section 13). */
+/** `ctxd pool create|show|grant|revoke|add-member|remove-member|seal|enroll|approve-key-transfer|lock` (SPEC v6 section 13). */
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { join } from "node:path";
 import type Database from "better-sqlite3";
@@ -8,10 +9,14 @@ import { deterministicId } from "../core/ids.js";
 import { appendAclEvent } from "../store/acl.js";
 import { GRANT_LEVELS, type AccessLevel } from "../core/kinds.js";
 import type { WriteContext } from "../store/write.js";
-import { loadConfig } from "../config/config.js";
-import { requireFlag, resolveFlags } from "../config/flags.js";
+import { loadConfig, type CtxdConfig } from "../config/config.js";
+import { isFlagOn, requireFlag, resolveFlags } from "../config/flags.js";
 import { KeyHelperProvider } from "../sealed/key-provider.js";
 import { SealedPoolStore, SqlCipherDatabaseProvider } from "../sealed/store.js";
+import { FileEventKeyProvider } from "../security/event-signatures.js";
+import { FileEncryptionKeyProvider, deriveConfirmationCode, signEncryptionPrekey } from "../sealed/encryptionKeys.js";
+import { approveKeyTransfer, completeKeyTransfer, type SignedPrekey } from "../sealed/keyTransfer.js";
+import type { CiphertextEnvelope } from "../sealed/crypto.js";
 
 function findPool(db: Database.Database, name: string): { pool_id: string } | undefined {
   return db.prepare("SELECT pool_id FROM pools WHERE name = ?").get(name) as { pool_id: string } | undefined;
@@ -131,7 +136,126 @@ export function removeMember(ctx: WriteContext, pool: string, clientOrTag: strin
   return 0;
 }
 
-export function run(argv: string[]): number {
+interface PeerForTransfer {
+  url: string;
+  outgoing_token: string;
+  node_id: string;
+}
+
+interface PendingEnrollState {
+  poolId: string;
+  peerUrl: string;
+  outgoingToken: string;
+  sourcePrekey: SignedPrekey;
+}
+
+function pendingTransferPath(dataDir: string, transferId: string): string {
+  return join(dataDir, "key-transfers", `${transferId}.json`);
+}
+
+/** W2, start: this node (the recipient) asks the peer for the pool's key. Prints the transferId and a confirmation code derived immediately from the exchange, so the owner can start comparing it against what approving on the source shows. */
+async function requestEnroll(db: Database.Database, dataDir: string, poolId: string, poolName: string, peerName: string, peer: PeerForTransfer): Promise<number> {
+  const node = db.prepare("SELECT node_id FROM nodes LIMIT 1").get() as { node_id: string };
+  const dbPath = join(dataDir, "ctxd.db");
+  const signingKeys = new FileEventKeyProvider(dbPath).keyPair(node.node_id);
+  const encKeys = new FileEncryptionKeyProvider(dbPath).keyPair(node.node_id);
+  const myPrekey: SignedPrekey = { nodeId: node.node_id, ...signEncryptionPrekey(node.node_id, encKeys, signingKeys.privateKey) };
+
+  let res: Response;
+  try {
+    res = await fetch(new URL("/v1/key-transfer/request", peer.url), {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${peer.outgoing_token}` },
+      body: JSON.stringify({ poolId, requesterPrekey: myPrekey }),
+    });
+  } catch (err) {
+    console.error(`ctxd pool enroll: could not reach "${peerName}": ${err instanceof Error ? err.message : String(err)}`);
+    return 1;
+  }
+  if (!res.ok) {
+    console.error(`ctxd pool enroll: request refused: HTTP ${res.status} (${await res.text()})`);
+    return 1;
+  }
+  const body = (await res.json()) as { transferId: string; sourcePrekey: SignedPrekey };
+
+  mkdirSync(join(dataDir, "key-transfers"), { recursive: true });
+  const state: PendingEnrollState = { poolId, peerUrl: peer.url, outgoingToken: peer.outgoing_token, sourcePrekey: body.sourcePrekey };
+  writeFileSync(pendingTransferPath(dataDir, body.transferId), JSON.stringify(state));
+
+  const code = deriveConfirmationCode(encKeys.privateKey, body.sourcePrekey.publicKey);
+  console.log(`ctxd pool enroll: requested transfer ${body.transferId} for "${poolName}" from "${peerName}".`);
+  console.log(`Confirmation code: ${code}`);
+  console.log(`On "${peerName}", run: ctxd pool approve-key-transfer ${body.transferId}  (it will show the same code)`);
+  console.log(`Then here, run: ctxd pool enroll ${poolName} ${peerName} --transfer-id ${body.transferId}`);
+  return 0;
+}
+
+/** W2, finish: fetches the (already-approved) wrapped key, unwraps it, and installs it via SealedPoolStore.enroll, which also records the enrollment. */
+async function completeEnroll(db: Database.Database, dataDir: string, config: CtxdConfig, ctx: WriteContext, poolId: string, peer: PeerForTransfer, transferId: string): Promise<number> {
+  const statePath = pendingTransferPath(dataDir, transferId);
+  if (!existsSync(statePath)) {
+    console.error(`ctxd pool enroll: no pending request for transfer ${transferId} on this node.`);
+    return 1;
+  }
+  const state = JSON.parse(readFileSync(statePath, "utf8")) as PendingEnrollState;
+
+  let res: Response;
+  try {
+    res = await fetch(new URL("/v1/key-transfer/fetch", peer.url), {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${peer.outgoing_token}` },
+      body: JSON.stringify({ transferId }),
+    });
+  } catch (err) {
+    console.error(`ctxd pool enroll: could not reach the source node: ${err instanceof Error ? err.message : String(err)}`);
+    return 1;
+  }
+  if (!res.ok) {
+    console.error(`ctxd pool enroll: fetch refused: HTTP ${res.status} (${await res.text()})`);
+    return 1;
+  }
+  const { wrappedKey } = (await res.json()) as { wrappedKey: CiphertextEnvelope };
+
+  const node = db.prepare("SELECT node_id FROM nodes LIMIT 1").get() as { node_id: string };
+  const encKeys = new FileEncryptionKeyProvider(join(dataDir, "ctxd.db")).keyPair(node.node_id);
+  const completion = completeKeyTransfer(transferId, encKeys, state.sourcePrekey, wrappedKey);
+  console.log(`Confirmation code: ${completion.confirmationCode}  (compare against what approving showed on the source)`);
+
+  const store = new SealedPoolStore(db, dataDir, new KeyHelperProvider(config.sealed.key_helper), new SqlCipherDatabaseProvider(), config.sealed.unlock_minutes);
+  store.enroll(state.poolId, node.node_id, completion.poolKey);
+  appendAclEvent(ctx, state.poolId, { action: "pool_enroll", node_id: node.node_id });
+  unlinkSync(statePath);
+  console.log(`ctxd pool enroll: enrolled on this node.`);
+  return 0;
+}
+
+/** W2, owner-only: approves a pending transfer on the source node, wrapping the real pool key for the requester. Never reachable except by this CLI command running locally. */
+function approveKeyTransferCommand(db: Database.Database, dataDir: string, config: CtxdConfig, transferId: string): number {
+  const transfer = db.prepare("SELECT pool_id FROM sealed_key_transfers WHERE transfer_id = ?").get(transferId) as { pool_id: string } | undefined;
+  if (!transfer) {
+    console.error(`ctxd pool approve-key-transfer: no such transfer ${transferId}.`);
+    return 1;
+  }
+  const node = db.prepare("SELECT node_id FROM nodes LIMIT 1").get() as { node_id: string };
+  const keys = isFlagOn(resolveFlags(config), "sealed_pools") ? new KeyHelperProvider(config.sealed.key_helper) : undefined;
+  if (!keys) {
+    console.error("ctxd pool approve-key-transfer: sealed_pools is off.");
+    return 1;
+  }
+  const encKeys = new FileEncryptionKeyProvider(join(dataDir, "ctxd.db")).keyPair(node.node_id);
+  try {
+    const poolKey = keys.get(transfer.pool_id);
+    const { confirmationCode } = approveKeyTransfer(db, transferId, encKeys, poolKey);
+    console.log(`ctxd pool approve-key-transfer: approved ${transferId}.`);
+    console.log(`Confirmation code: ${confirmationCode}  (compare against what the requester shows)`);
+    return 0;
+  } catch (err) {
+    console.error(`ctxd pool approve-key-transfer: ${err instanceof Error ? err.message : String(err)}`);
+    return 1;
+  }
+}
+
+export async function run(argv: string[]): Promise<number> {
   const [sub, ...rest] = argv;
   const { values, positionals } = parseArgs({
     args: rest,
@@ -139,6 +263,7 @@ export function run(argv: string[]): number {
       description: { type: "string" },
       level: { type: "string" },
       tag: { type: "boolean" },
+      "transfer-id": { type: "string" },
       "data-dir": { type: "string" },
       config: { type: "string" },
     },
@@ -224,18 +349,35 @@ export function run(argv: string[]): number {
       }
       case "enroll": {
         requireFlag(flags, "sealed_pools");
+        requireFlag(flags, "sealed_pools.key_transfer");
         const [name, nodeName] = positionals;
         const pool = name ? findPool(db, name) : undefined;
-        const node = nodeName ? db.prepare("SELECT remote_node_id AS node_id FROM peers WHERE (name = ? OR remote_node_id = ?) AND revoked_at IS NULL AND remote_node_id IS NOT NULL AND remote_public_key IS NOT NULL").get(nodeName, nodeName) as { node_id: string } | undefined : undefined;
-        if (!name || !nodeName || !pool || !node) { console.error("Usage: ctxd pool enroll <pool> <node>"); return 1; }
-        const store = new SealedPoolStore(db, dataDir, new KeyHelperProvider(config.sealed.key_helper), new SqlCipherDatabaseProvider(), config.sealed.unlock_minutes);
-        try {
-          store.enroll(pool.pool_id, node.node_id);
-          return 0;
-        } catch (err) {
-          console.error(`ctxd pool enroll: ${err instanceof Error ? err.message : String(err)}`);
+        const peer = nodeName
+          ? (db
+              .prepare(
+                "SELECT url, outgoing_token, remote_node_id AS node_id FROM peers WHERE (name = ? OR remote_node_id = ?) AND revoked_at IS NULL AND remote_node_id IS NOT NULL AND remote_public_key IS NOT NULL",
+              )
+              .get(nodeName, nodeName) as { url: string; outgoing_token: string | null; node_id: string } | undefined)
+          : undefined;
+        if (!name || !nodeName || !pool || !peer) {
+          console.error("Usage: ctxd pool enroll <pool> <node>  (run again with --transfer-id once approved on <node>)");
           return 1;
         }
+        const outgoingToken = peer.outgoing_token;
+        if (!outgoingToken) {
+          console.error(`ctxd pool enroll: no outgoing token for peer "${nodeName}" yet; run "ctxd node add-peer" first.`);
+          return 1;
+        }
+        const peerForTransfer: PeerForTransfer = { url: peer.url, outgoing_token: outgoingToken, node_id: peer.node_id };
+        return values["transfer-id"]
+          ? await completeEnroll(db, dataDir, config, humanContext(), pool.pool_id, peerForTransfer, values["transfer-id"])
+          : await requestEnroll(db, dataDir, pool.pool_id, name, nodeName, peerForTransfer);
+      }
+      case "approve-key-transfer": {
+        requireFlag(flags, "sealed_pools.key_transfer");
+        const transferId = positionals[0];
+        if (!transferId) { console.error("Usage: ctxd pool approve-key-transfer <transferId>"); return 1; }
+        return approveKeyTransferCommand(db, dataDir, config, transferId);
       }
       case "lock": {
         requireFlag(flags, "sealed_pools");
@@ -248,7 +390,7 @@ export function run(argv: string[]): number {
         return 0;
       }
       default:
-        console.error(`ctxd pool: unknown subcommand "${sub}". Use create, show, grant, revoke, add-member, remove-member, seal, enroll or lock.`);
+        console.error(`ctxd pool: unknown subcommand "${sub}". Use create, show, grant, revoke, add-member, remove-member, seal, enroll, approve-key-transfer or lock.`);
         return 2;
     }
   } finally {
