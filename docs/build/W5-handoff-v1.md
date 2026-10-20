@@ -22,9 +22,9 @@ Branch `done/w5-correctness-gaps`, five commits on top of `main` at `5b4063f`. N
 
 **Slice 5 (M5 handoff gap, Spec open issue 16, PRD Q10).** Codex's personal skills folder is confirmed: `~/.agents/skills` (`$HOME/.agents/skills`), read directly from the `openai/codex` source at the pinned minimum version `rust-v0.145.0` (`codex-rs/core-skills/src/loader.rs`: the user-scoped skill root is `home_dir.join(".agents").join("skills")`). SKILL.md there needs just `name` and `description` frontmatter, matching ctxd's own requirement exactly, so no format change was needed. `clientSkillsDir("codex", ...)` no longer returns null; `ctxd skills sync --client codex` and `ctxd skills import --from codex` both work now. [PRD-skills-v2.md](../prd/components/PRD-skills-v2.md) records this.
 
-**Accepted limitation, no work.** PreCompact still cannot record a phase or last-request summary: neither Claude Code's nor Codex's documented PreCompact payload carries one, only `session_id`/`cwd`/`trigger`. Noted once in [Spec v10 draft](../spec/SPEC-v10-draft.md) rather than every milestone's handoff.
+**Accepted limitation, no work.** PreCompact still cannot record a phase or last-request summary: neither Claude Code's nor Codex's documented PreCompact payload carries one, only `session_id`/`cwd`/`trigger`. Noted once in [Spec v10 draft](../spec/SPEC-v10.md) rather than every milestone's handoff.
 
-Spec changes for all five slices are in [docs/spec/SPEC-v10-draft.md](../spec/SPEC-v10-draft.md), which M7 slice 8 folds into the numbered Spec v10.
+Spec changes for all five slices are in [docs/spec/SPEC-v10-draft.md](../spec/SPEC-v10.md), which M7 slice 8 folds into the numbered Spec v10.
 
 ## Verification
 
