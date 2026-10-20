@@ -46,8 +46,8 @@ export function servePull(
     const where = behind.map(() => "(e.origin_node = ? AND e.origin_seq > ?)").join(" OR ");
     const args = behind.flatMap((origin) => [origin.origin_node, req.vector[origin.origin_node] ?? 0]);
     return source.prepare(
-      `SELECT e.event_id, e.origin_node, e.origin_seq, e.hlc, e.scope_id, e.entry_id, e.op, e.part, e.parent_revs, e.rev,
-              e.client_id, e.session_ref, e.request_id, e.request_hash, e.payload, e.prev, e.payload_hash, e.signature, e.public_key,
+      `SELECT e.event_id, e.schema_version, e.origin_node, e.origin_seq, e.hlc, e.scope_id, e.entry_id, e.op, e.part, e.parent_revs, e.rev,
+              e.client_id, e.session_ref, e.request_id, e.request_hash, e.payload, e.prev, e.payload_hash, e.prev_hash, e.signature, e.public_key,
               s.replication AS scope_replication,
               (SELECT pg.pool_id FROM pool_grants pg JOIN pools p ON p.pool_id = pg.pool_id
                WHERE pg.scope_id = e.scope_id AND p.storage = 'sealed' LIMIT 1) AS sealed_pool_id

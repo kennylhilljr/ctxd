@@ -37,6 +37,7 @@ export function rebuild(db: Database.Database): void {
       payload: string;
       prev: string | null;
       payload_hash: string | null;
+      prev_hash: string | null;
       signature: string | null;
       public_key: string | null;
     } & Record<string, unknown>)[];
@@ -45,7 +46,7 @@ export function rebuild(db: Database.Database): void {
     for (const e of events) {
       const fields = fieldsFromRow(e);
       const wasPurged = fields.payload.purged === true;
-      verifyEventSignature(db, { ...fields, payloadHash: e.payload_hash, signature: e.signature, publicKey: e.public_key }, !wasPurged);
+      verifyEventSignature(db, { ...fields, payloadHash: e.payload_hash, prevHash: e.prev_hash, signature: e.signature, publicKey: e.public_key }, !wasPurged);
       if (e.part !== "content" && e.part !== "status" && e.part !== "relations" && e.part !== "claim" && e.part !== "meta") continue;
       applyReplicatedEvent(db, {
         eventId: e.event_id,

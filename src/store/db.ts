@@ -78,14 +78,23 @@ export function openDatabase(path: string, { create = false }: OpenDatabaseOptio
     })();
   }
   const mirrorVersion = db.pragma("user_version", { simple: true }) as number;
-  if (mirrorVersion === 15 && SCHEMA_VERSION === 16) {
+  if (mirrorVersion === 15 && SCHEMA_VERSION >= 16) {
     db.transaction(() => {
       db.exec("CREATE TABLE sealed_purge_queue (pool_id TEXT NOT NULL, entry_id TEXT NOT NULL, requested_at TEXT NOT NULL, PRIMARY KEY (pool_id, entry_id))");
       db.pragma("user_version = 16");
     })();
-  } else if (mirrorVersion !== SCHEMA_VERSION) {
+  }
+  const sealedVersion = db.pragma("user_version", { simple: true }) as number;
+  if (sealedVersion === 16 && SCHEMA_VERSION >= 17) {
+    db.transaction(() => {
+      db.exec("ALTER TABLE events ADD COLUMN prev_hash TEXT; ALTER TABLE node_keys ADD COLUMN first_signed_seq INTEGER NOT NULL DEFAULT 0; ALTER TABLE peers ADD COLUMN remote_node_id TEXT; ALTER TABLE peers ADD COLUMN remote_public_key TEXT;");
+      db.pragma("user_version = 17");
+    })();
+  }
+  const finalVersion = db.pragma("user_version", { simple: true }) as number;
+  if (finalVersion !== SCHEMA_VERSION) {
     db.close();
-    throw new Error(`Database schema version ${mirrorVersion} does not match ${SCHEMA_VERSION}; no migration is defined yet.`);
+    throw new Error(`Database schema version ${finalVersion} does not match ${SCHEMA_VERSION}; no migration is defined yet.`);
   }
   return db;
 }

@@ -15,6 +15,7 @@ import { verifyEventSignature } from "../security/event-signatures.js";
  */
 export interface WireEvent {
   eventId: string;
+  schemaVersion: number;
   originNode: string;
   originSeq: number;
   hlc: string;
@@ -31,6 +32,7 @@ export interface WireEvent {
   payload: Record<string, unknown>;
   prev: Record<string, unknown> | null;
   payloadHash?: string | null;
+  prevHash?: string | null;
   signature?: string | null;
   publicKey?: string | null;
 }
@@ -187,6 +189,7 @@ function materializeByDecision(db: Database.Database, event: WireEvent, decision
 /** A stored event row's columns in their raw, pre-parse form: shared by `retryPendingFor` below and `src/sync/pull.ts`'s own row mapping (which adds one column, `scope_replication`, that only it needs), so there is exactly one place that knows how to turn a DB row back into a `WireEvent`. */
 export interface EventRow {
   event_id: string;
+  schema_version: number;
   origin_node: string;
   origin_seq: number;
   hlc: string;
@@ -203,6 +206,7 @@ export interface EventRow {
   payload: string;
   prev: string | null;
   payload_hash: string | null;
+  prev_hash: string | null;
   signature: string | null;
   public_key: string | null;
 }
@@ -210,6 +214,7 @@ export interface EventRow {
 export function toWireEvent(row: EventRow): WireEvent {
   return {
     eventId: row.event_id,
+    schemaVersion: row.schema_version,
     originNode: row.origin_node,
     originSeq: row.origin_seq,
     hlc: row.hlc,
@@ -226,6 +231,7 @@ export function toWireEvent(row: EventRow): WireEvent {
     payload: JSON.parse(row.payload) as Record<string, unknown>,
     prev: row.prev === null ? null : (JSON.parse(row.prev) as Record<string, unknown>),
     payloadHash: row.payload_hash,
+    prevHash: row.prev_hash,
     signature: row.signature,
     publicKey: row.public_key,
   };
@@ -247,8 +253,8 @@ function retryPendingFor(db: Database.Database, entryId: string): void {
     progressed = false;
     const rows = db
       .prepare(
-        `SELECT event_id, origin_node, origin_seq, hlc, scope_id, entry_id, op, part, parent_revs, rev,
-                client_id, session_ref, request_id, request_hash, payload, prev, payload_hash, signature, public_key
+        `SELECT event_id, schema_version, origin_node, origin_seq, hlc, scope_id, entry_id, op, part, parent_revs, rev,
+                client_id, session_ref, request_id, request_hash, payload, prev, payload_hash, prev_hash, signature, public_key
          FROM events WHERE entry_id = ? AND materialized = 0 ORDER BY hlc`,
       )
       .all(entryId) as EventRow[];
@@ -274,10 +280,10 @@ function retryPendingFor(db: Database.Database, entryId: string): void {
 
 /** Apply one event idempotently (Spec 7.1's puller loop step 1; 7.3). */
 export function applyEvent(db: Database.Database, event: WireEvent): ApplyResult {
-  verifyEventSignature(db, event, event.payload.purged !== true);
   if (db.prepare("SELECT 1 FROM events WHERE event_id = ?").get(event.eventId)) {
     return { outcome: "already-known" };
   }
+  verifyEventSignature(db, event, true);
 
   const decision = decide(db, event);
   // 7.6.6 step 3: an event for an already-purged entry is stored with its content already gone,
@@ -289,10 +295,11 @@ export function applyEvent(db: Database.Database, event: WireEvent): ApplyResult
 
   const result = db.transaction((): ApplyResult => {
     db.prepare(
-      `INSERT INTO events (event_id, origin_node, origin_seq, hlc, scope_id, entry_id, op, part, parent_revs, rev, client_id, session_ref, request_id, request_hash, payload, prev, payload_hash, signature, public_key, received_at, materialized)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO events (event_id, schema_version, origin_node, origin_seq, hlc, scope_id, entry_id, op, part, parent_revs, rev, client_id, session_ref, request_id, request_hash, payload, prev, payload_hash, prev_hash, signature, public_key, received_at, materialized)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       event.eventId,
+      event.schemaVersion,
       event.originNode,
       event.originSeq,
       event.hlc,
@@ -309,6 +316,7 @@ export function applyEvent(db: Database.Database, event: WireEvent): ApplyResult
       JSON.stringify(payload),
       prev === null ? null : JSON.stringify(prev),
       event.payloadHash,
+      event.prevHash,
       event.signature,
       event.publicKey,
       new Date().toISOString(),

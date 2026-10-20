@@ -32,8 +32,10 @@
  * Bumped to 15 for M6 slice 2: mirror conflicts and deletion archive requests are local review
  * records. Successful edits and imports still travel through ordinary events.
  * Bumped to 16 for M6 slice 3: sealed purge work may wait for its pool key.
+ * Bumped to 17 for M6 hardening: signatures cover the immutable envelope and separate retained
+ * payload hashes; peer records bind authenticated tokens to remote node identities and keys.
  */
-export const SCHEMA_VERSION = 16;
+export const SCHEMA_VERSION = 17;
 
 export const SCHEMA_SQL = `
 CREATE TABLE nodes (
@@ -47,7 +49,8 @@ CREATE TABLE nodes (
 CREATE TABLE node_keys (
   node_id      TEXT PRIMARY KEY,
   public_key   TEXT NOT NULL,
-  first_seen_at TEXT NOT NULL
+  first_seen_at TEXT NOT NULL,
+  first_signed_seq INTEGER NOT NULL
 );
 
 CREATE TABLE peers (                   -- a machine we sync with (Spec 7.1); never a row in nodes
@@ -60,6 +63,8 @@ CREATE TABLE peers (                   -- a machine we sync with (Spec 7.1); nev
   revoked_at          TEXT,
   created_at          TEXT NOT NULL,
   last_synced_at      TEXT                -- set when a pull from this peer last completed successfully (Spec 7.4's tentative-claim check)
+  ,remote_node_id     TEXT
+  ,remote_public_key  TEXT
 );
 
 CREATE TABLE clients (
@@ -105,6 +110,7 @@ CREATE TABLE events (
   payload      TEXT NOT NULL,
   prev         TEXT,                   -- JSON: prior values of the changed fields of this part (NULL on create)
   payload_hash TEXT,                   -- SHA-256 of canonical payload and prev; retained by purge
+  prev_hash    TEXT,                   -- SHA-256 of canonical prior values; retained by purge
   signature    TEXT,                   -- base64 Ed25519 signature over payload_hash; NULL for unsigned legacy events
   public_key   TEXT,                   -- base64 SPKI key, pinned in node_keys on first verified event
   received_at  TEXT NOT NULL,
