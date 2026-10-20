@@ -1,0 +1,79 @@
+openapi: 3.1.0
+info:
+  title: ctxd mobile inbox
+  version: "1.0.0"
+  description: >
+    Write-only capture for phone chat apps. This token can only append entries; it cannot read
+    anything back, including entries other clients submitted. Import this file as a ChatGPT
+    Action, or use it as the reference for an iOS Shortcuts HTTP request.
+servers:
+  - url: https://REPLACE_WITH_YOUR_WORKER_SUBDOMAIN.workers.dev
+security:
+  - bearerAuth: []
+paths:
+  /v1/inbox/entries:
+    post:
+      operationId: captureInboxEntry
+      summary: Capture a short note into the mobile inbox.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InboxEntryInput"
+      responses:
+        "201":
+          description: Accepted; queued for the home hub to pull.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+        "400":
+          description: Invalid entry shape or malformed JSON.
+        "401":
+          description: Missing or invalid bearer token.
+        "413":
+          description: Body or payload exceeds the size bound (16 KB body, 32 KB total).
+        "429":
+          description: Rate limited (10 requests/minute per token) or the inbox is full (500 entries).
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  schemas:
+    InboxEntryInput:
+      type: object
+      required: [scope, kind, title, body, capturedAt]
+      properties:
+        scope:
+          type: string
+          description: >
+            The ctxd scope name this note is intended for. If the mobile-inbox client has no
+            access to it, or it is excluded (sealed, local-only or home-only), the hub either
+            holds it for the owner's review or rejects it outright; it never silently lands
+            somewhere else.
+        kind:
+          type: string
+          enum: [brief, status, decision, convention, fact, lesson, handoff, task, pointer, note, preference, skill, journal]
+        title:
+          type: string
+          maxLength: 200
+        body:
+          type: string
+          description: UTF-8 text, at most 16 KB.
+        tags:
+          type: array
+          items:
+            type: string
+            maxLength: 40
+          maxItems: 10
+        clientRef:
+          type: string
+          description: An external message id, for your own cross-referencing (optional).
+        capturedAt:
+          type: string
+          format: date-time

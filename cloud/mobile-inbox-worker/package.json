@@ -1,0 +1,17 @@
+{
+  "name": "ctxd-mobile-inbox-worker",
+  "version": "0.0.1",
+  "private": true,
+  "description": "M7 mobile inbox: the cloud buffer Cloudflare Worker. A sibling project, never built or installed by ctxd's own npm scripts (see root tsconfig.json's include list).",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "migrate": "wrangler d1 migrations apply ctxd-mobile-inbox --remote"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4",
+    "typescript": "^5.9.0",
+    "wrangler": "^4"
+  }
+}
