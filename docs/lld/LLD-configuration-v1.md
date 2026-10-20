@@ -30,6 +30,7 @@ listen = "127.0.0.1:7411"
 [sync]
 listen = "127.0.0.1:7412"
 interval_seconds = 120
+stale_hours = 24                 # ctxd doctor warns when a peer's last sync is older (W3)
 # Peers live in the database (`ctxd node add-peer`), not here: each one needs a token hash
 # this machine can verify, which a config file is the wrong place to carry (3.1's notion of
 # "per machine, never synced" config is for behavior flags, not secrets).

@@ -169,3 +169,21 @@ function storeThrough(db: Database.Database, peerName: string, through: Record<s
     for (const [originNode, seq] of Object.entries(through)) stmt.run(peerName, originNode, seq);
   })();
 }
+
+/**
+ * The served-side mirror of `storeThrough` (W3): POST /v1/pull's handler (`src/server/sync.ts`)
+ * calls this after `servePull` so `peer_watermarks` records how far this node has served each
+ * peer, per origin -- otherwise serving is stateless and `ctxd doctor`/`ctxd status` have no way
+ * to answer "how far behind is this peer." Takes the max against any existing watermark, same as
+ * `through_seq` itself only ever advances within one pull.
+ */
+export function recordServedThrough(db: Database.Database, peerId: string, through: Record<string, number>): void {
+  const stmt = db.prepare(
+    `INSERT INTO peer_watermarks (peer_id, origin_node, through_seq, updated_at) VALUES (?, ?, ?, ?)
+     ON CONFLICT (peer_id, origin_node) DO UPDATE SET through_seq = MAX(through_seq, excluded.through_seq), updated_at = excluded.updated_at`,
+  );
+  const now = nowIso();
+  db.transaction(() => {
+    for (const [originNode, seq] of Object.entries(through)) stmt.run(peerId, originNode, seq, now);
+  })();
+}

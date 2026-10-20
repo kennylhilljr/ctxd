@@ -22,7 +22,7 @@ Section numbers are the Spec's own (for example 9.1), unchanged from Spec v9, so
   - token file permissions;
   - DB integrity (`PRAGMA quick_check`);
   - review rules that are broader than allowed (should never occur);
-  - peer reachability and last sync age;
+  - peer reachability and last sync age: each peer's real age from `peers.last_synced_at` (a peer that never synced uses its `created_at`), with a warning past `sync.stale_hours` (default 24) (W3);
   - FileVault status;
   - hook installation per client.
 - **Startup integrity.** The server runs `PRAGMA quick_check` and a schema version check before listening. If the database is missing but backups or peers exist, or if it is unreadable or corrupt, the server refuses to start and points to `ctxd doctor` and `ctxd restore`. It never creates a fresh empty database over an existing path. `ctxd init` is the only command that creates one.

@@ -10,11 +10,10 @@
  * `sessions` in `src/store/schema.ts`, a file the concurrent M3 sync-conflicts work is also
  * changing. Flagged here rather than guessed at or risked as a merge conflict.
  *
- * "Unsynced" has the same limit, for the same reason: this node's sync server never records what
- * it has already served each peer (`src/server/sync.ts`'s POST /v1/pull is stateless on the
- * serving side), so "how many of my own events are peers still missing" cannot be answered from
- * local state alone yet. Reported as `0` when there is nothing to sync (sync off, or no peers)
- * and as untracked otherwise, rather than a fabricated number.
+ * "Unsynced" (W3 closes the gap this comment used to describe): `peer_watermarks` now records
+ * what this node's sync server has served each peer, so `countUnsynced` (src/sync/freshness.ts)
+ * answers "how many of my own events are peers still missing" from local state. Still `0` when
+ * there is nothing to sync (sync off, or no peers), never a fabricated number otherwise.
  */
 import { parseArgs } from "node:util";
 import { join } from "node:path";
@@ -24,6 +23,7 @@ import { type CtxdConfig, loadConfig } from "../config/config.js";
 import { resolveFlags, isFlagOn } from "../config/flags.js";
 import { openDatabase } from "../store/db.js";
 import { resolveScope } from "../hooks/scope.js";
+import { countUnsynced } from "../sync/freshness.js";
 
 export interface StatusInfo {
   healthOk: boolean;
@@ -31,7 +31,7 @@ export interface StatusInfo {
   scopeNotice: string | null;
   briefAvailable: boolean;
   openClaims: number;
-  unsynced: number | null;
+  unsynced: number;
   peerCount: number;
 }
 
@@ -81,7 +81,7 @@ export async function gatherStatus(db: Database.Database, config: CtxdConfig, op
 
   const peerCount = (db.prepare("SELECT COUNT(*) AS n FROM peers WHERE revoked_at IS NULL").get() as { n: number }).n;
   const syncOn = isFlagOn(flags, "sync");
-  const unsynced = !syncOn || peerCount === 0 ? 0 : null;
+  const unsynced = !syncOn || peerCount === 0 ? 0 : countUnsynced(db);
 
   return { healthOk, scope, scopeNotice, briefAvailable, openClaims, unsynced, peerCount };
 }
@@ -91,7 +91,7 @@ export function formatStatusLine(info: StatusInfo): string {
   const scopePart = info.scope ?? "no scope";
   const briefPart = `brief ${info.briefAvailable ? "✓" : "✗"}`;
   const claimsPart = `${info.openClaims} claim${info.openClaims === 1 ? "" : "s"}`;
-  const syncPart = info.unsynced === null ? "sync ?" : `${info.unsynced} unsynced`;
+  const syncPart = `${info.unsynced} unsynced`;
   return `ctxd ${health} ${scopePart} · ${briefPart} · ${claimsPart} · ${syncPart}`;
 }
 
@@ -101,9 +101,7 @@ export function formatStatusDetail(info: StatusInfo): string {
     `scope: ${info.scope ?? `none (${info.scopeNotice})`}`,
     `brief: ${info.briefAvailable ? "available" : "not available (no scope, or hooks/hooks.session_start is off)"}`,
     `claims: ${info.openClaims} open`,
-    info.unsynced === null
-      ? `sync: ${info.peerCount} peer(s); unsynced count not tracked yet (the sync server has no outgoing watermark; see docs/build/M4-plan-v1.md)`
-      : `sync: ${info.unsynced} unsynced`,
+    `sync: ${info.peerCount} peer(s); ${info.unsynced} unsynced`,
   ];
   return lines.join("\n");
 }

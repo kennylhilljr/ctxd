@@ -132,6 +132,21 @@ describe("sync: two real nodes converge over a real HTTP listener", () => {
     expect(onB?.body).toBe(text);
   });
 
+  it("A's own doctor and status report real, non-guessed numbers after B's real pull (W3 exit criterion)", () => {
+    const statusA = run(["status", "--config", a.configPath, "--data-dir", a.dataDir]);
+    expect(statusA.status, statusA.stderr).toBe(0);
+    expect(statusA.stdout).toContain("0 unsynced"); // B is fully caught up: a real served watermark, not "not tracked yet"
+
+    // A has never itself pulled from B (only B pulled from A), so A's own "last sync age" for
+    // peer B is "never synced" -- an honest real answer, not a guess, and distinct from the old
+    // "not tracked yet" placeholder this check used to print unconditionally. B's own listener
+    // is never started in this test (see beforeAll), so the peer-reachability check itself still
+    // fails and doctor's overall exit code is non-zero for that unrelated, pre-existing reason.
+    const doctorA = run(["doctor", "--config", a.configPath, "--data-dir", a.dataDir]);
+    expect(doctorA.stdout).toContain("sync-test-node-b: unreachable (never synced)");
+    expect(doctorA.stdout).not.toContain("not tracked yet");
+  });
+
   it("a second sync with nothing new applies zero events", () => {
     const sync = run(["sync", "--peer", "sync-test-node-a", "--config", b.configPath, "--data-dir", b.dataDir]);
     expect(sync.status, sync.stderr).toBe(0);
