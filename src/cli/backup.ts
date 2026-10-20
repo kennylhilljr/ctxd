@@ -21,6 +21,7 @@ import { resolveConfigPath, resolveDataDir } from "./common.js";
 import { loadConfig } from "../config/config.js";
 import { resolveFlags, requireFlag, isFlagOn } from "../config/flags.js";
 import { checkDatabaseIntegrity, openDatabase } from "../store/db.js";
+import { run as runBackupSchedule } from "./backup-schedule.js";
 
 const KEEP = 14;
 const BACKUP_SUFFIX = ".db.age";
@@ -218,10 +219,27 @@ export function runRestore(opts: RestoreOptions): RestoreResult {
 }
 
 function usage(): string {
-  return ["Usage: ctxd backup [--copy-to <path>]", "       ctxd restore <file> --identity <path> [--force]"].join("\n");
+  return [
+    "Usage: ctxd backup [--copy-to <path>]",
+    "       ctxd backup schedule <install|uninstall|status>",
+    "       ctxd restore <file> --identity <path> [--force]",
+  ].join("\n");
 }
 
 export function runBackupCommand(argv: string[]): number {
+  if (argv[0] === "schedule") {
+    const { values, positionals } = parseArgs({
+      args: argv.slice(1),
+      options: { "data-dir": { type: "string" }, config: { type: "string" } },
+      allowPositionals: true,
+      strict: true,
+    });
+    const configPath = resolveConfigPath({ configPath: values.config });
+    const config = loadConfig(configPath);
+    const dataDir = resolveDataDir({ dataDir: values["data-dir"], configPath: values.config });
+    return runBackupSchedule(positionals, config.backup.schedule, configPath, dataDir);
+  }
+
   const { values } = parseArgs({
     args: argv,
     options: { "copy-to": { type: "string" }, "data-dir": { type: "string" }, config: { type: "string" } },

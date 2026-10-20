@@ -43,8 +43,13 @@ export const configSchema = z.object({
     }),
   scope_map: z.record(z.string(), z.string()).default({}),
   backup: z
-    .object({ age_recipient: z.string().default(""), copy_to: z.string().default("") })
-    .default({ age_recipient: "", copy_to: "" }),
+    .object({
+      age_recipient: z.string().default(""),
+      copy_to: z.string().default(""),
+      /** `ctxd backup schedule install`'s launchd StartCalendarInterval time, "HH:MM" local (W4). */
+      schedule: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "HH:MM").default("03:15"),
+    })
+    .default({ age_recipient: "", copy_to: "", schedule: "03:15" }),
   hooks: z
     .object({
       bypass_patterns: z.array(z.string()).default([]),

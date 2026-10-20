@@ -25,6 +25,7 @@ import {
   isClaudeCodeHooksInstalled,
   isCodexHooksInstalled,
 } from "./install-hooks.js";
+import { backupsDir } from "./backup.js";
 
 export interface DoctorCheck {
   name: string;
@@ -148,6 +149,23 @@ export function checkSemanticSearch(config: CtxdConfig, dataDir: string): Doctor
   };
 }
 
+/** Age of the newest backup (W4), with a warning past `staleHours` (default 36). Informational, not failing, when `backups` is off. */
+export function checkBackupAge(dataDir: string, config: CtxdConfig, staleHours = 36): DoctorCheck {
+  if (!isFlagOn(resolveFlags(config), "backups")) return { name: "backup age", ok: true, detail: "backups is off" };
+
+  const dir = backupsDir(dataDir);
+  const files = existsSync(dir) ? readdirSync(dir).filter((f) => f.endsWith(".db.age")) : [];
+  if (files.length === 0) return { name: "backup age", ok: false, detail: 'no backups yet; run "ctxd backup" or install the schedule (ctxd backup schedule install)' };
+
+  const newestMs = Math.max(...files.map((f) => statSync(join(dir, f)).mtimeMs));
+  const ageHours = (Date.now() - newestMs) / 3_600_000;
+  return {
+    name: "backup age",
+    ok: ageHours < staleHours,
+    detail: `newest backup ${ageHours.toFixed(1)}h old${ageHours >= staleHours ? " (stale)" : ""}`,
+  };
+}
+
 export function checkHookInstallation(home: string = homedir()): DoctorCheck {
   const claudeCode = isClaudeCodeHooksInstalled(claudeCodeSettingsPath(home));
   const codex = isCodexHooksInstalled(codexConfigPath(home));
@@ -177,6 +195,7 @@ export async function runDoctor(db: Database.Database, config: CtxdConfig, opts:
     checkFileVault(opts.execFile),
     checkHookInstallation(opts.home),
     checkSemanticSearch(config, opts.dataDir),
+    checkBackupAge(opts.dataDir, config),
   ];
 }
 
