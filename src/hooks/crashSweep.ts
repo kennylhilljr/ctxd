@@ -5,11 +5,12 @@
  * `ended_by: 'sweep'`, keeping `recovery` so the next brief for that client/scope still shows the
  * interrupted-work notice (SPEC 9.2).
  *
- * `sweepLeftoverTickets` below closes this file's own previously-documented gap: a SessionEnd
- * work ticket (SPEC 9.7) left behind by a reboot before its worker ran, or a worker that crashed
- * mid-run, is picked up here rather than sitting forever. It is a separate exported function, not
- * folded into `crashSweep` itself, since the two work on different things (sessions vs. ticket
- * files) and `crashSweep`'s own signature and tests should not need to change to gain it.
+ * `sweepLeftoverTickets` below closes this file's own previously-documented gap: a SessionEnd or
+ * skill-sync work ticket (SPEC 9.7, W5.4) left behind by a reboot before its worker ran, or a
+ * worker that crashed mid-run, is picked up here rather than sitting forever. It is a separate
+ * exported function, not folded into `crashSweep` itself, since the two work on different things
+ * (sessions vs. ticket files) and `crashSweep`'s own signature and tests should not need to
+ * change to gain it.
  *
  * W5.2 closes the gap this file used to document here: a crashed session's `cwd` (recorded at
  * SessionStart, `src/hooks/sessions.ts`) survives the crash, so the sweep can run the same
@@ -25,6 +26,7 @@ import { decodeHlc } from "../core/hlc.js";
 import { isFlagOn } from "../config/flags.js";
 import { readStateFile, withLock } from "./stateFile.js";
 import { applySessionEndTicket, performSessionEnd, type SessionEndTicket } from "./writeMoments.js";
+import { runSkillSyncTicket, type SkillSyncTicket } from "../skills/sync.js";
 
 export interface SweptSession {
   sessionRef: string;
@@ -79,7 +81,14 @@ export function crashSweep(db: Database.Database, nodeId: string, graceMinutes: 
  * left alone, since its own spawned worker is most likely still running. Each is processed under
  * its own lock, same as `ctxd worker` itself uses, so the two never race on the same ticket.
  */
-export async function sweepLeftoverTickets(db: Database.Database, nodeId: string, dataDir: string, graceMinutes: number, flags?: Map<string, boolean>): Promise<string[]> {
+export async function sweepLeftoverTickets(
+  db: Database.Database,
+  nodeId: string,
+  dataDir: string,
+  graceMinutes: number,
+  flags?: Map<string, boolean>,
+  configPath = "",
+): Promise<string[]> {
   const sessionsDir = join(dataDir, "sessions");
   if (!existsSync(sessionsDir)) return [];
   const cutoff = Date.now() - graceMinutes * 60_000;
@@ -97,8 +106,9 @@ export async function sweepLeftoverTickets(db: Database.Database, nodeId: string
     if (mtimeMs > cutoff) continue; // fresh enough that its own worker may still be running
 
     await withLock(path, () => {
-      const ticket = readStateFile<SessionEndTicket>(path);
-      if (ticket) applySessionEndTicket(db, nodeId, ticket, flags);
+      const ticket = readStateFile<SessionEndTicket | SkillSyncTicket>(path);
+      if (ticket?.kind === "skill-sync") runSkillSyncTicket(db, configPath);
+      else if (ticket) applySessionEndTicket(db, nodeId, ticket, flags);
       if (existsSync(path)) unlinkSync(path);
     });
     swept.push(file);

@@ -1,6 +1,7 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { stringify } from "smol-toml";
 import type Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 import { buildCatalog, catalogLine, parseSkill, renderSyncedSkill, skillSummary } from "../../src/skills/skillmd.js";
@@ -9,8 +10,9 @@ import { newId } from "../../src/core/ids.js";
 import { ME_SCOPE_ID } from "../../src/core/kinds.js";
 import { openDatabase } from "../../src/store/db.js";
 import { writeEntry, type WriteContext } from "../../src/store/write.js";
-import { clientSkillsDir, syncSkillsForClient } from "../../src/skills/sync.js";
+import { clientSkillsDir, runSkillSyncTicket, scheduleSkillSync, syncSkillsForClient } from "../../src/skills/sync.js";
 import { ensureImportClient, importSkillsFrom } from "../../src/skills/importSkills.js";
+import { configSchema } from "../../src/config/config.js";
 
 const BODY = `---
 name: release-checklist
@@ -253,6 +255,58 @@ describe("syncSkillsForClient", () => {
     const report = syncSkillsForClient(f.db, "codex", [ME_SCOPE_ID], new Map([[ME_SCOPE_ID, "_me"]]), false, f.home);
     expect(report.written).toEqual([]);
     expect(report.skipped[0]?.reason).toContain("not yet confirmed");
+  });
+});
+
+/** A config.toml with [skills] and the skills.native_sync flag set, for runSkillSyncTicket. */
+function writeConfig(dir: string, nativeSync: boolean, syncClients: string[] = ["claude-code"]): string {
+  const path = join(dir, "ctxd.toml");
+  const config = configSchema.parse({
+    node: { name: "air", role: "home" },
+    skills: { sync_clients: syncClients, include_scopes: ["_me"] },
+    features: { "skills.native_sync": nativeSync },
+  });
+  writeFileSync(path, stringify(config));
+  return path;
+}
+
+describe("scheduleSkillSync and runSkillSyncTicket (W5.4: automatic skill sync)", () => {
+  it("scheduleSkillSync writes a skill-sync ticket and spawns the detached worker", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "ctxd-skill-sync-data-"));
+    const spawned: { ticketPath: string; dataDir: string; configPath: string }[] = [];
+    await scheduleSkillSync(dataDir, "/some/config.toml", (ticketPath, d, c) => spawned.push({ ticketPath, dataDir: d, configPath: c }));
+
+    expect(spawned).toHaveLength(1);
+    expect(spawned[0]!.dataDir).toBe(dataDir);
+    expect(spawned[0]!.configPath).toBe("/some/config.toml");
+    const files = readdirSync(join(dataDir, "sessions"));
+    expect(files.some((f) => f.startsWith("skill-sync.") && f.endsWith(".ticket.json"))).toBe(true);
+    expect(JSON.parse(readFileSync(spawned[0]!.ticketPath, "utf8"))).toMatchObject({ kind: "skill-sync" });
+  });
+
+  it("runSkillSyncTicket writes the configured client's skill folder when skills.native_sync is on", () => {
+    const f = setup();
+    const skill = writeSkill(f, "deploy-runbook");
+    const configDir = mkdtempSync(join(tmpdir(), "ctxd-skill-sync-config-"));
+    const configPath = writeConfig(configDir, true);
+
+    runSkillSyncTicket(f.db, configPath, f.home);
+
+    const target = join(f.home, ".claude", "skills", "deploy-runbook", "SKILL.md");
+    expect(existsSync(target)).toBe(true);
+    const row = f.db.prepare("SELECT 1 FROM skill_syncs WHERE skill_entry = ?").get(skill.id);
+    expect(row).toBeDefined();
+  });
+
+  it("runSkillSyncTicket does nothing when skills.native_sync is off", () => {
+    const f = setup();
+    writeSkill(f, "deploy-runbook");
+    const configDir = mkdtempSync(join(tmpdir(), "ctxd-skill-sync-config-"));
+    const configPath = writeConfig(configDir, false);
+
+    runSkillSyncTicket(f.db, configPath, f.home);
+
+    expect(existsSync(join(f.home, ".claude", "skills", "deploy-runbook", "SKILL.md"))).toBe(false);
   });
 });
 

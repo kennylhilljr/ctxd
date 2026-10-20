@@ -18,6 +18,7 @@ import { resolveFlags } from "../config/flags.js";
 import { openDatabase } from "../store/db.js";
 import { readStateFile, withLock } from "../hooks/stateFile.js";
 import { applySessionEndTicket, type SessionEndTicket } from "../hooks/writeMoments.js";
+import { runSkillSyncTicket, type SkillSyncTicket } from "../skills/sync.js";
 
 function resolveFlagsOrUndefined(configPath: string): Map<string, boolean> | undefined {
   try {
@@ -35,12 +36,16 @@ function resolveFlagsOrUndefined(configPath: string): Map<string, boolean> | und
  */
 export async function processTicketFile(ticketPath: string, dataDir: string, configPath: string): Promise<void> {
   await withLock(ticketPath, async () => {
-    const ticket = readStateFile<SessionEndTicket>(ticketPath);
+    const ticket = readStateFile<SessionEndTicket | SkillSyncTicket>(ticketPath);
     if (!ticket) return; // gone, or not valid JSON: nothing to do
     const db = openDatabase(join(dataDir, "ctxd.db"));
     try {
-      const node = db.prepare("SELECT node_id FROM nodes LIMIT 1").get() as { node_id: string } | undefined;
-      if (node) applySessionEndTicket(db, node.node_id, ticket, resolveFlagsOrUndefined(configPath));
+      if (ticket.kind === "skill-sync") {
+        runSkillSyncTicket(db, configPath);
+      } else {
+        const node = db.prepare("SELECT node_id FROM nodes LIMIT 1").get() as { node_id: string } | undefined;
+        if (node) applySessionEndTicket(db, node.node_id, ticket, resolveFlagsOrUndefined(configPath));
+      }
     } finally {
       db.close();
     }

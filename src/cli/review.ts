@@ -9,10 +9,12 @@
  */
 import { parseArgs } from "node:util";
 import { join } from "node:path";
-import { resolveDataDir, resolveHumanWriteContext } from "./common.js";
+import { resolveConfigPath, resolveDataDir, resolveHumanWriteContext } from "./common.js";
 import { openDatabase } from "../store/db.js";
 import { buildReviewReport, addRule, listRules, removeRule, resolveEntry, type ReviewReport } from "../store/review.js";
 import { CtxdError } from "../core/errors.js";
+import { isFlagOn } from "../config/flags.js";
+import { scheduleSkillSync } from "../skills/sync.js";
 
 function printReport(report: ReviewReport): void {
   const counts = [
@@ -65,7 +67,7 @@ function printReport(report: ReviewReport): void {
   }
 }
 
-export function run(argv: string[]): number {
+export async function run(argv: string[]): Promise<number> {
   const { values } = parseArgs({
     args: argv,
     options: {
@@ -92,6 +94,10 @@ export function run(argv: string[]): number {
     if (values.approve) {
       const result = resolveEntry(ctx, values.approve);
       console.log(`ctxd review: ${result.ref} -> ${result.status}`);
+      // W5.4: an approved skill schedules a sync through the detached worker, never run inline here.
+      if (result.kind === "skill" && isFlagOn(ctx.flags, "skills.native_sync")) {
+        await scheduleSkillSync(dataDir, resolveConfigPath({ configPath: values.config }));
+      }
       return 0;
     }
 

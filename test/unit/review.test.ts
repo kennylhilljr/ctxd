@@ -168,6 +168,7 @@ describe("resolveEntry (ctxd review --approve, human only)", () => {
     };
     const resolved = resolveEntry(wctx(f, f.humanId), result.ref);
     expect(resolved.status).toBe("active");
+    expect(resolved.kind).toBe("decision"); // W5.4: callers (ctxd review --approve) use this to decide whether to schedule a skill sync
   });
 
   it("records approved_by/approved_hlc as the human who approved (W5.1)", () => {

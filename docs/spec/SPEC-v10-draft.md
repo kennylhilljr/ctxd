@@ -27,3 +27,12 @@ Fixes a bug against Spec v9's own 11.2: "With `query: '*'` and a time filter, re
 
 - List mode (`query: "*"`) now lists strictly by time in both `importance` flag states: every list-mode row gets `_score = 0`, so the final stable sort leaves the SQL's own time-descending order alone.
 - The scope fan-out multipliers (0.9/0.8/1.0, 11.2) and the flagged-entry penalty are relevance adjustments; they apply only to scored (non-`"*"`) search, never to list mode.
+
+### W5.4 Automatic skill sync
+
+Implements the deferred half of 12.2: previously, writing or approving a skill never updated the client skill folder until the next manual `ctxd skills sync`.
+
+- A write to a skill entry (`context_write`), and an approval of a proposed skill (`ctxd review --approve`), now schedule a sync when `skills.native_sync` is on, through the same ticket-plus-detached-worker mechanism SessionEnd uses (9.7): a `skill-sync` ticket under `sessions/`, picked up by `ctxd worker` or, if left behind, the next crash sweep.
+- The actual folder write never runs inline in the write path or inside a hook's time budget; disk I/O for every configured client has no place on the critical path of an unrelated tool call.
+- The trigger fires on the entry's kind alone, not on its resulting status: scheduling a sync for a write that leaves the skill `proposed` is harmless, since the sync itself only ever selects `active` skills.
+- A no-op, not an error, if `skills.native_sync` has been turned off by the time the worker actually runs.

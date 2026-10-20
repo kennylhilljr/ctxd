@@ -224,7 +224,7 @@ function nextOriginSeq(db: Database.Database, nodeId: string): number {
 }
 
 /** `ctxd review --approve <ref>` (human only): moves a proposed or conflicted entry to active. */
-export function resolveEntry(ctx: WriteContext, ref: string): { ref: string; status: string } {
+export function resolveEntry(ctx: WriteContext, ref: string): { ref: string; status: string; kind: string } {
   const { db } = ctx;
   const client = loadClient(db, ctx.clientId);
   if (!client) throw new CtxdError("UNAUTHORIZED", "Unknown or revoked client");
@@ -232,8 +232,8 @@ export function resolveEntry(ctx: WriteContext, ref: string): { ref: string; sta
 
   const parsed = parseRef(ref);
   const id = parsed ? parsed.id : ref;
-  const row = db.prepare("SELECT entry_id, scope_id, status, status_rev FROM entries WHERE entry_id = ?").get(id) as
-    | { entry_id: string; scope_id: string; status: string; status_rev: string }
+  const row = db.prepare("SELECT entry_id, scope_id, kind, status, status_rev FROM entries WHERE entry_id = ?").get(id) as
+    | { entry_id: string; scope_id: string; kind: string; status: string; status_rev: string }
     | undefined;
   if (!row) throw new CtxdError("NOT_FOUND", `Entry not found: ${ref}`, {}, "ref");
   if (row.status !== "proposed" && row.status !== "conflicted") {
@@ -254,7 +254,7 @@ export function resolveEntry(ctx: WriteContext, ref: string): { ref: string; sta
   })();
 
   const updated = db.prepare("SELECT status FROM entries WHERE entry_id = ?").get(row.entry_id) as { status: string };
-  return { ref, status: updated.status };
+  return { ref, status: updated.status, kind: row.kind };
 }
 
 function loadRules(db: Database.Database, scopeId: string): ReviewRule[] {
