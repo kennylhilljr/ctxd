@@ -44,3 +44,7 @@ Closes open issue 16 (12.2): Codex's personal skills folder is `~/.agents/skills
 A deprecated `$CODEX_HOME/skills` fallback is also still scanned by Codex itself for backward compatibility; ctxd writes only to the current location.
 
 `ctxd skills sync --client codex` and `ctxd skills import --from codex` both now work; `clientSkillsDir("codex", ...)` no longer returns null. See [PRD-skills-v2.md](../prd/components/PRD-skills-v2.md).
+
+### W5 accepted limitation: PreCompact's phase and summary
+
+No work, by design: PreCompact still writes only the mechanical checkpoint file (branch, HEAD, changed files). Recording "phase and last request summary from the hook input" (9.2) has no reliable source, since neither Claude Code's nor Codex's documented PreCompact payload carries one, only `session_id`/`cwd`/`trigger`. Revisit only if a client adds such a field.
