@@ -9,6 +9,7 @@ import { isoWeek } from "../../src/journal/time.js";
 import { newId } from "../../src/core/ids.js";
 import { openDatabase } from "../../src/store/db.js";
 import { writeEntry, type WriteContext } from "../../src/store/write.js";
+import { addRule, resolveEntry } from "../../src/store/review.js";
 import { syncSignalsForScope } from "../../src/journal/sync.js";
 import {
   assembleDigest,
@@ -36,6 +37,7 @@ interface Fixture {
   clock: HlcClock;
   nodeId: string;
   humanId: string;
+  agentId: string;
   scopeId: string;
 }
 
@@ -52,11 +54,25 @@ function setup(): Fixture {
     newId(),
     now(),
   );
-  return { db, clock: new HlcClock(nodeId), nodeId, humanId, scopeId };
+  const agentId = newId();
+  db.prepare("INSERT INTO clients (client_id, name, vendor, node_id, token_hash, created_at) VALUES (?, 'agent-a', 'openai', ?, ?, ?)").run(
+    agentId,
+    nodeId,
+    newId(),
+    now(),
+  );
+  db.prepare("INSERT INTO pools (pool_id, name, created_at) VALUES ('pool-dev', 'pool-dev', ?)").run(now());
+  db.prepare("INSERT INTO pool_members (pool_id, principal) VALUES ('pool-dev', ?)").run(`client:${agentId}`);
+  db.prepare("INSERT INTO pool_grants (pool_id, scope_id, level) VALUES ('pool-dev', ?, 'write')").run(scopeId);
+  return { db, clock: new HlcClock(nodeId), nodeId, humanId, agentId, scopeId };
 }
 
 function ctxFor(f: Fixture): WriteContext {
   return { db: f.db, clock: f.clock, nodeId: f.nodeId, clientId: f.humanId };
+}
+
+function agentCtxFor(f: Fixture): WriteContext {
+  return { db: f.db, clock: f.clock, nodeId: f.nodeId, clientId: f.agentId, assumedPools: ["pool-dev"] };
 }
 
 /** Overwrites an entry's created_hlc (and updated_hlc, by default) to a chosen physical time, so tests can place it in or out of a week without waiting. */
@@ -98,17 +114,43 @@ describe("assembleDigest", () => {
     expect(body).toContain("Shipped the thing");
   });
 
-  it("lists a decision made this week by its updated_hlc, since approved_hlc is never set", () => {
+  it("lists a decision made this week by its approved_hlc (review path, W5.1)", () => {
     const f = setup();
     const weekId = isoWeek(Date.now());
     const { from } = isoWeekBounds(weekId);
-    const d = note(f, "decision", "Use Postgres");
-    placeAt(f, d.id, from - 30 * 86_400_000, "created_hlc"); // proposed long ago
-    placeAt(f, d.id, from + 1000, "updated_hlc"); // "approved" (became active) this week
+    const result = writeEntry(agentCtxFor(f), { scope: "notes", kind: "decision", title: "Use Postgres", body: "b", request_id: newId() } as never) as { id: string; ref: string };
+    placeAt(f, result.id, from - 30 * 86_400_000, "created_hlc"); // proposed long ago; approved_hlc (set below, "now") is what should matter
+    resolveEntry(ctxFor(f), result.ref);
 
     const { body } = assembleDigest(f.db, f.scopeId, "notes", weekId);
     expect(body).toContain("Decisions made");
     expect(body).toContain("Use Postgres");
+  });
+
+  it("falls back to created_hlc for a decision with no approval event (direct human write)", () => {
+    const f = setup();
+    const weekId = isoWeek(Date.now());
+    const { from } = isoWeekBounds(weekId);
+    const d = note(f, "decision", "Use SQLite");
+    placeAt(f, d.id, from + 1000);
+
+    const { body } = assembleDigest(f.db, f.scopeId, "notes", weekId);
+    expect(body).toContain("Decisions made");
+    expect(body).toContain("Use SQLite");
+  });
+
+  it("excludes a decision whose approval fell outside the week even though it was created inside it", () => {
+    const f = setup();
+    const weekId = isoWeek(Date.now());
+    const { from } = isoWeekBounds(weekId);
+    addRule(ctxFor(f), "notes", { kind: "decision", client: "agent-a", action: "auto-accept" });
+    const result = writeEntry(agentCtxFor(f), { scope: "notes", kind: "decision", title: "Use MySQL", body: "b", request_id: newId() } as never) as { id: string };
+    // Auto-accepted, so approved_hlc was set at creation; push both outside the target week.
+    placeAt(f, result.id, from - 30 * 86_400_000, "created_hlc");
+    f.db.prepare("UPDATE entries SET approved_hlc = created_hlc WHERE entry_id = ?").run(result.id);
+
+    const { body } = assembleDigest(f.db, f.scopeId, "notes", weekId);
+    expect(body).not.toContain("Use MySQL");
   });
 
   it("lists lessons, preferences and skills added", () => {
