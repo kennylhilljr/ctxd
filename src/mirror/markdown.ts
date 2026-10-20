@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync,
 import { dirname, join, relative, resolve } from "node:path";
 import type Database from "better-sqlite3";
 import { entryPath } from "../fsview/paths.js";
-import { formatRef } from "../model/refs.js";
+import { formatRef, parseRef } from "../model/refs.js";
 import { makeRev, newId, revVersion } from "../core/ids.js";
 import { decodeHlc } from "../core/hlc.js";
 import { nowIso } from "../core/time.js";
@@ -131,6 +131,19 @@ export function exportMarkdown(db: Database.Database, outputDir: string, scopeNa
     written++;
   }
   return { written };
+}
+
+export function confirmArchiveRequest(ctx: WriteContext, ref: string): void {
+  const parsed = parseRef(ref);
+  const entryId = parsed?.id ?? ref;
+  const request = ctx.db.prepare("SELECT entry_id FROM archive_requests WHERE entry_id = ?").get(entryId);
+  if (!request) throw new CtxdError("NOT_FOUND", `Archive request not found: ${ref}`);
+  const scope = ctx.db.prepare(
+    "SELECT s.name FROM entries e JOIN scopes s ON s.scope_id = e.scope_id WHERE e.entry_id = ?",
+  ).get(entryId) as { name: string } | undefined;
+  if (!scope) throw new CtxdError("NOT_FOUND", `Entry not found: ${ref}`);
+  setEntryStatus(ctx, formatRef(scope.name, entryId), "archived");
+  ctx.db.prepare("DELETE FROM archive_requests WHERE entry_id = ?").run(entryId);
 }
 
 function recordConflict(db: Database.Database, dir: string, path: string, row: MarkdownRow, fileRev: string | undefined, reason: string, text: string): void {

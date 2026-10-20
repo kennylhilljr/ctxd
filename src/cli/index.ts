@@ -48,6 +48,7 @@ import { run as runExportCommand } from "./export.js";
 import { run as runMirrorCommand } from "./mirror.js";
 import { run as runImportCommand } from "./import.js";
 import { run as runOpenCommand } from "./open.js";
+import { run as runArchiveRequestCommand } from "./archive-request.js";
 
 /** Each command's parsed-args entry point, added as its milestone lands. */
 const COMMAND_RUNNERS: Record<string, (argv: string[]) => number | Promise<number>> = {
@@ -98,6 +99,7 @@ const COMMAND_RUNNERS: Record<string, (argv: string[]) => number | Promise<numbe
   mirror: runMirrorCommand,
   import: runImportCommand,
   open: runOpenCommand,
+  "archive-request": runArchiveRequestCommand,
 };
 
 const COMMANDS: Record<string, { milestone: string; summary: string }> = {
@@ -140,6 +142,7 @@ const COMMANDS: Record<string, { milestone: string; summary: string }> = {
   grep: { milestone: "M2", summary: "Full-text search within a subtree" },
   open: { milestone: "M6", summary: "Open an entry's mirror file in $EDITOR" },
   mirror: { milestone: "M6", summary: "Start, stop or check the Markdown mirror" },
+  "archive-request": { milestone: "M6", summary: "Confirm a mirror deletion archive request" },
   import: { milestone: "M6", summary: "Import Markdown files as proposed entries" },
   skills: { milestone: "M5", summary: "List, show, sync or import skills" },
   remember: { milestone: "M2", summary: "Record a preference, convention or fact in _me" },

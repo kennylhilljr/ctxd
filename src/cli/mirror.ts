@@ -5,6 +5,7 @@ import { requireFlag, resolveFlags } from "../config/flags.js";
 import { syncMirror } from "../mirror/markdown.js";
 import { openDatabase } from "../store/db.js";
 import { resolveConfigPath, resolveDataDir, resolveHumanWriteContext } from "./common.js";
+import { setFlag } from "./features.js";
 
 export function run(argv: string[]): number {
   const [sub = "status", ...rest] = argv;
@@ -16,7 +17,11 @@ export function run(argv: string[]): number {
   const dir = expandHome(values.dir ?? config.mirror.dir);
   const db = openDatabase(join(dataDir, "ctxd.db"));
   try {
-    if (sub === "stop") { console.log("ctxd mirror: no watcher is running in this process."); return 0; }
+    if (sub === "stop") {
+      const result = setFlag(configPath, "mirror", false);
+      if (result === 0) console.log("ctxd mirror: disabled persistently; reconciliation is stopped.");
+      return result;
+    }
     if (sub === "status") {
       const count = (db.prepare("SELECT COUNT(*) AS n FROM mirror_files").get() as { n: number }).n;
       console.log(`ctxd mirror: ${flags.get("mirror") ? "enabled" : "disabled"}; ${count} tracked file(s); ${dir}`);

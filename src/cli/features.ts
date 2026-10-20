@@ -18,7 +18,7 @@ function printList(configPath: string): void {
   }
 }
 
-function setFlag(configPath: string, name: string, on: boolean): number {
+export function setFlag(configPath: string, name: string, on: boolean): number {
   if (!FLAG_REGISTRY.some((def) => def.name === name)) {
     console.error(`ctxd features: unknown flag "${name}". Run ctxd features to list every flag.`);
     return 1;

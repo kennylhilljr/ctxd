@@ -6,7 +6,7 @@ import { HlcClock } from "../../src/core/hlc.js";
 import { newId } from "../../src/core/ids.js";
 import { openDatabase } from "../../src/store/db.js";
 import { writeEntry, type WriteContext } from "../../src/store/write.js";
-import { exportMarkdown, parseMarkdown, syncMirror } from "../../src/mirror/markdown.js";
+import { confirmArchiveRequest, exportMarkdown, parseMarkdown, syncMirror } from "../../src/mirror/markdown.js";
 
 const scratch: string[] = [];
 afterEach(() => { for (const dir of scratch.splice(0)) rmSync(dir, { recursive: true, force: true }); });
@@ -81,6 +81,11 @@ describe("Markdown export and mirror (Spec v9 section 12.1)", () => {
     expect(result.archiveRequests).toBe(1);
     expect(existsSync(join(f.mirror, state.path))).toBe(true);
     expect((f.db.prepare("SELECT COUNT(*) AS n FROM archive_requests").get() as { n: number }).n).toBe(1);
+    const entryId = (f.db.prepare("SELECT entry_id FROM entries").get() as { entry_id: string }).entry_id;
+    confirmArchiveRequest(f.ctx, entryId);
+    expect(f.db.prepare("SELECT status FROM entries WHERE entry_id = ?").get(entryId)).toEqual({ status: "archived" });
+    expect((f.db.prepare("SELECT COUNT(*) AS n FROM archive_requests").get() as { n: number }).n).toBe(0);
+    expect(f.db.prepare("SELECT op FROM events ORDER BY origin_seq DESC LIMIT 1").get()).toEqual({ op: "status" });
   });
 
   it("creates an entry from a new file in a scope folder", () => {
