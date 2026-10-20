@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -7,6 +7,7 @@ import { openDatabase } from "../../src/store/db.js";
 import { configSchema } from "../../src/config/config.js";
 import { installClaudeCodeHooks, installCodexHooks } from "../../src/cli/install-hooks.js";
 import {
+  checkBackupAge,
   checkBindAddresses,
   checkDatabaseHealth,
   checkFileVault,
@@ -140,6 +141,36 @@ describe("checkPeers", () => {
     expect(result.detail).toContain("down: unreachable");
     db.close();
   });
+
+  it("reports a real last-sync age per peer, from peers.last_synced_at (W3)", async () => {
+    const db = freshDb(tmpDataDir());
+    const syncedAt = new Date(Date.now() - 2 * 3_600_000).toISOString();
+    db.prepare(
+      "INSERT INTO peers (peer_id, name, url, role, incoming_token_hash, created_at, last_synced_at) VALUES (?, 'air', 'https://air.example/sync', 'home', 'h', datetime('now'), ?)",
+    ).run(randomUUID(), syncedAt);
+
+    const result = await checkPeers(db, (async () => new Response("ok")) as typeof fetch, 24);
+    expect(result.ok).toBe(true);
+    expect(result.detail).toMatch(/air: reachable \(last sync 2\.0h ago\)/);
+    db.close();
+  });
+
+  it("warns past the stale threshold, and for a peer that has never synced", async () => {
+    const db = freshDb(tmpDataDir());
+    const longAgo = new Date(Date.now() - 48 * 3_600_000).toISOString();
+    db.prepare(
+      "INSERT INTO peers (peer_id, name, url, role, incoming_token_hash, created_at, last_synced_at) VALUES (?, 'stale-peer', 'https://stale.example/sync', 'home', 'h', ?, ?)",
+    ).run(randomUUID(), longAgo, longAgo);
+    db.prepare(
+      "INSERT INTO peers (peer_id, name, url, role, incoming_token_hash, created_at) VALUES (?, 'never-synced', 'https://never.example/sync', 'home', 'h', ?)",
+    ).run(randomUUID(), longAgo);
+
+    const result = await checkPeers(db, (async () => new Response("ok")) as typeof fetch, 24);
+    expect(result.ok).toBe(false);
+    expect(result.detail).toContain("STALE");
+    expect(result.detail).toContain("never-synced: reachable (never synced, STALE)");
+    db.close();
+  });
 });
 
 describe("checkFileVault", () => {
@@ -202,5 +233,45 @@ describe("checkSemanticSearch (SPEC v8 11.2, user condition: degrade to keyword-
     mkdirSync(join(weightFile, ".."), { recursive: true });
     writeFileSync(weightFile, "marker");
     expect(checkSemanticSearch(config, dataDir).ok).toBe(true);
+  });
+});
+
+describe("checkBackupAge (W4)", () => {
+  it("passes informationally when backups is off", () => {
+    const config = configSchema.parse({ node: { name: "n", role: "home" }, features: { backups: false } });
+    const result = checkBackupAge(tmpDataDir(), config);
+    expect(result.ok).toBe(true);
+    expect(result.detail).toContain("off");
+  });
+
+  it("fails when backups is on but there are no backups yet", () => {
+    const config = configSchema.parse({ node: { name: "n", role: "home" } });
+    const result = checkBackupAge(tmpDataDir(), config);
+    expect(result.ok).toBe(false);
+    expect(result.detail).toContain("no backups yet");
+  });
+
+  it("passes with a fresh backup, using its own file mtime", () => {
+    const config = configSchema.parse({ node: { name: "n", role: "home" } });
+    const dataDir = tmpDataDir();
+    mkdirSync(join(dataDir, "backups"), { recursive: true });
+    writeFileSync(join(dataDir, "backups", "ctxd-2026-01-01T00-00-00-000Z.db.age"), "fake");
+    const result = checkBackupAge(dataDir, config);
+    expect(result.ok).toBe(true);
+    expect(result.detail).toContain("newest backup");
+  });
+
+  it("warns past the stale threshold", () => {
+    const config = configSchema.parse({ node: { name: "n", role: "home" } });
+    const dataDir = tmpDataDir();
+    const backupDir = join(dataDir, "backups");
+    mkdirSync(backupDir, { recursive: true });
+    const path = join(backupDir, "ctxd-2026-01-01T00-00-00-000Z.db.age");
+    writeFileSync(path, "fake");
+    const old = new Date(Date.now() - 48 * 3_600_000);
+    utimesSync(path, old, old);
+    const result = checkBackupAge(dataDir, config, 36);
+    expect(result.ok).toBe(false);
+    expect(result.detail).toContain("stale");
   });
 });

@@ -62,6 +62,7 @@ Commands marked human only are refused for agent clients (access evaluation, [LL
 | `ctxd signals [<scope>]` | Open signals with their age (11.4) |
 | `ctxd stats [--since <age>]` | Response metering (8.5) |
 | `ctxd backup` / `restore <file>` | Backups |
+| `ctxd backup schedule install\|uninstall\|status` | Daily launchd agent that runs `ctxd backup` at `backup.schedule` (12) |
 | `ctxd rebuild` | Rebuild materialized state and FTS from the event log |
 | `ctxd doctor` | Diagnostics |
 | `ctxd install-hooks --client <claude-code\|codex>` | Write the hook and MCP config snippets (with confirmation and a backup of existing files) |
