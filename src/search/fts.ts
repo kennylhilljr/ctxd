@@ -103,6 +103,23 @@ function scopeOfPath(path: string): string {
   throw new CtxdError("VALIDATION", "path must be inside a scope", {}, "path");
 }
 
+/**
+ * FTS5's query string is a small expression language of its own (`-`, `"`, `(`, `)`, `*`, `:`,
+ * `OR`/`AND`/`NOT`...), so passing free text straight to MATCH throws a raw SqliteError the
+ * moment a query contains one of those characters -- found via a real query, "blue-green
+ * deployment rollback", while building the W6 search benchmark's fixtures. Wrapping each
+ * whitespace-separated word in its own quoted phrase (doubling any literal `"` inside it, FTS5's
+ * own escape for a quote within a quoted string) makes every word literal, keeping the same
+ * implicit-AND-of-terms behavior for an ordinary query.
+ */
+function escapeFtsQuery(query: string): string {
+  return query
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) => `"${word.replace(/"/g, '""')}"`)
+    .join(" ");
+}
+
 const RRF_K = 60;
 const RRF_VEC_CANDIDATES = 200;
 
@@ -186,7 +203,7 @@ export async function runSearch(
            FROM entries_fts JOIN entries e ON e.rowid = entries_fts.rowid
            WHERE entries_fts MATCH ? AND e.scope_id IN (${placeholders}) ${kindFilter}`,
         )
-        .all(input.query, ...scopeIds, ...kindArgs) as (EntryRow & { bm25: number })[]);
+        .all(escapeFtsQuery(input.query), ...scopeIds, ...kindArgs) as (EntryRow & { bm25: number })[]);
 
   const rrf = isListMode ? null : await hybridRelevance(ctx, input.query, rows, loadEmbedderFn);
   const scopeIdSet = new Set(scopeIds);

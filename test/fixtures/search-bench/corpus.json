@@ -1,0 +1,1602 @@
+[
+  {
+    "id": "blue-green-sample-app",
+    "topic": "blue-green",
+    "scope": "sample-app",
+    "kind": "note",
+    "title": "Blue-green deployment rollback",
+    "body": "Note: The blue-green deployment keeps the previous release warm so a rollback just flips the router back, with no rebuild and no downtime."
+  },
+  {
+    "id": "blue-green-notes",
+    "topic": "blue-green",
+    "scope": "notes",
+    "kind": "fact",
+    "title": "Blue-green deployment rollback",
+    "body": "Fact: The blue-green deployment keeps the previous release warm so a rollback just flips the router back, with no rebuild and no downtime."
+  },
+  {
+    "id": "blue-green-project-b",
+    "topic": "blue-green",
+    "scope": "project-b",
+    "kind": "lesson",
+    "title": "Blue-green deployment rollback",
+    "body": "Lesson learned: The blue-green deployment keeps the previous release warm so a rollback just flips the router back, with no rebuild and no downtime."
+  },
+  {
+    "id": "blue-green-shared-tools",
+    "topic": "blue-green",
+    "scope": "shared-tools",
+    "kind": "decision",
+    "title": "Blue-green deployment rollback",
+    "body": "Decision: The blue-green deployment keeps the previous release warm so a rollback just flips the router back, with no rebuild and no downtime."
+  },
+  {
+    "id": "blue-green-pool-dev",
+    "topic": "blue-green",
+    "scope": "pool-dev",
+    "kind": "convention",
+    "title": "Blue-green deployment rollback",
+    "body": "Convention: The blue-green deployment keeps the previous release warm so a rollback just flips the router back, with no rebuild and no downtime."
+  },
+  {
+    "id": "blue-green-pool-notes",
+    "topic": "blue-green",
+    "scope": "pool-notes",
+    "kind": "journal",
+    "title": "Blue-green deployment rollback",
+    "body": "Journal: The blue-green deployment keeps the previous release warm so a rollback just flips the router back, with no rebuild and no downtime."
+  },
+  {
+    "id": "blue-green-pool-ops",
+    "topic": "blue-green",
+    "scope": "pool-ops",
+    "kind": "handoff",
+    "title": "Blue-green deployment rollback",
+    "body": "Handoff: The blue-green deployment keeps the previous release warm so a rollback just flips the router back, with no rebuild and no downtime."
+  },
+  {
+    "id": "blue-green-pool-private",
+    "topic": "blue-green",
+    "scope": "pool-private",
+    "kind": "task",
+    "title": "Blue-green deployment rollback",
+    "body": "Task: The blue-green deployment keeps the previous release warm so a rollback just flips the router back, with no rebuild and no downtime."
+  },
+  {
+    "id": "conn-pool-sample-app",
+    "topic": "conn-pool",
+    "scope": "sample-app",
+    "kind": "note",
+    "title": "Database connection pooling",
+    "body": "Note: Connection pool exhaustion happens when every pooled connection is checked out and a new request has nowhere to go; raise the pool size or fix a leak that never returns connections."
+  },
+  {
+    "id": "conn-pool-notes",
+    "topic": "conn-pool",
+    "scope": "notes",
+    "kind": "fact",
+    "title": "Database connection pooling",
+    "body": "Fact: Connection pool exhaustion happens when every pooled connection is checked out and a new request has nowhere to go; raise the pool size or fix a leak that never returns connections."
+  },
+  {
+    "id": "conn-pool-project-b",
+    "topic": "conn-pool",
+    "scope": "project-b",
+    "kind": "lesson",
+    "title": "Database connection pooling",
+    "body": "Lesson learned: Connection pool exhaustion happens when every pooled connection is checked out and a new request has nowhere to go; raise the pool size or fix a leak that never returns connections."
+  },
+  {
+    "id": "conn-pool-shared-tools",
+    "topic": "conn-pool",
+    "scope": "shared-tools",
+    "kind": "decision",
+    "title": "Database connection pooling",
+    "body": "Decision: Connection pool exhaustion happens when every pooled connection is checked out and a new request has nowhere to go; raise the pool size or fix a leak that never returns connections."
+  },
+  {
+    "id": "conn-pool-pool-dev",
+    "topic": "conn-pool",
+    "scope": "pool-dev",
+    "kind": "convention",
+    "title": "Database connection pooling",
+    "body": "Convention: Connection pool exhaustion happens when every pooled connection is checked out and a new request has nowhere to go; raise the pool size or fix a leak that never returns connections."
+  },
+  {
+    "id": "conn-pool-pool-notes",
+    "topic": "conn-pool",
+    "scope": "pool-notes",
+    "kind": "journal",
+    "title": "Database connection pooling",
+    "body": "Journal: Connection pool exhaustion happens when every pooled connection is checked out and a new request has nowhere to go; raise the pool size or fix a leak that never returns connections."
+  },
+  {
+    "id": "conn-pool-pool-ops",
+    "topic": "conn-pool",
+    "scope": "pool-ops",
+    "kind": "handoff",
+    "title": "Database connection pooling",
+    "body": "Handoff: Connection pool exhaustion happens when every pooled connection is checked out and a new request has nowhere to go; raise the pool size or fix a leak that never returns connections."
+  },
+  {
+    "id": "conn-pool-pool-private",
+    "topic": "conn-pool",
+    "scope": "pool-private",
+    "kind": "task",
+    "title": "Database connection pooling",
+    "body": "Task: Connection pool exhaustion happens when every pooled connection is checked out and a new request has nowhere to go; raise the pool size or fix a leak that never returns connections."
+  },
+  {
+    "id": "rate-limit-sample-app",
+    "topic": "rate-limit",
+    "scope": "sample-app",
+    "kind": "note",
+    "title": "Rate limiting API requests",
+    "body": "Note: Rate limit responses return 429 with a Retry-After header once a client exceeds its quota in the current window."
+  },
+  {
+    "id": "rate-limit-notes",
+    "topic": "rate-limit",
+    "scope": "notes",
+    "kind": "fact",
+    "title": "Rate limiting API requests",
+    "body": "Fact: Rate limit responses return 429 with a Retry-After header once a client exceeds its quota in the current window."
+  },
+  {
+    "id": "rate-limit-project-b",
+    "topic": "rate-limit",
+    "scope": "project-b",
+    "kind": "lesson",
+    "title": "Rate limiting API requests",
+    "body": "Lesson learned: Rate limit responses return 429 with a Retry-After header once a client exceeds its quota in the current window."
+  },
+  {
+    "id": "rate-limit-shared-tools",
+    "topic": "rate-limit",
+    "scope": "shared-tools",
+    "kind": "decision",
+    "title": "Rate limiting API requests",
+    "body": "Decision: Rate limit responses return 429 with a Retry-After header once a client exceeds its quota in the current window."
+  },
+  {
+    "id": "rate-limit-pool-dev",
+    "topic": "rate-limit",
+    "scope": "pool-dev",
+    "kind": "convention",
+    "title": "Rate limiting API requests",
+    "body": "Convention: Rate limit responses return 429 with a Retry-After header once a client exceeds its quota in the current window."
+  },
+  {
+    "id": "rate-limit-pool-notes",
+    "topic": "rate-limit",
+    "scope": "pool-notes",
+    "kind": "journal",
+    "title": "Rate limiting API requests",
+    "body": "Journal: Rate limit responses return 429 with a Retry-After header once a client exceeds its quota in the current window."
+  },
+  {
+    "id": "rate-limit-pool-ops",
+    "topic": "rate-limit",
+    "scope": "pool-ops",
+    "kind": "handoff",
+    "title": "Rate limiting API requests",
+    "body": "Handoff: Rate limit responses return 429 with a Retry-After header once a client exceeds its quota in the current window."
+  },
+  {
+    "id": "rate-limit-pool-private",
+    "topic": "rate-limit",
+    "scope": "pool-private",
+    "kind": "task",
+    "title": "Rate limiting API requests",
+    "body": "Task: Rate limit responses return 429 with a Retry-After header once a client exceeds its quota in the current window."
+  },
+  {
+    "id": "secret-rotate-sample-app",
+    "topic": "secret-rotate",
+    "scope": "sample-app",
+    "kind": "note",
+    "title": "Rotating credentials on a schedule",
+    "body": "Note: Rotate API keys quarterly, revoking the previous key only after every service has picked up the new one."
+  },
+  {
+    "id": "secret-rotate-notes",
+    "topic": "secret-rotate",
+    "scope": "notes",
+    "kind": "fact",
+    "title": "Rotating credentials on a schedule",
+    "body": "Fact: Rotate API keys quarterly, revoking the previous key only after every service has picked up the new one."
+  },
+  {
+    "id": "secret-rotate-project-b",
+    "topic": "secret-rotate",
+    "scope": "project-b",
+    "kind": "lesson",
+    "title": "Rotating credentials on a schedule",
+    "body": "Lesson learned: Rotate API keys quarterly, revoking the previous key only after every service has picked up the new one."
+  },
+  {
+    "id": "secret-rotate-shared-tools",
+    "topic": "secret-rotate",
+    "scope": "shared-tools",
+    "kind": "decision",
+    "title": "Rotating credentials on a schedule",
+    "body": "Decision: Rotate API keys quarterly, revoking the previous key only after every service has picked up the new one."
+  },
+  {
+    "id": "secret-rotate-pool-dev",
+    "topic": "secret-rotate",
+    "scope": "pool-dev",
+    "kind": "convention",
+    "title": "Rotating credentials on a schedule",
+    "body": "Convention: Rotate API keys quarterly, revoking the previous key only after every service has picked up the new one."
+  },
+  {
+    "id": "secret-rotate-pool-notes",
+    "topic": "secret-rotate",
+    "scope": "pool-notes",
+    "kind": "journal",
+    "title": "Rotating credentials on a schedule",
+    "body": "Journal: Rotate API keys quarterly, revoking the previous key only after every service has picked up the new one."
+  },
+  {
+    "id": "secret-rotate-pool-ops",
+    "topic": "secret-rotate",
+    "scope": "pool-ops",
+    "kind": "handoff",
+    "title": "Rotating credentials on a schedule",
+    "body": "Handoff: Rotate API keys quarterly, revoking the previous key only after every service has picked up the new one."
+  },
+  {
+    "id": "secret-rotate-pool-private",
+    "topic": "secret-rotate",
+    "scope": "pool-private",
+    "kind": "task",
+    "title": "Rotating credentials on a schedule",
+    "body": "Task: Rotate API keys quarterly, revoking the previous key only after every service has picked up the new one."
+  },
+  {
+    "id": "flag-rollout-sample-app",
+    "topic": "flag-rollout",
+    "scope": "sample-app",
+    "kind": "note",
+    "title": "Gradual feature flag rollout",
+    "body": "Note: A gradual feature flag rollout ramps a new capability from 1% to 100% of traffic, watching error rates at each step before widening it."
+  },
+  {
+    "id": "flag-rollout-notes",
+    "topic": "flag-rollout",
+    "scope": "notes",
+    "kind": "fact",
+    "title": "Gradual feature flag rollout",
+    "body": "Fact: A gradual feature flag rollout ramps a new capability from 1% to 100% of traffic, watching error rates at each step before widening it."
+  },
+  {
+    "id": "flag-rollout-project-b",
+    "topic": "flag-rollout",
+    "scope": "project-b",
+    "kind": "lesson",
+    "title": "Gradual feature flag rollout",
+    "body": "Lesson learned: A gradual feature flag rollout ramps a new capability from 1% to 100% of traffic, watching error rates at each step before widening it."
+  },
+  {
+    "id": "flag-rollout-shared-tools",
+    "topic": "flag-rollout",
+    "scope": "shared-tools",
+    "kind": "decision",
+    "title": "Gradual feature flag rollout",
+    "body": "Decision: A gradual feature flag rollout ramps a new capability from 1% to 100% of traffic, watching error rates at each step before widening it."
+  },
+  {
+    "id": "flag-rollout-pool-dev",
+    "topic": "flag-rollout",
+    "scope": "pool-dev",
+    "kind": "convention",
+    "title": "Gradual feature flag rollout",
+    "body": "Convention: A gradual feature flag rollout ramps a new capability from 1% to 100% of traffic, watching error rates at each step before widening it."
+  },
+  {
+    "id": "flag-rollout-pool-notes",
+    "topic": "flag-rollout",
+    "scope": "pool-notes",
+    "kind": "journal",
+    "title": "Gradual feature flag rollout",
+    "body": "Journal: A gradual feature flag rollout ramps a new capability from 1% to 100% of traffic, watching error rates at each step before widening it."
+  },
+  {
+    "id": "flag-rollout-pool-ops",
+    "topic": "flag-rollout",
+    "scope": "pool-ops",
+    "kind": "handoff",
+    "title": "Gradual feature flag rollout",
+    "body": "Handoff: A gradual feature flag rollout ramps a new capability from 1% to 100% of traffic, watching error rates at each step before widening it."
+  },
+  {
+    "id": "flag-rollout-pool-private",
+    "topic": "flag-rollout",
+    "scope": "pool-private",
+    "kind": "task",
+    "title": "Gradual feature flag rollout",
+    "body": "Task: A gradual feature flag rollout ramps a new capability from 1% to 100% of traffic, watching error rates at each step before widening it."
+  },
+  {
+    "id": "cache-invalidate-sample-app",
+    "topic": "cache-invalidate",
+    "scope": "sample-app",
+    "kind": "note",
+    "title": "Cache invalidation on write",
+    "body": "Note: Cache invalidation on write clears or updates the cached copy the moment the underlying row changes, so stale data is never served after an edit."
+  },
+  {
+    "id": "cache-invalidate-notes",
+    "topic": "cache-invalidate",
+    "scope": "notes",
+    "kind": "fact",
+    "title": "Cache invalidation on write",
+    "body": "Fact: Cache invalidation on write clears or updates the cached copy the moment the underlying row changes, so stale data is never served after an edit."
+  },
+  {
+    "id": "cache-invalidate-project-b",
+    "topic": "cache-invalidate",
+    "scope": "project-b",
+    "kind": "lesson",
+    "title": "Cache invalidation on write",
+    "body": "Lesson learned: Cache invalidation on write clears or updates the cached copy the moment the underlying row changes, so stale data is never served after an edit."
+  },
+  {
+    "id": "cache-invalidate-shared-tools",
+    "topic": "cache-invalidate",
+    "scope": "shared-tools",
+    "kind": "decision",
+    "title": "Cache invalidation on write",
+    "body": "Decision: Cache invalidation on write clears or updates the cached copy the moment the underlying row changes, so stale data is never served after an edit."
+  },
+  {
+    "id": "cache-invalidate-pool-dev",
+    "topic": "cache-invalidate",
+    "scope": "pool-dev",
+    "kind": "convention",
+    "title": "Cache invalidation on write",
+    "body": "Convention: Cache invalidation on write clears or updates the cached copy the moment the underlying row changes, so stale data is never served after an edit."
+  },
+  {
+    "id": "cache-invalidate-pool-notes",
+    "topic": "cache-invalidate",
+    "scope": "pool-notes",
+    "kind": "journal",
+    "title": "Cache invalidation on write",
+    "body": "Journal: Cache invalidation on write clears or updates the cached copy the moment the underlying row changes, so stale data is never served after an edit."
+  },
+  {
+    "id": "cache-invalidate-pool-ops",
+    "topic": "cache-invalidate",
+    "scope": "pool-ops",
+    "kind": "handoff",
+    "title": "Cache invalidation on write",
+    "body": "Handoff: Cache invalidation on write clears or updates the cached copy the moment the underlying row changes, so stale data is never served after an edit."
+  },
+  {
+    "id": "cache-invalidate-pool-private",
+    "topic": "cache-invalidate",
+    "scope": "pool-private",
+    "kind": "task",
+    "title": "Cache invalidation on write",
+    "body": "Task: Cache invalidation on write clears or updates the cached copy the moment the underlying row changes, so stale data is never served after an edit."
+  },
+  {
+    "id": "structured-log-sample-app",
+    "topic": "structured-log",
+    "scope": "sample-app",
+    "kind": "note",
+    "title": "Structured JSON logging",
+    "body": "Note: Structured JSON logging writes one JSON object per log line with fixed field names, so a log pipeline can filter and aggregate without regex parsing."
+  },
+  {
+    "id": "structured-log-notes",
+    "topic": "structured-log",
+    "scope": "notes",
+    "kind": "fact",
+    "title": "Structured JSON logging",
+    "body": "Fact: Structured JSON logging writes one JSON object per log line with fixed field names, so a log pipeline can filter and aggregate without regex parsing."
+  },
+  {
+    "id": "structured-log-project-b",
+    "topic": "structured-log",
+    "scope": "project-b",
+    "kind": "lesson",
+    "title": "Structured JSON logging",
+    "body": "Lesson learned: Structured JSON logging writes one JSON object per log line with fixed field names, so a log pipeline can filter and aggregate without regex parsing."
+  },
+  {
+    "id": "structured-log-shared-tools",
+    "topic": "structured-log",
+    "scope": "shared-tools",
+    "kind": "decision",
+    "title": "Structured JSON logging",
+    "body": "Decision: Structured JSON logging writes one JSON object per log line with fixed field names, so a log pipeline can filter and aggregate without regex parsing."
+  },
+  {
+    "id": "structured-log-pool-dev",
+    "topic": "structured-log",
+    "scope": "pool-dev",
+    "kind": "convention",
+    "title": "Structured JSON logging",
+    "body": "Convention: Structured JSON logging writes one JSON object per log line with fixed field names, so a log pipeline can filter and aggregate without regex parsing."
+  },
+  {
+    "id": "structured-log-pool-notes",
+    "topic": "structured-log",
+    "scope": "pool-notes",
+    "kind": "journal",
+    "title": "Structured JSON logging",
+    "body": "Journal: Structured JSON logging writes one JSON object per log line with fixed field names, so a log pipeline can filter and aggregate without regex parsing."
+  },
+  {
+    "id": "structured-log-pool-ops",
+    "topic": "structured-log",
+    "scope": "pool-ops",
+    "kind": "handoff",
+    "title": "Structured JSON logging",
+    "body": "Handoff: Structured JSON logging writes one JSON object per log line with fixed field names, so a log pipeline can filter and aggregate without regex parsing."
+  },
+  {
+    "id": "structured-log-pool-private",
+    "topic": "structured-log",
+    "scope": "pool-private",
+    "kind": "task",
+    "title": "Structured JSON logging",
+    "body": "Task: Structured JSON logging writes one JSON object per log line with fixed field names, so a log pipeline can filter and aggregate without regex parsing."
+  },
+  {
+    "id": "flaky-test-sample-app",
+    "topic": "flaky-test",
+    "scope": "sample-app",
+    "kind": "note",
+    "title": "Flaky tests in CI",
+    "body": "Note: A flaky test fails intermittently in CI for reasons unrelated to the code under test, usually timing, shared state, or network calls; quarantine it rather than retrying blindly."
+  },
+  {
+    "id": "flaky-test-notes",
+    "topic": "flaky-test",
+    "scope": "notes",
+    "kind": "fact",
+    "title": "Flaky tests in CI",
+    "body": "Fact: A flaky test fails intermittently in CI for reasons unrelated to the code under test, usually timing, shared state, or network calls; quarantine it rather than retrying blindly."
+  },
+  {
+    "id": "flaky-test-project-b",
+    "topic": "flaky-test",
+    "scope": "project-b",
+    "kind": "lesson",
+    "title": "Flaky tests in CI",
+    "body": "Lesson learned: A flaky test fails intermittently in CI for reasons unrelated to the code under test, usually timing, shared state, or network calls; quarantine it rather than retrying blindly."
+  },
+  {
+    "id": "flaky-test-shared-tools",
+    "topic": "flaky-test",
+    "scope": "shared-tools",
+    "kind": "decision",
+    "title": "Flaky tests in CI",
+    "body": "Decision: A flaky test fails intermittently in CI for reasons unrelated to the code under test, usually timing, shared state, or network calls; quarantine it rather than retrying blindly."
+  },
+  {
+    "id": "flaky-test-pool-dev",
+    "topic": "flaky-test",
+    "scope": "pool-dev",
+    "kind": "convention",
+    "title": "Flaky tests in CI",
+    "body": "Convention: A flaky test fails intermittently in CI for reasons unrelated to the code under test, usually timing, shared state, or network calls; quarantine it rather than retrying blindly."
+  },
+  {
+    "id": "flaky-test-pool-notes",
+    "topic": "flaky-test",
+    "scope": "pool-notes",
+    "kind": "journal",
+    "title": "Flaky tests in CI",
+    "body": "Journal: A flaky test fails intermittently in CI for reasons unrelated to the code under test, usually timing, shared state, or network calls; quarantine it rather than retrying blindly."
+  },
+  {
+    "id": "flaky-test-pool-ops",
+    "topic": "flaky-test",
+    "scope": "pool-ops",
+    "kind": "handoff",
+    "title": "Flaky tests in CI",
+    "body": "Handoff: A flaky test fails intermittently in CI for reasons unrelated to the code under test, usually timing, shared state, or network calls; quarantine it rather than retrying blindly."
+  },
+  {
+    "id": "flaky-test-pool-private",
+    "topic": "flaky-test",
+    "scope": "pool-private",
+    "kind": "task",
+    "title": "Flaky tests in CI",
+    "body": "Task: A flaky test fails intermittently in CI for reasons unrelated to the code under test, usually timing, shared state, or network calls; quarantine it rather than retrying blindly."
+  },
+  {
+    "id": "pr-checklist-sample-app",
+    "topic": "pr-checklist",
+    "scope": "sample-app",
+    "kind": "note",
+    "title": "Pull request review checklist",
+    "body": "Note: A pull request review checklist covers tests, naming, error handling and whether the diff matches its stated intent before approval."
+  },
+  {
+    "id": "pr-checklist-notes",
+    "topic": "pr-checklist",
+    "scope": "notes",
+    "kind": "fact",
+    "title": "Pull request review checklist",
+    "body": "Fact: A pull request review checklist covers tests, naming, error handling and whether the diff matches its stated intent before approval."
+  },
+  {
+    "id": "pr-checklist-project-b",
+    "topic": "pr-checklist",
+    "scope": "project-b",
+    "kind": "lesson",
+    "title": "Pull request review checklist",
+    "body": "Lesson learned: A pull request review checklist covers tests, naming, error handling and whether the diff matches its stated intent before approval."
+  },
+  {
+    "id": "pr-checklist-shared-tools",
+    "topic": "pr-checklist",
+    "scope": "shared-tools",
+    "kind": "decision",
+    "title": "Pull request review checklist",
+    "body": "Decision: A pull request review checklist covers tests, naming, error handling and whether the diff matches its stated intent before approval."
+  },
+  {
+    "id": "pr-checklist-pool-dev",
+    "topic": "pr-checklist",
+    "scope": "pool-dev",
+    "kind": "convention",
+    "title": "Pull request review checklist",
+    "body": "Convention: A pull request review checklist covers tests, naming, error handling and whether the diff matches its stated intent before approval."
+  },
+  {
+    "id": "pr-checklist-pool-notes",
+    "topic": "pr-checklist",
+    "scope": "pool-notes",
+    "kind": "journal",
+    "title": "Pull request review checklist",
+    "body": "Journal: A pull request review checklist covers tests, naming, error handling and whether the diff matches its stated intent before approval."
+  },
+  {
+    "id": "pr-checklist-pool-ops",
+    "topic": "pr-checklist",
+    "scope": "pool-ops",
+    "kind": "handoff",
+    "title": "Pull request review checklist",
+    "body": "Handoff: A pull request review checklist covers tests, naming, error handling and whether the diff matches its stated intent before approval."
+  },
+  {
+    "id": "pr-checklist-pool-private",
+    "topic": "pr-checklist",
+    "scope": "pool-private",
+    "kind": "task",
+    "title": "Pull request review checklist",
+    "body": "Task: A pull request review checklist covers tests, naming, error handling and whether the diff matches its stated intent before approval."
+  },
+  {
+    "id": "postmortem-sample-app",
+    "topic": "postmortem",
+    "scope": "sample-app",
+    "kind": "note",
+    "title": "Blameless incident postmortem",
+    "body": "Note: A blameless incident postmortem documents the timeline, root cause and action items from an outage without naming who made the mistake."
+  },
+  {
+    "id": "postmortem-notes",
+    "topic": "postmortem",
+    "scope": "notes",
+    "kind": "fact",
+    "title": "Blameless incident postmortem",
+    "body": "Fact: A blameless incident postmortem documents the timeline, root cause and action items from an outage without naming who made the mistake."
+  },
+  {
+    "id": "postmortem-project-b",
+    "topic": "postmortem",
+    "scope": "project-b",
+    "kind": "lesson",
+    "title": "Blameless incident postmortem",
+    "body": "Lesson learned: A blameless incident postmortem documents the timeline, root cause and action items from an outage without naming who made the mistake."
+  },
+  {
+    "id": "postmortem-shared-tools",
+    "topic": "postmortem",
+    "scope": "shared-tools",
+    "kind": "decision",
+    "title": "Blameless incident postmortem",
+    "body": "Decision: A blameless incident postmortem documents the timeline, root cause and action items from an outage without naming who made the mistake."
+  },
+  {
+    "id": "postmortem-pool-dev",
+    "topic": "postmortem",
+    "scope": "pool-dev",
+    "kind": "convention",
+    "title": "Blameless incident postmortem",
+    "body": "Convention: A blameless incident postmortem documents the timeline, root cause and action items from an outage without naming who made the mistake."
+  },
+  {
+    "id": "postmortem-pool-notes",
+    "topic": "postmortem",
+    "scope": "pool-notes",
+    "kind": "journal",
+    "title": "Blameless incident postmortem",
+    "body": "Journal: A blameless incident postmortem documents the timeline, root cause and action items from an outage without naming who made the mistake."
+  },
+  {
+    "id": "postmortem-pool-ops",
+    "topic": "postmortem",
+    "scope": "pool-ops",
+    "kind": "handoff",
+    "title": "Blameless incident postmortem",
+    "body": "Handoff: A blameless incident postmortem documents the timeline, root cause and action items from an outage without naming who made the mistake."
+  },
+  {
+    "id": "postmortem-pool-private",
+    "topic": "postmortem",
+    "scope": "pool-private",
+    "kind": "task",
+    "title": "Blameless incident postmortem",
+    "body": "Task: A blameless incident postmortem documents the timeline, root cause and action items from an outage without naming who made the mistake."
+  },
+  {
+    "id": "zero-downtime-migration-sample-app",
+    "topic": "zero-downtime-migration",
+    "scope": "sample-app",
+    "kind": "note",
+    "title": "Zero downtime schema migration",
+    "body": "Note: A zero downtime schema migration adds the new column as nullable, backfills it in batches, then only later makes it required, so no deploy ever waits on a lock."
+  },
+  {
+    "id": "zero-downtime-migration-notes",
+    "topic": "zero-downtime-migration",
+    "scope": "notes",
+    "kind": "fact",
+    "title": "Zero downtime schema migration",
+    "body": "Fact: A zero downtime schema migration adds the new column as nullable, backfills it in batches, then only later makes it required, so no deploy ever waits on a lock."
+  },
+  {
+    "id": "zero-downtime-migration-project-b",
+    "topic": "zero-downtime-migration",
+    "scope": "project-b",
+    "kind": "lesson",
+    "title": "Zero downtime schema migration",
+    "body": "Lesson learned: A zero downtime schema migration adds the new column as nullable, backfills it in batches, then only later makes it required, so no deploy ever waits on a lock."
+  },
+  {
+    "id": "zero-downtime-migration-shared-tools",
+    "topic": "zero-downtime-migration",
+    "scope": "shared-tools",
+    "kind": "decision",
+    "title": "Zero downtime schema migration",
+    "body": "Decision: A zero downtime schema migration adds the new column as nullable, backfills it in batches, then only later makes it required, so no deploy ever waits on a lock."
+  },
+  {
+    "id": "zero-downtime-migration-pool-dev",
+    "topic": "zero-downtime-migration",
+    "scope": "pool-dev",
+    "kind": "convention",
+    "title": "Zero downtime schema migration",
+    "body": "Convention: A zero downtime schema migration adds the new column as nullable, backfills it in batches, then only later makes it required, so no deploy ever waits on a lock."
+  },
+  {
+    "id": "zero-downtime-migration-pool-notes",
+    "topic": "zero-downtime-migration",
+    "scope": "pool-notes",
+    "kind": "journal",
+    "title": "Zero downtime schema migration",
+    "body": "Journal: A zero downtime schema migration adds the new column as nullable, backfills it in batches, then only later makes it required, so no deploy ever waits on a lock."
+  },
+  {
+    "id": "zero-downtime-migration-pool-ops",
+    "topic": "zero-downtime-migration",
+    "scope": "pool-ops",
+    "kind": "handoff",
+    "title": "Zero downtime schema migration",
+    "body": "Handoff: A zero downtime schema migration adds the new column as nullable, backfills it in batches, then only later makes it required, so no deploy ever waits on a lock."
+  },
+  {
+    "id": "zero-downtime-migration-pool-private",
+    "topic": "zero-downtime-migration",
+    "scope": "pool-private",
+    "kind": "task",
+    "title": "Zero downtime schema migration",
+    "body": "Task: A zero downtime schema migration adds the new column as nullable, backfills it in batches, then only later makes it required, so no deploy ever waits on a lock."
+  },
+  {
+    "id": "dep-upgrade-sample-app",
+    "topic": "dep-upgrade",
+    "scope": "sample-app",
+    "kind": "note",
+    "title": "Upgrading a major dependency",
+    "body": "Note: Upgrading a major dependency version means reading its changelog for breaking changes first, then fixing call sites before touching the lockfile."
+  },
+  {
+    "id": "dep-upgrade-notes",
+    "topic": "dep-upgrade",
+    "scope": "notes",
+    "kind": "fact",
+    "title": "Upgrading a major dependency",
+    "body": "Fact: Upgrading a major dependency version means reading its changelog for breaking changes first, then fixing call sites before touching the lockfile."
+  },
+  {
+    "id": "dep-upgrade-project-b",
+    "topic": "dep-upgrade",
+    "scope": "project-b",
+    "kind": "lesson",
+    "title": "Upgrading a major dependency",
+    "body": "Lesson learned: Upgrading a major dependency version means reading its changelog for breaking changes first, then fixing call sites before touching the lockfile."
+  },
+  {
+    "id": "dep-upgrade-shared-tools",
+    "topic": "dep-upgrade",
+    "scope": "shared-tools",
+    "kind": "decision",
+    "title": "Upgrading a major dependency",
+    "body": "Decision: Upgrading a major dependency version means reading its changelog for breaking changes first, then fixing call sites before touching the lockfile."
+  },
+  {
+    "id": "dep-upgrade-pool-dev",
+    "topic": "dep-upgrade",
+    "scope": "pool-dev",
+    "kind": "convention",
+    "title": "Upgrading a major dependency",
+    "body": "Convention: Upgrading a major dependency version means reading its changelog for breaking changes first, then fixing call sites before touching the lockfile."
+  },
+  {
+    "id": "dep-upgrade-pool-notes",
+    "topic": "dep-upgrade",
+    "scope": "pool-notes",
+    "kind": "journal",
+    "title": "Upgrading a major dependency",
+    "body": "Journal: Upgrading a major dependency version means reading its changelog for breaking changes first, then fixing call sites before touching the lockfile."
+  },
+  {
+    "id": "dep-upgrade-pool-ops",
+    "topic": "dep-upgrade",
+    "scope": "pool-ops",
+    "kind": "handoff",
+    "title": "Upgrading a major dependency",
+    "body": "Handoff: Upgrading a major dependency version means reading its changelog for breaking changes first, then fixing call sites before touching the lockfile."
+  },
+  {
+    "id": "dep-upgrade-pool-private",
+    "topic": "dep-upgrade",
+    "scope": "pool-private",
+    "kind": "task",
+    "title": "Upgrading a major dependency",
+    "body": "Task: Upgrading a major dependency version means reading its changelog for breaking changes first, then fixing call sites before touching the lockfile."
+  },
+  {
+    "id": "alert-fatigue-sample-app",
+    "topic": "alert-fatigue",
+    "scope": "sample-app",
+    "kind": "note",
+    "title": "Alert fatigue from noisy pages",
+    "body": "Note: Alert fatigue sets in when too many low-signal pages fire, so engineers start ignoring real incidents along with the noise; tune thresholds before adding more alerts."
+  },
+  {
+    "id": "alert-fatigue-notes",
+    "topic": "alert-fatigue",
+    "scope": "notes",
+    "kind": "fact",
+    "title": "Alert fatigue from noisy pages",
+    "body": "Fact: Alert fatigue sets in when too many low-signal pages fire, so engineers start ignoring real incidents along with the noise; tune thresholds before adding more alerts."
+  },
+  {
+    "id": "alert-fatigue-project-b",
+    "topic": "alert-fatigue",
+    "scope": "project-b",
+    "kind": "lesson",
+    "title": "Alert fatigue from noisy pages",
+    "body": "Lesson learned: Alert fatigue sets in when too many low-signal pages fire, so engineers start ignoring real incidents along with the noise; tune thresholds before adding more alerts."
+  },
+  {
+    "id": "alert-fatigue-shared-tools",
+    "topic": "alert-fatigue",
+    "scope": "shared-tools",
+    "kind": "decision",
+    "title": "Alert fatigue from noisy pages",
+    "body": "Decision: Alert fatigue sets in when too many low-signal pages fire, so engineers start ignoring real incidents along with the noise; tune thresholds before adding more alerts."
+  },
+  {
+    "id": "alert-fatigue-pool-dev",
+    "topic": "alert-fatigue",
+    "scope": "pool-dev",
+    "kind": "convention",
+    "title": "Alert fatigue from noisy pages",
+    "body": "Convention: Alert fatigue sets in when too many low-signal pages fire, so engineers start ignoring real incidents along with the noise; tune thresholds before adding more alerts."
+  },
+  {
+    "id": "alert-fatigue-pool-notes",
+    "topic": "alert-fatigue",
+    "scope": "pool-notes",
+    "kind": "journal",
+    "title": "Alert fatigue from noisy pages",
+    "body": "Journal: Alert fatigue sets in when too many low-signal pages fire, so engineers start ignoring real incidents along with the noise; tune thresholds before adding more alerts."
+  },
+  {
+    "id": "alert-fatigue-pool-ops",
+    "topic": "alert-fatigue",
+    "scope": "pool-ops",
+    "kind": "handoff",
+    "title": "Alert fatigue from noisy pages",
+    "body": "Handoff: Alert fatigue sets in when too many low-signal pages fire, so engineers start ignoring real incidents along with the noise; tune thresholds before adding more alerts."
+  },
+  {
+    "id": "alert-fatigue-pool-private",
+    "topic": "alert-fatigue",
+    "scope": "pool-private",
+    "kind": "task",
+    "title": "Alert fatigue from noisy pages",
+    "body": "Task: Alert fatigue sets in when too many low-signal pages fire, so engineers start ignoring real incidents along with the noise; tune thresholds before adding more alerts."
+  },
+  {
+    "id": "load-test-sample-app",
+    "topic": "load-test",
+    "scope": "sample-app",
+    "kind": "note",
+    "title": "Load testing throughput and latency",
+    "body": "Note: A load test ramps simulated traffic to find the throughput and latency ceiling before real users do, and the point where error rate starts climbing."
+  },
+  {
+    "id": "load-test-notes",
+    "topic": "load-test",
+    "scope": "notes",
+    "kind": "fact",
+    "title": "Load testing throughput and latency",
+    "body": "Fact: A load test ramps simulated traffic to find the throughput and latency ceiling before real users do, and the point where error rate starts climbing."
+  },
+  {
+    "id": "load-test-project-b",
+    "topic": "load-test",
+    "scope": "project-b",
+    "kind": "lesson",
+    "title": "Load testing throughput and latency",
+    "body": "Lesson learned: A load test ramps simulated traffic to find the throughput and latency ceiling before real users do, and the point where error rate starts climbing."
+  },
+  {
+    "id": "load-test-shared-tools",
+    "topic": "load-test",
+    "scope": "shared-tools",
+    "kind": "decision",
+    "title": "Load testing throughput and latency",
+    "body": "Decision: A load test ramps simulated traffic to find the throughput and latency ceiling before real users do, and the point where error rate starts climbing."
+  },
+  {
+    "id": "load-test-pool-dev",
+    "topic": "load-test",
+    "scope": "pool-dev",
+    "kind": "convention",
+    "title": "Load testing throughput and latency",
+    "body": "Convention: A load test ramps simulated traffic to find the throughput and latency ceiling before real users do, and the point where error rate starts climbing."
+  },
+  {
+    "id": "load-test-pool-notes",
+    "topic": "load-test",
+    "scope": "pool-notes",
+    "kind": "journal",
+    "title": "Load testing throughput and latency",
+    "body": "Journal: A load test ramps simulated traffic to find the throughput and latency ceiling before real users do, and the point where error rate starts climbing."
+  },
+  {
+    "id": "load-test-pool-ops",
+    "topic": "load-test",
+    "scope": "pool-ops",
+    "kind": "handoff",
+    "title": "Load testing throughput and latency",
+    "body": "Handoff: A load test ramps simulated traffic to find the throughput and latency ceiling before real users do, and the point where error rate starts climbing."
+  },
+  {
+    "id": "load-test-pool-private",
+    "topic": "load-test",
+    "scope": "pool-private",
+    "kind": "task",
+    "title": "Load testing throughput and latency",
+    "body": "Task: A load test ramps simulated traffic to find the throughput and latency ceiling before real users do, and the point where error rate starts climbing."
+  },
+  {
+    "id": "backup-restore-sample-app",
+    "topic": "backup-restore",
+    "scope": "sample-app",
+    "kind": "note",
+    "title": "Encrypted backup and restore",
+    "body": "Note: An encrypted backup is useless without a tested restore path; practice decrypting and restoring it on a schedule, not only when a real outage forces the question."
+  },
+  {
+    "id": "backup-restore-notes",
+    "topic": "backup-restore",
+    "scope": "notes",
+    "kind": "fact",
+    "title": "Encrypted backup and restore",
+    "body": "Fact: An encrypted backup is useless without a tested restore path; practice decrypting and restoring it on a schedule, not only when a real outage forces the question."
+  },
+  {
+    "id": "backup-restore-project-b",
+    "topic": "backup-restore",
+    "scope": "project-b",
+    "kind": "lesson",
+    "title": "Encrypted backup and restore",
+    "body": "Lesson learned: An encrypted backup is useless without a tested restore path; practice decrypting and restoring it on a schedule, not only when a real outage forces the question."
+  },
+  {
+    "id": "backup-restore-shared-tools",
+    "topic": "backup-restore",
+    "scope": "shared-tools",
+    "kind": "decision",
+    "title": "Encrypted backup and restore",
+    "body": "Decision: An encrypted backup is useless without a tested restore path; practice decrypting and restoring it on a schedule, not only when a real outage forces the question."
+  },
+  {
+    "id": "backup-restore-pool-dev",
+    "topic": "backup-restore",
+    "scope": "pool-dev",
+    "kind": "convention",
+    "title": "Encrypted backup and restore",
+    "body": "Convention: An encrypted backup is useless without a tested restore path; practice decrypting and restoring it on a schedule, not only when a real outage forces the question."
+  },
+  {
+    "id": "backup-restore-pool-notes",
+    "topic": "backup-restore",
+    "scope": "pool-notes",
+    "kind": "journal",
+    "title": "Encrypted backup and restore",
+    "body": "Journal: An encrypted backup is useless without a tested restore path; practice decrypting and restoring it on a schedule, not only when a real outage forces the question."
+  },
+  {
+    "id": "backup-restore-pool-ops",
+    "topic": "backup-restore",
+    "scope": "pool-ops",
+    "kind": "handoff",
+    "title": "Encrypted backup and restore",
+    "body": "Handoff: An encrypted backup is useless without a tested restore path; practice decrypting and restoring it on a schedule, not only when a real outage forces the question."
+  },
+  {
+    "id": "backup-restore-pool-private",
+    "topic": "backup-restore",
+    "scope": "pool-private",
+    "kind": "task",
+    "title": "Encrypted backup and restore",
+    "body": "Task: An encrypted backup is useless without a tested restore path; practice decrypting and restoring it on a schedule, not only when a real outage forces the question."
+  },
+  {
+    "id": "short-lived-token-sample-app",
+    "topic": "short-lived-token",
+    "scope": "sample-app",
+    "kind": "note",
+    "title": "Short-lived access tokens",
+    "body": "Note: Short-lived access tokens expire in minutes, not days, so a stolen token is only useful to an attacker for a narrow window."
+  },
+  {
+    "id": "short-lived-token-notes",
+    "topic": "short-lived-token",
+    "scope": "notes",
+    "kind": "fact",
+    "title": "Short-lived access tokens",
+    "body": "Fact: Short-lived access tokens expire in minutes, not days, so a stolen token is only useful to an attacker for a narrow window."
+  },
+  {
+    "id": "short-lived-token-project-b",
+    "topic": "short-lived-token",
+    "scope": "project-b",
+    "kind": "lesson",
+    "title": "Short-lived access tokens",
+    "body": "Lesson learned: Short-lived access tokens expire in minutes, not days, so a stolen token is only useful to an attacker for a narrow window."
+  },
+  {
+    "id": "short-lived-token-shared-tools",
+    "topic": "short-lived-token",
+    "scope": "shared-tools",
+    "kind": "decision",
+    "title": "Short-lived access tokens",
+    "body": "Decision: Short-lived access tokens expire in minutes, not days, so a stolen token is only useful to an attacker for a narrow window."
+  },
+  {
+    "id": "short-lived-token-pool-dev",
+    "topic": "short-lived-token",
+    "scope": "pool-dev",
+    "kind": "convention",
+    "title": "Short-lived access tokens",
+    "body": "Convention: Short-lived access tokens expire in minutes, not days, so a stolen token is only useful to an attacker for a narrow window."
+  },
+  {
+    "id": "short-lived-token-pool-notes",
+    "topic": "short-lived-token",
+    "scope": "pool-notes",
+    "kind": "journal",
+    "title": "Short-lived access tokens",
+    "body": "Journal: Short-lived access tokens expire in minutes, not days, so a stolen token is only useful to an attacker for a narrow window."
+  },
+  {
+    "id": "short-lived-token-pool-ops",
+    "topic": "short-lived-token",
+    "scope": "pool-ops",
+    "kind": "handoff",
+    "title": "Short-lived access tokens",
+    "body": "Handoff: Short-lived access tokens expire in minutes, not days, so a stolen token is only useful to an attacker for a narrow window."
+  },
+  {
+    "id": "short-lived-token-pool-private",
+    "topic": "short-lived-token",
+    "scope": "pool-private",
+    "kind": "task",
+    "title": "Short-lived access tokens",
+    "body": "Task: Short-lived access tokens expire in minutes, not days, so a stolen token is only useful to an attacker for a narrow window."
+  },
+  {
+    "id": "onboarding-sample-app",
+    "topic": "onboarding",
+    "scope": "sample-app",
+    "kind": "note",
+    "title": "New engineer onboarding checklist",
+    "body": "Note: A new hire onboarding checklist covers accounts, local setup, a first small pull request, and who to ask when something is unclear."
+  },
+  {
+    "id": "onboarding-notes",
+    "topic": "onboarding",
+    "scope": "notes",
+    "kind": "fact",
+    "title": "New engineer onboarding checklist",
+    "body": "Fact: A new hire onboarding checklist covers accounts, local setup, a first small pull request, and who to ask when something is unclear."
+  },
+  {
+    "id": "onboarding-project-b",
+    "topic": "onboarding",
+    "scope": "project-b",
+    "kind": "lesson",
+    "title": "New engineer onboarding checklist",
+    "body": "Lesson learned: A new hire onboarding checklist covers accounts, local setup, a first small pull request, and who to ask when something is unclear."
+  },
+  {
+    "id": "onboarding-shared-tools",
+    "topic": "onboarding",
+    "scope": "shared-tools",
+    "kind": "decision",
+    "title": "New engineer onboarding checklist",
+    "body": "Decision: A new hire onboarding checklist covers accounts, local setup, a first small pull request, and who to ask when something is unclear."
+  },
+  {
+    "id": "onboarding-pool-dev",
+    "topic": "onboarding",
+    "scope": "pool-dev",
+    "kind": "convention",
+    "title": "New engineer onboarding checklist",
+    "body": "Convention: A new hire onboarding checklist covers accounts, local setup, a first small pull request, and who to ask when something is unclear."
+  },
+  {
+    "id": "onboarding-pool-notes",
+    "topic": "onboarding",
+    "scope": "pool-notes",
+    "kind": "journal",
+    "title": "New engineer onboarding checklist",
+    "body": "Journal: A new hire onboarding checklist covers accounts, local setup, a first small pull request, and who to ask when something is unclear."
+  },
+  {
+    "id": "onboarding-pool-ops",
+    "topic": "onboarding",
+    "scope": "pool-ops",
+    "kind": "handoff",
+    "title": "New engineer onboarding checklist",
+    "body": "Handoff: A new hire onboarding checklist covers accounts, local setup, a first small pull request, and who to ask when something is unclear."
+  },
+  {
+    "id": "onboarding-pool-private",
+    "topic": "onboarding",
+    "scope": "pool-private",
+    "kind": "task",
+    "title": "New engineer onboarding checklist",
+    "body": "Task: A new hire onboarding checklist covers accounts, local setup, a first small pull request, and who to ask when something is unclear."
+  },
+  {
+    "id": "api-versioning-sample-app",
+    "topic": "api-versioning",
+    "scope": "sample-app",
+    "kind": "note",
+    "title": "API versioning for breaking changes",
+    "body": "Note: A breaking API version change ships alongside the old one under a new version prefix, so existing callers keep working until they migrate on their own schedule."
+  },
+  {
+    "id": "api-versioning-notes",
+    "topic": "api-versioning",
+    "scope": "notes",
+    "kind": "fact",
+    "title": "API versioning for breaking changes",
+    "body": "Fact: A breaking API version change ships alongside the old one under a new version prefix, so existing callers keep working until they migrate on their own schedule."
+  },
+  {
+    "id": "api-versioning-project-b",
+    "topic": "api-versioning",
+    "scope": "project-b",
+    "kind": "lesson",
+    "title": "API versioning for breaking changes",
+    "body": "Lesson learned: A breaking API version change ships alongside the old one under a new version prefix, so existing callers keep working until they migrate on their own schedule."
+  },
+  {
+    "id": "api-versioning-shared-tools",
+    "topic": "api-versioning",
+    "scope": "shared-tools",
+    "kind": "decision",
+    "title": "API versioning for breaking changes",
+    "body": "Decision: A breaking API version change ships alongside the old one under a new version prefix, so existing callers keep working until they migrate on their own schedule."
+  },
+  {
+    "id": "api-versioning-pool-dev",
+    "topic": "api-versioning",
+    "scope": "pool-dev",
+    "kind": "convention",
+    "title": "API versioning for breaking changes",
+    "body": "Convention: A breaking API version change ships alongside the old one under a new version prefix, so existing callers keep working until they migrate on their own schedule."
+  },
+  {
+    "id": "api-versioning-pool-notes",
+    "topic": "api-versioning",
+    "scope": "pool-notes",
+    "kind": "journal",
+    "title": "API versioning for breaking changes",
+    "body": "Journal: A breaking API version change ships alongside the old one under a new version prefix, so existing callers keep working until they migrate on their own schedule."
+  },
+  {
+    "id": "api-versioning-pool-ops",
+    "topic": "api-versioning",
+    "scope": "pool-ops",
+    "kind": "handoff",
+    "title": "API versioning for breaking changes",
+    "body": "Handoff: A breaking API version change ships alongside the old one under a new version prefix, so existing callers keep working until they migrate on their own schedule."
+  },
+  {
+    "id": "api-versioning-pool-private",
+    "topic": "api-versioning",
+    "scope": "pool-private",
+    "kind": "task",
+    "title": "API versioning for breaking changes",
+    "body": "Task: A breaking API version change ships alongside the old one under a new version prefix, so existing callers keep working until they migrate on their own schedule."
+  },
+  {
+    "id": "backoff-retry-sample-app",
+    "topic": "backoff-retry",
+    "scope": "sample-app",
+    "kind": "note",
+    "title": "Exponential backoff on retry",
+    "body": "Note: Exponential backoff doubles the wait between retries after a failure, with jitter added so many clients don't retry in lockstep and overwhelm the service again."
+  },
+  {
+    "id": "backoff-retry-notes",
+    "topic": "backoff-retry",
+    "scope": "notes",
+    "kind": "fact",
+    "title": "Exponential backoff on retry",
+    "body": "Fact: Exponential backoff doubles the wait between retries after a failure, with jitter added so many clients don't retry in lockstep and overwhelm the service again."
+  },
+  {
+    "id": "backoff-retry-project-b",
+    "topic": "backoff-retry",
+    "scope": "project-b",
+    "kind": "lesson",
+    "title": "Exponential backoff on retry",
+    "body": "Lesson learned: Exponential backoff doubles the wait between retries after a failure, with jitter added so many clients don't retry in lockstep and overwhelm the service again."
+  },
+  {
+    "id": "backoff-retry-shared-tools",
+    "topic": "backoff-retry",
+    "scope": "shared-tools",
+    "kind": "decision",
+    "title": "Exponential backoff on retry",
+    "body": "Decision: Exponential backoff doubles the wait between retries after a failure, with jitter added so many clients don't retry in lockstep and overwhelm the service again."
+  },
+  {
+    "id": "backoff-retry-pool-dev",
+    "topic": "backoff-retry",
+    "scope": "pool-dev",
+    "kind": "convention",
+    "title": "Exponential backoff on retry",
+    "body": "Convention: Exponential backoff doubles the wait between retries after a failure, with jitter added so many clients don't retry in lockstep and overwhelm the service again."
+  },
+  {
+    "id": "backoff-retry-pool-notes",
+    "topic": "backoff-retry",
+    "scope": "pool-notes",
+    "kind": "journal",
+    "title": "Exponential backoff on retry",
+    "body": "Journal: Exponential backoff doubles the wait between retries after a failure, with jitter added so many clients don't retry in lockstep and overwhelm the service again."
+  },
+  {
+    "id": "backoff-retry-pool-ops",
+    "topic": "backoff-retry",
+    "scope": "pool-ops",
+    "kind": "handoff",
+    "title": "Exponential backoff on retry",
+    "body": "Handoff: Exponential backoff doubles the wait between retries after a failure, with jitter added so many clients don't retry in lockstep and overwhelm the service again."
+  },
+  {
+    "id": "backoff-retry-pool-private",
+    "topic": "backoff-retry",
+    "scope": "pool-private",
+    "kind": "task",
+    "title": "Exponential backoff on retry",
+    "body": "Task: Exponential backoff doubles the wait between retries after a failure, with jitter added so many clients don't retry in lockstep and overwhelm the service again."
+  },
+  {
+    "id": "search-ranking-sample-app",
+    "topic": "search-ranking",
+    "scope": "sample-app",
+    "kind": "note",
+    "title": "Tuning search relevance ranking",
+    "body": "Note: Tuning search relevance ranking means adjusting how keyword match, recency and importance are weighted so the most useful result lands near the top, not just any match."
+  },
+  {
+    "id": "search-ranking-notes",
+    "topic": "search-ranking",
+    "scope": "notes",
+    "kind": "fact",
+    "title": "Tuning search relevance ranking",
+    "body": "Fact: Tuning search relevance ranking means adjusting how keyword match, recency and importance are weighted so the most useful result lands near the top, not just any match."
+  },
+  {
+    "id": "search-ranking-project-b",
+    "topic": "search-ranking",
+    "scope": "project-b",
+    "kind": "lesson",
+    "title": "Tuning search relevance ranking",
+    "body": "Lesson learned: Tuning search relevance ranking means adjusting how keyword match, recency and importance are weighted so the most useful result lands near the top, not just any match."
+  },
+  {
+    "id": "search-ranking-shared-tools",
+    "topic": "search-ranking",
+    "scope": "shared-tools",
+    "kind": "decision",
+    "title": "Tuning search relevance ranking",
+    "body": "Decision: Tuning search relevance ranking means adjusting how keyword match, recency and importance are weighted so the most useful result lands near the top, not just any match."
+  },
+  {
+    "id": "search-ranking-pool-dev",
+    "topic": "search-ranking",
+    "scope": "pool-dev",
+    "kind": "convention",
+    "title": "Tuning search relevance ranking",
+    "body": "Convention: Tuning search relevance ranking means adjusting how keyword match, recency and importance are weighted so the most useful result lands near the top, not just any match."
+  },
+  {
+    "id": "search-ranking-pool-notes",
+    "topic": "search-ranking",
+    "scope": "pool-notes",
+    "kind": "journal",
+    "title": "Tuning search relevance ranking",
+    "body": "Journal: Tuning search relevance ranking means adjusting how keyword match, recency and importance are weighted so the most useful result lands near the top, not just any match."
+  },
+  {
+    "id": "search-ranking-pool-ops",
+    "topic": "search-ranking",
+    "scope": "pool-ops",
+    "kind": "handoff",
+    "title": "Tuning search relevance ranking",
+    "body": "Handoff: Tuning search relevance ranking means adjusting how keyword match, recency and importance are weighted so the most useful result lands near the top, not just any match."
+  },
+  {
+    "id": "search-ranking-pool-private",
+    "topic": "search-ranking",
+    "scope": "pool-private",
+    "kind": "task",
+    "title": "Tuning search relevance ranking",
+    "body": "Task: Tuning search relevance ranking means adjusting how keyword match, recency and importance are weighted so the most useful result lands near the top, not just any match."
+  },
+  {
+    "id": "missing-index-sample-app",
+    "topic": "missing-index",
+    "scope": "sample-app",
+    "kind": "note",
+    "title": "Slow queries from a missing index",
+    "body": "Note: A slow query with no index behind it scans every row; add the index on the filtered column and the same query returns in milliseconds."
+  },
+  {
+    "id": "missing-index-notes",
+    "topic": "missing-index",
+    "scope": "notes",
+    "kind": "fact",
+    "title": "Slow queries from a missing index",
+    "body": "Fact: A slow query with no index behind it scans every row; add the index on the filtered column and the same query returns in milliseconds."
+  },
+  {
+    "id": "missing-index-project-b",
+    "topic": "missing-index",
+    "scope": "project-b",
+    "kind": "lesson",
+    "title": "Slow queries from a missing index",
+    "body": "Lesson learned: A slow query with no index behind it scans every row; add the index on the filtered column and the same query returns in milliseconds."
+  },
+  {
+    "id": "missing-index-shared-tools",
+    "topic": "missing-index",
+    "scope": "shared-tools",
+    "kind": "decision",
+    "title": "Slow queries from a missing index",
+    "body": "Decision: A slow query with no index behind it scans every row; add the index on the filtered column and the same query returns in milliseconds."
+  },
+  {
+    "id": "missing-index-pool-dev",
+    "topic": "missing-index",
+    "scope": "pool-dev",
+    "kind": "convention",
+    "title": "Slow queries from a missing index",
+    "body": "Convention: A slow query with no index behind it scans every row; add the index on the filtered column and the same query returns in milliseconds."
+  },
+  {
+    "id": "missing-index-pool-notes",
+    "topic": "missing-index",
+    "scope": "pool-notes",
+    "kind": "journal",
+    "title": "Slow queries from a missing index",
+    "body": "Journal: A slow query with no index behind it scans every row; add the index on the filtered column and the same query returns in milliseconds."
+  },
+  {
+    "id": "missing-index-pool-ops",
+    "topic": "missing-index",
+    "scope": "pool-ops",
+    "kind": "handoff",
+    "title": "Slow queries from a missing index",
+    "body": "Handoff: A slow query with no index behind it scans every row; add the index on the filtered column and the same query returns in milliseconds."
+  },
+  {
+    "id": "missing-index-pool-private",
+    "topic": "missing-index",
+    "scope": "pool-private",
+    "kind": "task",
+    "title": "Slow queries from a missing index",
+    "body": "Task: A slow query with no index behind it scans every row; add the index on the filtered column and the same query returns in milliseconds."
+  },
+  {
+    "id": "crash-loop-sample-app",
+    "topic": "crash-loop",
+    "scope": "sample-app",
+    "kind": "note",
+    "title": "Container crash loop on restart",
+    "body": "Note: A container crash loop restarts over and over because the process exits immediately on startup; check the startup logs before assuming it is a resource limit."
+  },
+  {
+    "id": "crash-loop-notes",
+    "topic": "crash-loop",
+    "scope": "notes",
+    "kind": "fact",
+    "title": "Container crash loop on restart",
+    "body": "Fact: A container crash loop restarts over and over because the process exits immediately on startup; check the startup logs before assuming it is a resource limit."
+  },
+  {
+    "id": "crash-loop-project-b",
+    "topic": "crash-loop",
+    "scope": "project-b",
+    "kind": "lesson",
+    "title": "Container crash loop on restart",
+    "body": "Lesson learned: A container crash loop restarts over and over because the process exits immediately on startup; check the startup logs before assuming it is a resource limit."
+  },
+  {
+    "id": "crash-loop-shared-tools",
+    "topic": "crash-loop",
+    "scope": "shared-tools",
+    "kind": "decision",
+    "title": "Container crash loop on restart",
+    "body": "Decision: A container crash loop restarts over and over because the process exits immediately on startup; check the startup logs before assuming it is a resource limit."
+  },
+  {
+    "id": "crash-loop-pool-dev",
+    "topic": "crash-loop",
+    "scope": "pool-dev",
+    "kind": "convention",
+    "title": "Container crash loop on restart",
+    "body": "Convention: A container crash loop restarts over and over because the process exits immediately on startup; check the startup logs before assuming it is a resource limit."
+  },
+  {
+    "id": "crash-loop-pool-notes",
+    "topic": "crash-loop",
+    "scope": "pool-notes",
+    "kind": "journal",
+    "title": "Container crash loop on restart",
+    "body": "Journal: A container crash loop restarts over and over because the process exits immediately on startup; check the startup logs before assuming it is a resource limit."
+  },
+  {
+    "id": "crash-loop-pool-ops",
+    "topic": "crash-loop",
+    "scope": "pool-ops",
+    "kind": "handoff",
+    "title": "Container crash loop on restart",
+    "body": "Handoff: A container crash loop restarts over and over because the process exits immediately on startup; check the startup logs before assuming it is a resource limit."
+  },
+  {
+    "id": "crash-loop-pool-private",
+    "topic": "crash-loop",
+    "scope": "pool-private",
+    "kind": "task",
+    "title": "Container crash loop on restart",
+    "body": "Task: A container crash loop restarts over and over because the process exits immediately on startup; check the startup logs before assuming it is a resource limit."
+  },
+  {
+    "id": "secret-leak-sample-app",
+    "topic": "secret-leak",
+    "scope": "sample-app",
+    "kind": "note",
+    "title": "Secrets leaked into logs",
+    "body": "Note: A secret leaked into logs usually comes from an exception handler that prints the whole request object; redact known secret fields before any log line is written."
+  },
+  {
+    "id": "secret-leak-notes",
+    "topic": "secret-leak",
+    "scope": "notes",
+    "kind": "fact",
+    "title": "Secrets leaked into logs",
+    "body": "Fact: A secret leaked into logs usually comes from an exception handler that prints the whole request object; redact known secret fields before any log line is written."
+  },
+  {
+    "id": "secret-leak-project-b",
+    "topic": "secret-leak",
+    "scope": "project-b",
+    "kind": "lesson",
+    "title": "Secrets leaked into logs",
+    "body": "Lesson learned: A secret leaked into logs usually comes from an exception handler that prints the whole request object; redact known secret fields before any log line is written."
+  },
+  {
+    "id": "secret-leak-shared-tools",
+    "topic": "secret-leak",
+    "scope": "shared-tools",
+    "kind": "decision",
+    "title": "Secrets leaked into logs",
+    "body": "Decision: A secret leaked into logs usually comes from an exception handler that prints the whole request object; redact known secret fields before any log line is written."
+  },
+  {
+    "id": "secret-leak-pool-dev",
+    "topic": "secret-leak",
+    "scope": "pool-dev",
+    "kind": "convention",
+    "title": "Secrets leaked into logs",
+    "body": "Convention: A secret leaked into logs usually comes from an exception handler that prints the whole request object; redact known secret fields before any log line is written."
+  },
+  {
+    "id": "secret-leak-pool-notes",
+    "topic": "secret-leak",
+    "scope": "pool-notes",
+    "kind": "journal",
+    "title": "Secrets leaked into logs",
+    "body": "Journal: A secret leaked into logs usually comes from an exception handler that prints the whole request object; redact known secret fields before any log line is written."
+  },
+  {
+    "id": "secret-leak-pool-ops",
+    "topic": "secret-leak",
+    "scope": "pool-ops",
+    "kind": "handoff",
+    "title": "Secrets leaked into logs",
+    "body": "Handoff: A secret leaked into logs usually comes from an exception handler that prints the whole request object; redact known secret fields before any log line is written."
+  },
+  {
+    "id": "secret-leak-pool-private",
+    "topic": "secret-leak",
+    "scope": "pool-private",
+    "kind": "task",
+    "title": "Secrets leaked into logs",
+    "body": "Task: A secret leaked into logs usually comes from an exception handler that prints the whole request object; redact known secret fields before any log line is written."
+  },
+  {
+    "id": "stale-docs-sample-app",
+    "topic": "stale-docs",
+    "scope": "sample-app",
+    "kind": "note",
+    "title": "Stale documentation",
+    "body": "Note: Stale documentation describes a flow that no longer matches the code; the fix is linking docs to the code they describe so a change forces a review of both."
+  },
+  {
+    "id": "stale-docs-notes",
+    "topic": "stale-docs",
+    "scope": "notes",
+    "kind": "fact",
+    "title": "Stale documentation",
+    "body": "Fact: Stale documentation describes a flow that no longer matches the code; the fix is linking docs to the code they describe so a change forces a review of both."
+  },
+  {
+    "id": "stale-docs-project-b",
+    "topic": "stale-docs",
+    "scope": "project-b",
+    "kind": "lesson",
+    "title": "Stale documentation",
+    "body": "Lesson learned: Stale documentation describes a flow that no longer matches the code; the fix is linking docs to the code they describe so a change forces a review of both."
+  },
+  {
+    "id": "stale-docs-shared-tools",
+    "topic": "stale-docs",
+    "scope": "shared-tools",
+    "kind": "decision",
+    "title": "Stale documentation",
+    "body": "Decision: Stale documentation describes a flow that no longer matches the code; the fix is linking docs to the code they describe so a change forces a review of both."
+  },
+  {
+    "id": "stale-docs-pool-dev",
+    "topic": "stale-docs",
+    "scope": "pool-dev",
+    "kind": "convention",
+    "title": "Stale documentation",
+    "body": "Convention: Stale documentation describes a flow that no longer matches the code; the fix is linking docs to the code they describe so a change forces a review of both."
+  },
+  {
+    "id": "stale-docs-pool-notes",
+    "topic": "stale-docs",
+    "scope": "pool-notes",
+    "kind": "journal",
+    "title": "Stale documentation",
+    "body": "Journal: Stale documentation describes a flow that no longer matches the code; the fix is linking docs to the code they describe so a change forces a review of both."
+  },
+  {
+    "id": "stale-docs-pool-ops",
+    "topic": "stale-docs",
+    "scope": "pool-ops",
+    "kind": "handoff",
+    "title": "Stale documentation",
+    "body": "Handoff: Stale documentation describes a flow that no longer matches the code; the fix is linking docs to the code they describe so a change forces a review of both."
+  },
+  {
+    "id": "stale-docs-pool-private",
+    "topic": "stale-docs",
+    "scope": "pool-private",
+    "kind": "task",
+    "title": "Stale documentation",
+    "body": "Task: Stale documentation describes a flow that no longer matches the code; the fix is linking docs to the code they describe so a change forces a review of both."
+  },
+  {
+    "id": "cpu-profile-sample-app",
+    "topic": "cpu-profile",
+    "scope": "sample-app",
+    "kind": "note",
+    "title": "CPU profiling a hot path",
+    "body": "Note: CPU profiling a hot path samples where time is actually spent, usually revealing one unexpected function rather than confirming whatever was guessed beforehand."
+  },
+  {
+    "id": "cpu-profile-notes",
+    "topic": "cpu-profile",
+    "scope": "notes",
+    "kind": "fact",
+    "title": "CPU profiling a hot path",
+    "body": "Fact: CPU profiling a hot path samples where time is actually spent, usually revealing one unexpected function rather than confirming whatever was guessed beforehand."
+  },
+  {
+    "id": "cpu-profile-project-b",
+    "topic": "cpu-profile",
+    "scope": "project-b",
+    "kind": "lesson",
+    "title": "CPU profiling a hot path",
+    "body": "Lesson learned: CPU profiling a hot path samples where time is actually spent, usually revealing one unexpected function rather than confirming whatever was guessed beforehand."
+  },
+  {
+    "id": "cpu-profile-shared-tools",
+    "topic": "cpu-profile",
+    "scope": "shared-tools",
+    "kind": "decision",
+    "title": "CPU profiling a hot path",
+    "body": "Decision: CPU profiling a hot path samples where time is actually spent, usually revealing one unexpected function rather than confirming whatever was guessed beforehand."
+  },
+  {
+    "id": "cpu-profile-pool-dev",
+    "topic": "cpu-profile",
+    "scope": "pool-dev",
+    "kind": "convention",
+    "title": "CPU profiling a hot path",
+    "body": "Convention: CPU profiling a hot path samples where time is actually spent, usually revealing one unexpected function rather than confirming whatever was guessed beforehand."
+  },
+  {
+    "id": "cpu-profile-pool-notes",
+    "topic": "cpu-profile",
+    "scope": "pool-notes",
+    "kind": "journal",
+    "title": "CPU profiling a hot path",
+    "body": "Journal: CPU profiling a hot path samples where time is actually spent, usually revealing one unexpected function rather than confirming whatever was guessed beforehand."
+  },
+  {
+    "id": "cpu-profile-pool-ops",
+    "topic": "cpu-profile",
+    "scope": "pool-ops",
+    "kind": "handoff",
+    "title": "CPU profiling a hot path",
+    "body": "Handoff: CPU profiling a hot path samples where time is actually spent, usually revealing one unexpected function rather than confirming whatever was guessed beforehand."
+  },
+  {
+    "id": "cpu-profile-pool-private",
+    "topic": "cpu-profile",
+    "scope": "pool-private",
+    "kind": "task",
+    "title": "CPU profiling a hot path",
+    "body": "Task: CPU profiling a hot path samples where time is actually spent, usually revealing one unexpected function rather than confirming whatever was guessed beforehand."
+  }
+]
