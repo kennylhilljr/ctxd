@@ -53,6 +53,7 @@ completion_markers = ["done", "implemented", "merged", "complete"]
 [backup]
 age_recipient = "age1..."
 copy_to = ""                     # optional, e.g. a Google Drive folder path
+schedule = "03:15"               # local HH:MM for the scheduled backup agent (W4)
 ```
 
 ### 3.1 Feature flags

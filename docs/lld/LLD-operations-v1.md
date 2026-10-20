@@ -24,9 +24,10 @@ Section numbers are the Spec's own (for example 9.1), unchanged from Spec v9, so
   - review rules that are broader than allowed (should never occur);
   - peer reachability and last sync age: each peer's real age from `peers.last_synced_at` (a peer that never synced uses its `created_at`), with a warning past `sync.stale_hours` (default 24) (W3);
   - FileVault status;
-  - hook installation per client.
+  - hook installation per client;
+  - backup age: the newest `*.db.age` file's modification time in `backups/`, warning past 36 hours; it fails when no backup exists yet, and is informational when `backups` is off (W4).
 - **Startup integrity.** The server runs `PRAGMA quick_check` and a schema version check before listening. If the database is missing but backups or peers exist, or if it is unreadable or corrupt, the server refuses to start and points to `ctxd doctor` and `ctxd restore`. It never creates a fresh empty database over an existing path. `ctxd init` is the only command that creates one.
-- **Backups:** nightly `VACUUM INTO` to a temporary file, then `age` encryption to `backups/`, keeping 14 copies, then an optional copy to `copy_to`. `ctxd restore <file>` is tested in CI.
+- **Backups:** `ctxd backup schedule install|uninstall|status` installs a launchd agent that runs `ctxd backup` daily at `backup.schedule` (local `HH:MM`, default `03:15`) through `StartCalendarInterval`, not `RunAtLoad` or `KeepAlive`, reusing the service plist generation and `lintPlist`; it respects the `backups` flag, and installing it on a real machine is the owner's step (W4). Each run is a nightly `VACUUM INTO` to a temporary file, then `age` encryption to `backups/`, keeping 14 copies, then an optional copy to `copy_to`. `ctxd restore <file>` is tested in CI.
 - **Air settings:**
   - prevent sleep on power;
   - restart automatically after power failure;
