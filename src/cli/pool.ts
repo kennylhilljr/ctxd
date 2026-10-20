@@ -2,12 +2,16 @@
 import { parseArgs } from "node:util";
 import { join } from "node:path";
 import type Database from "better-sqlite3";
-import { resolveDataDir, resolveHumanWriteContext } from "./common.js";
+import { resolveConfigPath, resolveDataDir, resolveHumanWriteContext } from "./common.js";
 import { openDatabase } from "../store/db.js";
 import { deterministicId } from "../core/ids.js";
 import { appendAclEvent } from "../store/acl.js";
 import { GRANT_LEVELS, type AccessLevel } from "../core/kinds.js";
 import type { WriteContext } from "../store/write.js";
+import { loadConfig } from "../config/config.js";
+import { requireFlag, resolveFlags } from "../config/flags.js";
+import { KeyHelperProvider } from "../sealed/key-provider.js";
+import { SealedPoolStore, SqlCipherDatabaseProvider } from "../sealed/store.js";
 
 function findPool(db: Database.Database, name: string): { pool_id: string } | undefined {
   return db.prepare("SELECT pool_id FROM pools WHERE name = ?").get(name) as { pool_id: string } | undefined;
@@ -142,7 +146,14 @@ export function run(argv: string[]): number {
     strict: true,
   });
   const dataDir = resolveDataDir({ dataDir: values["data-dir"], configPath: values.config });
+  const config = loadConfig(resolveConfigPath({ configPath: values.config }));
+  const flags = resolveFlags(config);
   const db = openDatabase(join(dataDir, "ctxd.db"));
+  const humanContext = (): WriteContext => {
+    const ctx = resolveHumanWriteContext(db);
+    ctx.flags = flags;
+    return ctx;
+  };
   try {
     switch (sub) {
       case "create": {
@@ -151,7 +162,7 @@ export function run(argv: string[]): number {
           console.error("Usage: ctxd pool create <name> [--description <text>]");
           return 1;
         }
-        return createPool(resolveHumanWriteContext(db), name, values.description ?? "");
+        return createPool(humanContext(), name, values.description ?? "");
       }
       case "show": {
         const name = positionals[0];
@@ -172,7 +183,7 @@ export function run(argv: string[]): number {
           console.error(`ctxd pool: --level must be one of: ${GRANT_LEVELS.join(", ")}.`);
           return 1;
         }
-        return grantPool(resolveHumanWriteContext(db), pool, scope, level);
+        return grantPool(humanContext(), pool, scope, level);
       }
       case "revoke": {
         const [pool, scope] = positionals;
@@ -180,7 +191,7 @@ export function run(argv: string[]): number {
           console.error("Usage: ctxd pool revoke <pool> <scope>");
           return 1;
         }
-        return revokePoolGrant(resolveHumanWriteContext(db), pool, scope);
+        return revokePoolGrant(humanContext(), pool, scope);
       }
       case "add-member": {
         const [pool, clientOrTag] = positionals;
@@ -188,7 +199,7 @@ export function run(argv: string[]): number {
           console.error("Usage: ctxd pool add-member <pool> <client> | --tag <tag>");
           return 1;
         }
-        return addMember(resolveHumanWriteContext(db), pool, clientOrTag, values.tag === true);
+        return addMember(humanContext(), pool, clientOrTag, values.tag === true);
       }
       case "remove-member": {
         const [pool, clientOrTag] = positionals;
@@ -196,10 +207,48 @@ export function run(argv: string[]): number {
           console.error("Usage: ctxd pool remove-member <pool> <client> | --tag <tag>");
           return 1;
         }
-        return removeMember(resolveHumanWriteContext(db), pool, clientOrTag, values.tag === true);
+        return removeMember(humanContext(), pool, clientOrTag, values.tag === true);
+      }
+      case "seal": {
+        requireFlag(flags, "sealed_pools");
+        const name = positionals[0];
+        const pool = name ? findPool(db, name) : undefined;
+        if (!name || !pool) { console.error("Usage: ctxd pool seal <pool>"); return 1; }
+        const node = db.prepare("SELECT node_id FROM nodes LIMIT 1").get() as { node_id: string };
+        const store = new SealedPoolStore(db, dataDir, new KeyHelperProvider(config.sealed.key_helper), new SqlCipherDatabaseProvider(), config.sealed.unlock_minutes);
+        const file = store.seal(pool.pool_id, node.node_id);
+        appendAclEvent(humanContext(), pool.pool_id, { action: "pool_seal", sealed_file: file });
+        appendAclEvent(humanContext(), pool.pool_id, { action: "pool_enroll", node_id: node.node_id });
+        console.log(`ctxd pool sealed: ${name} (${file})`);
+        return 0;
+      }
+      case "enroll": {
+        requireFlag(flags, "sealed_pools");
+        const [name, nodeName] = positionals;
+        const pool = name ? findPool(db, name) : undefined;
+        const node = nodeName ? db.prepare("SELECT remote_node_id AS node_id FROM peers WHERE (name = ? OR remote_node_id = ?) AND revoked_at IS NULL AND remote_node_id IS NOT NULL AND remote_public_key IS NOT NULL").get(nodeName, nodeName) as { node_id: string } | undefined : undefined;
+        if (!name || !nodeName || !pool || !node) { console.error("Usage: ctxd pool enroll <pool> <node>"); return 1; }
+        const store = new SealedPoolStore(db, dataDir, new KeyHelperProvider(config.sealed.key_helper), new SqlCipherDatabaseProvider(), config.sealed.unlock_minutes);
+        try {
+          store.enroll(pool.pool_id, node.node_id);
+          return 0;
+        } catch (err) {
+          console.error(`ctxd pool enroll: ${err instanceof Error ? err.message : String(err)}`);
+          return 1;
+        }
+      }
+      case "lock": {
+        requireFlag(flags, "sealed_pools");
+        const name = positionals[0];
+        const pool = name ? findPool(db, name) : undefined;
+        if (!name || !pool) { console.error("Usage: ctxd pool lock <pool>"); return 1; }
+        const store = new SealedPoolStore(db, dataDir, new KeyHelperProvider(config.sealed.key_helper), new SqlCipherDatabaseProvider(), config.sealed.unlock_minutes);
+        store.lock(pool.pool_id);
+        console.log(`ctxd pool locked: ${name}`);
+        return 0;
       }
       default:
-        console.error(`ctxd pool: unknown subcommand "${sub}". Use create, show, grant, revoke, add-member or remove-member.`);
+        console.error(`ctxd pool: unknown subcommand "${sub}". Use create, show, grant, revoke, add-member, remove-member, seal, enroll or lock.`);
         return 2;
     }
   } finally {

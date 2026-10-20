@@ -2,9 +2,14 @@
 import { parseArgs } from "node:util";
 import { join } from "node:path";
 import type Database from "better-sqlite3";
-import { resolveDataDir } from "./common.js";
+import { resolveConfigPath, resolveDataDir } from "./common.js";
 import { openDatabase } from "../store/db.js";
 import { pullFromPeer } from "../sync/pull.js";
+import type { SealedKeyProvider } from "../sealed/key-provider.js";
+import { KeyHelperProvider } from "../sealed/key-provider.js";
+import { loadConfig } from "../config/config.js";
+import { isFlagOn, resolveFlags } from "../config/flags.js";
+import { createSealedPurgeReplay, SealedPoolStore, SqlCipherDatabaseProvider } from "../sealed/store.js";
 
 interface PeerRow {
   peer_id: string;
@@ -19,7 +24,7 @@ function peersToSync(db: Database.Database, only: string | undefined): PeerRow[]
   return rows.filter((r) => r.name === only);
 }
 
-export async function runSync(db: Database.Database, selfNodeId: string, only: string | undefined): Promise<number> {
+export async function runSync(db: Database.Database, selfNodeId: string, only: string | undefined, sealedKeys?: SealedKeyProvider, sealedStore?: SealedPoolStore): Promise<number> {
   const peers = peersToSync(db, only);
   if (only && peers.length === 0) {
     console.error(`ctxd sync: peer "${only}" not found (or revoked).`);
@@ -38,7 +43,7 @@ export async function runSync(db: Database.Database, selfNodeId: string, only: s
       continue;
     }
     try {
-      const outcome = await pullFromPeer(db, selfNodeId, { peerId: peer.peer_id, name: peer.name, url: peer.url, outgoingToken: peer.outgoing_token });
+      const outcome = await pullFromPeer(db, selfNodeId, { peerId: peer.peer_id, name: peer.name, url: peer.url, outgoingToken: peer.outgoing_token }, fetch, sealedKeys, sealedStore);
       console.log(
         `ctxd sync: ${peer.name}: ${outcome.pulled} applied, ${outcome.conflicts} resolved by conflict policy, ${outcome.purged} purge-stripped, ${outcome.deferred} deferred`,
       );
@@ -57,14 +62,21 @@ export async function run(argv: string[]): Promise<number> {
     strict: true,
   });
   const dataDir = resolveDataDir({ dataDir: values["data-dir"], configPath: values.config });
+  const config = loadConfig(resolveConfigPath({ configPath: values.config }));
+  const sealedKeys = isFlagOn(resolveFlags(config), "sealed_pools") ? new KeyHelperProvider(config.sealed.key_helper) : undefined;
   const db = openDatabase(join(dataDir, "ctxd.db"));
+  const human = db.prepare("SELECT client_id FROM clients WHERE name = 'human'").get() as { client_id: string } | undefined;
   try {
     const node = db.prepare("SELECT node_id FROM nodes LIMIT 1").get() as { node_id: string } | undefined;
     if (!node) {
       console.error("ctxd sync: no node identity found; run ctxd init first.");
       return 1;
     }
-    return await runSync(db, node.node_id, values.peer);
+    const sealedStore = sealedKeys && human
+      ? new SealedPoolStore(db, dataDir, sealedKeys, new SqlCipherDatabaseProvider(), config.sealed.unlock_minutes, createSealedPurgeReplay(node.node_id, human.client_id, resolveFlags(config)))
+      : undefined;
+    try { return await runSync(db, node.node_id, values.peer, sealedKeys, sealedStore); }
+    finally { sealedStore?.close(); }
   } finally {
     db.close();
   }

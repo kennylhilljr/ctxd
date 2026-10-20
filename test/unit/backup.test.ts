@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -109,6 +109,37 @@ describe("runBackup", () => {
     expect(result.copiedTo).toBeDefined();
     expect(existsSync(result.copiedTo!)).toBe(true);
   });
+
+  it("backs up sealed database files as ciphertext companions without adding them to the main database", () => {
+    const dataDir = tmpDataDir();
+    const sealedDir = join(dataDir, "sealed");
+    mkdirSync(sealedDir, { recursive: true });
+    const ciphertext = Buffer.from("sqlcipher ciphertext fixture");
+    writeFileSync(join(sealedDir, "pool-id.db"), ciphertext);
+    const db = openDatabase(realDbPath(dataDir));
+    const result = runBackup(db, { dataDir, ageRecipient: "age1testrecipient" });
+    db.close();
+    expect(result.sealedPaths).toHaveLength(1);
+    expect(readFileSync(result.sealedPaths[0]!)).toEqual(ciphertext);
+    const main = openDatabase(result.path);
+    expect(main.prepare("SELECT COUNT(*) AS n FROM entries").get()).toEqual({ n: 0 });
+    main.close();
+  });
+
+  it("round-trips the node signing key only as an age-encrypted companion", () => {
+    const sourceDir = tmpDataDir();
+    const key = Buffer.from("private signing key fixture");
+    writeFileSync(join(sourceDir, "node.ed25519.pem"), key, { mode: 0o600 });
+    const db = openDatabase(realDbPath(sourceDir));
+    const backup = runBackup(db, { dataDir: sourceDir, ageRecipient: "age1testrecipient" });
+    db.close();
+    expect(backup.nodeKeyPath).toBeDefined();
+    expect(readFileSync(backup.nodeKeyPath!)).toEqual(key);
+    const targetDir = tmpDataDir();
+    const restored = runRestore({ file: backup.path, identity: "unused", dataDir: targetDir });
+    expect(restored.nodeKeyRestored).toBe(join(targetDir, "node.ed25519.pem"));
+    expect(readFileSync(restored.nodeKeyRestored!)).toEqual(key);
+  });
 });
 
 describe("runRestore", () => {
@@ -124,6 +155,21 @@ describe("runRestore", () => {
     expect(result.replacedBackupPath).toBeUndefined();
     const restored = openDatabase(result.restoredTo);
     restored.close();
+  });
+
+  it("restores sealed ciphertext companions beside the main database", () => {
+    const sourceDir = tmpDataDir();
+    mkdirSync(join(sourceDir, "sealed"), { recursive: true });
+    const ciphertext = Buffer.from("encrypted sealed database bytes");
+    writeFileSync(join(sourceDir, "sealed", "pool-id.db"), ciphertext);
+    const db = openDatabase(realDbPath(sourceDir));
+    const backup = runBackup(db, { dataDir: sourceDir, ageRecipient: "age1testrecipient" });
+    db.close();
+
+    const targetDir = tmpDataDir();
+    const result = runRestore({ file: backup.path, identity: "unused", dataDir: targetDir });
+    expect(result.sealedRestored).toEqual([join(targetDir, "sealed", "pool-id.db")]);
+    expect(readFileSync(result.sealedRestored[0]!)).toEqual(ciphertext);
   });
 
   it("refuses to overwrite a healthy existing database without --force", () => {

@@ -13,8 +13,10 @@ import {
   checkHookInstallation,
   checkPeers,
   checkReviewRuleNarrowness,
+  checkSemanticSearch,
   checkTokenFilePermissions,
 } from "../../src/cli/doctor.js";
+import { MODEL_ID, MODEL_REVISION, modelCacheDir } from "../../src/embed/model.js";
 
 /** `ctxd doctor` (SPEC v8 section 12, M4 slice 4): one test per check, each using a scratch
  * database or scratch home directory, never real config or real tokens. */
@@ -175,5 +177,30 @@ describe("checkHookInstallation", () => {
     installClaudeCodeHooks(join(home, ".claude", "settings.json"));
     installCodexHooks(join(home, ".codex", "config.toml"));
     expect(checkHookInstallation(home).ok).toBe(true);
+  });
+});
+
+describe("checkSemanticSearch (SPEC v8 11.2, user condition: degrade to keyword-only and report why)", () => {
+  it("passes, informationally, when semantic_search is off", () => {
+    const config = configSchema.parse({ node: { name: "n", role: "home" }, features: { semantic_search: false } });
+    const result = checkSemanticSearch(config, tmpDataDir());
+    expect(result.ok).toBe(true);
+    expect(result.detail).toContain("off");
+  });
+
+  it("fails when semantic_search is on but the model is not cached", () => {
+    const config = configSchema.parse({ node: { name: "n", role: "home" }, features: { semantic_search: true } });
+    const result = checkSemanticSearch(config, tmpDataDir());
+    expect(result.ok).toBe(false);
+    expect(result.detail).toContain("ctxd model fetch");
+  });
+
+  it("passes when semantic_search is on and the model is cached", () => {
+    const config = configSchema.parse({ node: { name: "n", role: "home" }, features: { semantic_search: true } });
+    const dataDir = tmpDataDir();
+    const weightFile = join(modelCacheDir(dataDir), MODEL_ID, MODEL_REVISION, "onnx", "model_quantized.onnx");
+    mkdirSync(join(weightFile, ".."), { recursive: true });
+    writeFileSync(weightFile, "marker");
+    expect(checkSemanticSearch(config, dataDir).ok).toBe(true);
   });
 });

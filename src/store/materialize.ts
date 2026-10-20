@@ -4,6 +4,7 @@ import { compareHlc, decodeHlc } from "../core/hlc.js";
 import { LWW_CONTENT_KINDS, type Kind } from "../core/kinds.js";
 import { persistOverlaps, scanOverlappingLeases } from "../claims/overlap.js";
 import { loadClient } from "./snapshot.js";
+import { removeFromVecIndex, upsertVecIndex } from "../embed/vec.js";
 
 /**
  * Turns one already-appended event into its effect on `entries` and `relations` (SPEC v6
@@ -17,7 +18,7 @@ export interface EventForMaterialize {
   scopeId: string;
   entryId: string;
   op: string;
-  part: "content" | "status" | "relations" | "claim" | "meta";
+  part: "content" | "status" | "relations" | "claim" | "meta" | "embedding";
   rev: string;
   clientId: string;
   hlc: string;
@@ -35,10 +36,57 @@ function currentRevFor(db: Database.Database, entryId: string, part: "content" |
   return row?.rev;
 }
 
-/** The current active claim's `claim_hlc` for a task (Spec 7.3's "head" for the claim part), or undefined when no claim is active there. Only an *active* lease counts: a released, expired-but-taken-over, or lost one blocks nothing, so a fresh claim against it is a legitimate new lineage, not a conflict. */
-function currentClaimHeadFor(db: Database.Database, taskId: string): string | undefined {
-  const row = db.prepare("SELECT claim_hlc FROM leases WHERE task_id = ? AND state = 'active'").get(taskId) as { claim_hlc: string } | undefined;
-  return row?.claim_hlc;
+interface ClaimHead {
+  /** The current epoch's own claim_hlc: what a renewal or release's parentRevs must match to be a fast-forward. */
+  claimHlc: string;
+  /** This task's smallest claim_hlc ever, across every epoch: what a genuine conflict is decided against (Spec 7.4). */
+  earliestClaimHlc: string;
+  /** The row's own `state`/`last_activity_hlc`, needed by the release branch's own-HLC guard (`isStaleByHlc`); fetched here too so that branch doesn't re-query the same row a second time. */
+  state: string;
+  lastActivityHlc: string;
+}
+
+/**
+ * The claim state an incoming claim/release must be checked against (Spec 7.3's "head" for the
+ * claim part), or undefined only when this task has no lease row at all. Unlike content/status,
+ * a claim part's head is checked regardless of the lease's current `state`: `store/claim.ts`'s
+ * `claimTask` and `releaseTask` always set a new event's parentRevs to whatever local row exists
+ * (active or closed), never empty just because the row happens to be closed, so a renewal,
+ * release or proven reclaim's parentRevs always names the live row's own claim_hlc as its parent
+ * and fast-forwards through the match check below regardless of state. A claim made in total
+ * ignorance of this task's history (parentRevs=[] while a row already exists here) can never
+ * match that way, so it always falls through to a genuine conflict, resolved against
+ * `earliestClaimHlc` -- deliberately not against whichever HLC it happens to carry relative to a
+ * clock it never synced with (found via the N-node partition property suite: a node's own fresh,
+ * never-synced claim could otherwise fast-forward in and overwrite an already-resolved,
+ * already-released epoch purely because its claim's wall-clock HLC happened to sort later).
+ *
+ * Returns two different hlcs rather than one, because they answer two different questions.
+ * `claimHlc` is the live epoch's own claim_hlc, which is what a renewal or release's own
+ * parentRevs names as its parent (fast-forward vs concurrent). `earliestClaimHlc` is this task's
+ * smallest claim_hlc ever, across every epoch, not just the current one: a straggler from a
+ * long-closed-and-reclaimed epoch must still lose to the task's true earliest claimant once a
+ * genuine conflict is confirmed, not to whichever claim happens to be active or most recently
+ * closed right now (Spec 7.4's "earliest claim_hlc wins" is not undone by what later happens to
+ * the winning side's own state, e.g. a release and reclaim the winner makes before ever learning
+ * of the losing side's claim). It never resets, only ever shrinks, deliberately: resetting it at
+ * the start of each new epoch was tried and reverted, because which epoch a given node considers
+ * "current" when a late, cross-origin claim finally arrives depends on delivery order (per-origin
+ * pull batching, Spec 7.1, does not guarantee cross-origin causal order), so two nodes could reset
+ * at different points and end up comparing the same late claim against two different values. A
+ * value every node agrees on regardless of delivery order has to be monotonic.
+ */
+function currentClaimHeadFor(db: Database.Database, taskId: string): ClaimHead | undefined {
+  const row = db.prepare("SELECT claim_hlc, earliest_claim_hlc, state, last_activity_hlc FROM leases WHERE task_id = ?").get(taskId) as
+    | { claim_hlc: string; earliest_claim_hlc: string; state: string; last_activity_hlc: string }
+    | undefined;
+  if (!row) return undefined;
+  return { claimHlc: row.claim_hlc, earliestClaimHlc: row.earliest_claim_hlc, state: row.state, lastActivityHlc: row.last_activity_hlc };
+}
+
+/** The shared stale-by-HLC idiom (Spec 7.6.6's purge guard, and the claim-release guard below): true once something has already recorded a result at `referenceHlc` that this `incomingHlc` cannot improve on. */
+function isStaleByHlc(incomingHlc: string, referenceHlc: string): boolean {
+  return compareHlc(incomingHlc, referenceHlc) <= 0;
 }
 
 /** The event that currently holds `rev` for this entry, whatever part it was recorded under (ranks share a rev value with their creating event: Spec v6 4, status_rev/content_rev/relations_rev all start equal to the create event's own rev). */
@@ -166,11 +214,13 @@ function upsertLease(db: Database.Database, e: EventForMaterialize): void {
   };
   const expiresAt = new Date(decodeHlc(e.hlc).physical + p.ttl_minutes * 60_000).toISOString();
   db.prepare(
-    `INSERT INTO leases (task_id, scope_id, holder, state, paths, claim_event, claim_hlc, session_ref, base_head, expires_at, last_activity_hlc, tentative, taken_over_by)
-     VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO leases (task_id, scope_id, holder, state, paths, claim_event, claim_hlc, earliest_claim_hlc, session_ref, base_head, expires_at, last_activity_hlc, tentative, taken_over_by)
+     VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (task_id) DO UPDATE SET
        scope_id = excluded.scope_id, holder = excluded.holder, state = 'active', paths = excluded.paths,
-       claim_event = excluded.claim_event, claim_hlc = excluded.claim_hlc, session_ref = excluded.session_ref,
+       claim_event = excluded.claim_event, claim_hlc = excluded.claim_hlc,
+       earliest_claim_hlc = MIN(leases.earliest_claim_hlc, excluded.earliest_claim_hlc),
+       session_ref = excluded.session_ref,
        base_head = excluded.base_head, expires_at = excluded.expires_at, last_activity_hlc = excluded.last_activity_hlc,
        tentative = excluded.tentative, released_at = NULL, changed_files = NULL, drift = NULL, lost_by = NULL,
        taken_over_by = excluded.taken_over_by`,
@@ -180,6 +230,7 @@ function upsertLease(db: Database.Database, e: EventForMaterialize): void {
     p.holder,
     p.paths !== null ? JSON.stringify(p.paths) : null,
     e.eventId,
+    e.hlc,
     e.hlc,
     p.session_ref,
     p.base_head,
@@ -201,15 +252,18 @@ function upsertLease(db: Database.Database, e: EventForMaterialize): void {
  * surfaced to its own holder later without the single leases row needing to represent both
  * outcomes.
  */
-function applyClaimConflict(db: Database.Database, e: ReplicatedEvent, currentClaimHlc: string): void {
-  const local = db.prepare("SELECT claim_event FROM leases WHERE task_id = ?").get(e.entryId) as { claim_event: string } | undefined;
+function applyClaimConflict(db: Database.Database, e: ReplicatedEvent, earliestClaimHlc: string): void {
+  const local = db.prepare("SELECT claim_event, claim_hlc FROM leases WHERE task_id = ?").get(e.entryId) as
+    | { claim_event: string; claim_hlc: string }
+    | undefined;
   if (!local) return; // defensive: `currentClaimHeadFor` just reported this HLC, so its row should exist
-  const incomingWins = compareHlc(e.hlc, currentClaimHlc) <= 0;
-  // `resolveConflict`'s "rev" slot holds e.hlc for claims, not e.rev: the loser's identity must
-  // be an HLC either way this resolves (currentClaimHlc, the other side, already is one), so a
-  // reader comparing entry_siblings.rev against leases.claim_hlc or another claim's parentRevs
-  // sees the same format regardless of which side lost.
-  resolveConflict(db, "claim", e.entryId, "lost", incomingWins, currentClaimHlc, { event_id: local.claim_event }, { eventId: e.eventId, rev: e.hlc }, () => {
+  // Decided against `earliestClaimHlc` (the smallest claim_hlc this task has ever contended, Spec
+  // 7.4), not the current epoch's own `claim_hlc`: a straggler from a closed-and-reclaimed epoch
+  // must still lose to the task's true earliest claimant, not to whatever the current epoch
+  // happens to be. The *recorded* loser, when the incoming side wins, is still the current
+  // epoch's own claim (`local.claim_hlc`/`claim_event`): that is the actual row being evicted.
+  const incomingWins = compareHlc(e.hlc, earliestClaimHlc) <= 0;
+  resolveConflict(db, "claim", e.entryId, "lost", incomingWins, local.claim_hlc, { event_id: local.claim_event }, { eventId: e.eventId, rev: e.hlc }, () => {
     upsertLease(db, e);
     recordClaimOverlaps(db, e);
   });
@@ -282,8 +336,8 @@ export function applyReplicatedEvent(db: Database.Database, e: ReplicatedEvent, 
     }
   } else if (e.part === "claim" && e.op === "claim") {
     const current = currentClaimHeadFor(db, e.entryId);
-    if (current !== undefined && !(e.parentRevs.length === 1 && e.parentRevs[0] === current)) {
-      applyClaimConflict(db, e, current);
+    if (current !== undefined && !(e.parentRevs.length === 1 && e.parentRevs[0] === current.claimHlc)) {
+      applyClaimConflict(db, e, current.earliestClaimHlc);
       return;
     }
     // A legitimate continuation (renewal, take-over, or a brand-new claim with no prior lease),
@@ -296,10 +350,22 @@ export function applyReplicatedEvent(db: Database.Database, e: ReplicatedEvent, 
     return;
   } else if (e.part === "claim" && e.op === "release") {
     const current = currentClaimHeadFor(db, e.entryId);
-    if (current === undefined || !(e.parentRevs.length === 1 && e.parentRevs[0] === current)) {
+    if (current === undefined || !(e.parentRevs.length === 1 && e.parentRevs[0] === current.claimHlc)) {
       // Stale: this release targets a claim already superseded by a later claim or take-over
       // (or none is active at all). `decide` only routes a release here once it has already
       // confirmed the mismatch, so there is nothing left to do but leave the current lease alone.
+      return;
+    }
+    if (current.state !== "active" && isStaleByHlc(e.hlc, current.lastActivityHlc)) {
+      // A second, racing release of the same still-active epoch (Spec 7.4): two different holders
+      // can each release the same claim while partitioned (its own holder, and a human override
+      // elsewhere), both naming the same claim_hlc as their parent and so both passing the match
+      // above regardless of delivery order. Only the later-hlc release's own payload
+      // (released_at/changed_files/drift) may win, deterministically on every node -- the same rule
+      // the purge handler's own-HLC guard already applies below. Found via the N-node partition
+      // property suite: without this, whichever release a node happened to apply LAST simply
+      // overwrote the fields, so two nodes that received the same pair of releases in different
+      // orders disagreed about which one's details survived.
       return;
     }
   }
@@ -367,7 +433,11 @@ function applyEventCore(db: Database.Database, e: EventForMaterialize, skipFts: 
   }
 
   if (e.part === "status" && e.op === "status") {
-    const p = e.payload as { status: string };
+    const p = e.payload as { status?: string; review_after?: string | null };
+    if (!("status" in p)) {
+      db.prepare("UPDATE entries SET review_after = ?, status_rev = ?, updated_hlc = ? WHERE entry_id = ?").run(p.review_after ?? null, e.rev, e.hlc, e.entryId);
+      return;
+    }
     const prevStatus = (e.prev as { status?: string } | null)?.status ?? null;
     db.prepare("UPDATE entries SET status = ?, status_before = ?, status_rev = ?, updated_hlc = ? WHERE entry_id = ?").run(
       p.status,
@@ -540,7 +610,7 @@ function applyEventCore(db: Database.Database, e: EventForMaterialize, skipFts: 
     // keeps its fingerprint (untouched by the rewrite below), but it does not become the entry's
     // `purge_fingerprint`, so reinsertion-blocking only covers whichever fingerprint's HLC won.
     const alreadyPurged = before?.purged_at != null;
-    if (alreadyPurged && compareHlc(e.hlc, before.updated_hlc) <= 0) return;
+    if (alreadyPurged && isStaleByHlc(e.hlc, before.updated_hlc)) return;
     // UPSERT, not a plain UPDATE (SPEC v7 7.6.6): a rebuild replays the create event neutered to
     // {"purged": true} (the guard at the top of this function), so the row may not exist yet when
     // this purge event itself is replayed. scope_id/kind/slug come from the purge event's own
@@ -604,13 +674,32 @@ function applyEventCore(db: Database.Database, e: EventForMaterialize, skipFts: 
       // "Erase history": every stored event for this entry is rewritten in place (the only
       // operation that rewrites events, ADR-0002's own carve-out) -- but not this purge event
       // itself, whose own payload is exactly what records the fingerprint that blocks reinsertion.
-      db.prepare("UPDATE events SET payload = '{\"purged\":true}', prev = NULL WHERE entry_id = ? AND event_id != ?").run(e.entryId, e.eventId);
+      db.prepare("UPDATE events SET payload = '{\"purged\":true}', prev = NULL, payload_stripped = 1 WHERE entry_id = ? AND event_id != ?").run(e.entryId, e.eventId);
+      // Embeddings (SPEC 11.2.1): deleted on every node, same as the entry's other content. A
+      // plain DELETE on an already-empty set is a harmless no-op, unlike the FTS 'delete' command
+      // above, but grouped here anyway as part of the same one-time erasure.
+      const embeddingRows = db.prepare("SELECT rowid FROM embeddings WHERE entry_id = ?").all(e.entryId) as { rowid: number }[];
+      for (const er of embeddingRows) removeFromVecIndex(db, er.rowid);
+      db.prepare("DELETE FROM embeddings WHERE entry_id = ?").run(e.entryId);
     }
     return;
   }
 
   if (e.part === "meta" && e.op === "acl") {
     applyAclEvent(db, e);
+    return;
+  }
+
+  // Embeddings (SPEC 11.2.1): current content only, like FTS -- a later vector for the same
+  // (entry, model) replaces the earlier one; a different model_id is kept alongside, never
+  // overwritten, so a model change is additive rather than a silent mix of vector spaces.
+  if (e.part === "embedding" && e.op === "update") {
+    const p = e.payload as unknown as { model_id: string; dim: number; vector: number[] };
+    db.prepare(
+      `INSERT INTO embeddings (entry_id, model_id, dim, vector, rev, updated_hlc) VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT (entry_id, model_id) DO UPDATE SET dim = excluded.dim, vector = excluded.vector, rev = excluded.rev, updated_hlc = excluded.updated_hlc`,
+    ).run(e.entryId, p.model_id, p.dim, JSON.stringify(p.vector), e.rev, e.hlc);
+    upsertVecIndex(db, e.entryId, p.model_id, p.dim, p.vector);
     return;
   }
 
@@ -637,6 +726,8 @@ type AclPayload =
   | { action: "pool_revoke"; scope_id: string }
   | { action: "pool_add_member"; principal: string }
   | { action: "pool_remove_member"; principal: string }
+  | { action: "pool_seal"; sealed_file: string }
+  | { action: "pool_enroll"; node_id: string }
   | { action: "client_grant"; scope_id: string; level: string; expires_at: string; granted_by: string };
 
 /**
@@ -713,6 +804,14 @@ function applyAclEvent(db: Database.Database, e: EventForMaterialize): void {
     case "pool_remove_member":
       if (!aclGuardPasses(db, `pool_member:${e.entryId}:${p.principal}`, e.hlc)) return;
       db.prepare("DELETE FROM pool_members WHERE pool_id = ? AND principal = ?").run(e.entryId, p.principal);
+      return;
+    case "pool_seal":
+      if (!aclGuardPasses(db, `pool_storage:${e.entryId}`, e.hlc)) return;
+      db.prepare("UPDATE pools SET storage = 'sealed', sealed_file = ? WHERE pool_id = ?").run(p.sealed_file, e.entryId);
+      return;
+    case "pool_enroll":
+      if (!aclGuardPasses(db, `pool_enrollment:${e.entryId}:${p.node_id}`, e.hlc)) return;
+      db.prepare("INSERT OR REPLACE INTO pool_enrollments (pool_id, node_id, enrolled_at) VALUES (?, ?, ?)").run(e.entryId, p.node_id, createdAt);
       return;
     case "client_grant":
       if (!aclGuardPasses(db, `client_grant:${e.entryId}:${p.scope_id}`, e.hlc)) return;

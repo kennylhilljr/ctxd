@@ -1,6 +1,7 @@
 import type Database from "better-sqlite3";
 import type { HlcClock } from "../core/hlc.js";
 import type { Vendor } from "../core/kinds.js";
+import type { SealedPoolStore } from "../sealed/store.js";
 
 /**
  * Everything a tool handler needs to act on behalf of one authenticated request
@@ -22,4 +23,7 @@ export interface RequestContext {
    * map as "every flag on", matching the pre-M3 behavior those fixtures exercise.
    */
   flags?: Map<string, boolean>;
+  /** The node's data directory, for loading the local embedding model at query time (SPEC v8 11.2). Optional for the same reason as `flags`. */
+  dataDir?: string;
+  sealedStore?: SealedPoolStore;
 }

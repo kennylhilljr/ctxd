@@ -37,6 +37,13 @@ export const FLAG_REGISTRY: readonly FlagDef[] = [
   { name: "statusline", default: true, milestone: "M4", description: "ctxd statusline output", offMeans: "ctxd statusline prints nothing" },
   { name: "semantic_search", default: false, milestone: "M5", description: "Hybrid search blending FTS with embedding vectors (reciprocal rank fusion)", offMeans: "Full-text search only" },
   { name: "semantic_search.compute", default: false, milestone: "M5", description: "Compute an embedding for this machine's own writes and replicate it", offMeans: "This machine never computes embeddings itself; it still serves hybrid search over vectors that arrive through sync", parent: "semantic_search" },
+  { name: "importance", default: true, milestone: "M5", description: "Importance-weighted ranking in briefs and search (SPEC 11.3)", offMeans: "Briefs and search fall back to the Spec v6 ranking without importance" },
+  { name: "digest", default: true, milestone: "M5", description: "Automatic weekly digest on journal.digest_weekday (SPEC 11.5)", offMeans: "No weekly digests from this machine; ctxd digest still works manually" },
+  { name: "skills.native_sync", default: false, milestone: "M5", description: "Write approved skills into a client's personal skills folder (SPEC 12.2)", offMeans: "Skills are not written into client skill folders, and nothing already synced is changed; ctxd skills sync itself refuses to run, since unlike sync/digest this flag gates files outside ctxd's own data folder" },
+  { name: "signed_events", default: false, milestone: "M6", description: "Sign new events with the node Ed25519 key", offMeans: "New events are unsigned; signatures already present are still verified" },
+  { name: "mirror", default: false, milestone: "M6", description: "Write and read the editable Markdown mirror", offMeans: "The Markdown mirror is neither written nor read" },
+  { name: "sealed_pools", default: false, milestone: "M6", description: "Store selected pools in encrypted database files", offMeans: "Sealing, enrollment and unlocking are unavailable; existing sealed files are left unchanged" },
+  { name: "local_model", default: false, milestone: "M6", description: "Ask a loopback model for summary and lesson proposals", offMeans: "No model calls or model-authored proposals; deterministic summaries remain unchanged" },
 ];
 
 const FLAGS_BY_NAME = new Map(FLAG_REGISTRY.map((def) => [def.name, def]));

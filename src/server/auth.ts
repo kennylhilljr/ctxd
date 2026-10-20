@@ -46,14 +46,16 @@ export interface PeerAuthResult {
   peerName: string;
   /** The peer's own role, for the 7.2 replication filter when it pulls from us. */
   peerRole: "home" | "roaming";
+  remoteNodeId: string | null;
+  remotePublicKey: string | null;
 }
 
 /** Resolve a bearer token on the sync listener to the peer that holds it (Spec 7.1). */
 export function resolvePeerAuth(db: Database.Database, token: string): PeerAuthResult | null {
   const hash = sha256Hex(token);
-  const row = db.prepare("SELECT peer_id, name, role, revoked_at FROM peers WHERE incoming_token_hash = ?").get(hash) as
-    | { peer_id: string; name: string; role: "home" | "roaming"; revoked_at: string | null }
+  const row = db.prepare("SELECT peer_id, name, role, revoked_at, remote_node_id, remote_public_key FROM peers WHERE incoming_token_hash = ?").get(hash) as
+    | { peer_id: string; name: string; role: "home" | "roaming"; revoked_at: string | null; remote_node_id: string | null; remote_public_key: string | null }
     | undefined;
   if (!row || row.revoked_at !== null) return null;
-  return { peerId: row.peer_id, peerName: row.name, peerRole: row.role };
+  return { peerId: row.peer_id, peerName: row.name, peerRole: row.role, remoteNodeId: row.remote_node_id, remotePublicKey: row.remote_public_key };
 }

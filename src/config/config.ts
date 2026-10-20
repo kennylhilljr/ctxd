@@ -58,6 +58,29 @@ export const configSchema = z.object({
       dir: z.string().default("~/Library/Application Support/ctxd/mirror"),
     })
     .default({ enabled: false, dir: "~/Library/Application Support/ctxd/mirror" }),
+  sealed: z
+    .object({ unlock_minutes: z.number().int().min(1).default(60), key_helper: z.string().default("ctxd-keyhelper") })
+    .default({ unlock_minutes: 60, key_helper: "ctxd-keyhelper" }),
+  local_model: z
+    .object({ endpoint: z.string().url().default("http://127.0.0.1:11434/api/generate"), model: z.string().min(1).default("ctxd-local"), timeout_ms: z.number().int().min(100).default(30_000) })
+    .default({ endpoint: "http://127.0.0.1:11434/api/generate", model: "ctxd-local", timeout_ms: 30_000 }),
+  /** Weekly digest (SPEC v8 11.5): only digest_node writes digests, on digest_weekday after 18:00 local. */
+  journal: z
+    .object({
+      digest_node: z.string().default(""),
+      digest_weekday: z
+        .enum(["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"])
+        .default("sunday"),
+    })
+    .default({ digest_node: "", digest_weekday: "sunday" }),
+  /** Native skill sync (SPEC v8 12.2): writes approved skills into a client's personal skills folder. */
+  skills: z
+    .object({
+      sync_clients: z.array(z.string()).default([]),
+      include_scopes: z.array(z.string()).default(["_me"]),
+      keep_allowed_tools: z.boolean().default(false),
+    })
+    .default({ sync_clients: [], include_scopes: ["_me"], keep_allowed_tools: false }),
   /** Feature flags (PRD-feature-flags-v1 section 2): per machine, never synced. */
   features: z.record(z.string(), z.boolean()).default({}),
 });

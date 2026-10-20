@@ -4,6 +4,7 @@ import { nowIso } from "../core/time.js";
 import { canonicalJson } from "./idempotency.js";
 import { applyEvent } from "./materialize.js";
 import { nextOriginSeq, type WriteContext } from "./write.js";
+import { signStoredEvent } from "../security/event-signatures.js";
 
 /**
  * Appends and applies one `acl` event (SPEC v8 4): access metadata (scope/pool creation, grants,
@@ -23,6 +24,7 @@ export function appendAclEvent(ctx: WriteContext, entryId: string, payload: Reco
       `INSERT INTO events (event_id, origin_node, origin_seq, hlc, scope_id, entry_id, op, part, parent_revs, rev, client_id, session_ref, request_id, request_hash, payload, prev, received_at)
        VALUES (?, ?, ?, ?, ?, ?, 'acl', 'meta', '[]', ?, ?, NULL, NULL, NULL, ?, NULL, ?)`,
     ).run(eventId, ctx.nodeId, nextOriginSeq(db, ctx.nodeId), hlc, SYSTEM_SCOPE_ID, entryId, rev, ctx.clientId, canonicalJson(payload), nowIso());
+    signStoredEvent(db, eventId, ctx.flags);
     applyEvent(db, { eventId, scopeId: SYSTEM_SCOPE_ID, entryId, op: "acl", part: "meta", rev, clientId: ctx.clientId, hlc, payload, prev: null });
   })();
 }

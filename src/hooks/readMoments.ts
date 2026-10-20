@@ -93,13 +93,13 @@ function ftsQueryFromPrompt(prompt: string): string | null {
 }
 
 /** R7: up to 3 matching entry titles as a search hint on each prompt (PRD-hooks-v5 section 7.2), gated by `hooks.prompt_search`. Skips silently (its own stated fallback) on anything short of a match. */
-export function promptSearchHandler(ctx: HookContext): HookResult {
+export async function promptSearchHandler(ctx: HookContext): Promise<HookResult> {
   if (!ctx.scope) return undefined;
   const promptField = ctx.adapter.fields.prompt ? ctx.input[ctx.adapter.fields.prompt] : undefined;
   const query = typeof promptField === "string" ? ftsQueryFromPrompt(promptField) : null;
   if (!query) return undefined;
   try {
-    const result = runSearch(requestContextOf(ctx), { scope: ctx.scope, query, limit: 3, max_tokens: 200, include_proposed: false });
+    const result = await runSearch(requestContextOf(ctx), { scope: ctx.scope, query, limit: 3, max_tokens: 200, include_proposed: false });
     if (result.results.length === 0) return undefined;
     return { text: result.results.map((r) => `${r.ref} ${r.title}`).join("\n") };
   } catch {

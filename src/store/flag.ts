@@ -9,6 +9,8 @@ import { canonicalJson, requestHash } from "./idempotency.js";
 import { applyEvent } from "./materialize.js";
 import { loadAccessSnapshot, loadClient, loadScopeById } from "./snapshot.js";
 import type { WriteContext } from "./write.js";
+import { signStoredEvent } from "../security/event-signatures.js";
+import { allocateOriginSeq } from "./origin-seq.js";
 
 /**
  * context_flag (SPEC v6 section 7.6.1): any client with at least `read` access to the entry's
@@ -63,9 +65,7 @@ export function flagEntry(ctx: WriteContext, input: FlagInput): FlagResult {
   const eventId = newId();
   const hlc = ctx.clock.tick();
   const flagId = newId();
-  const nextOriginSeq = (
-    db.prepare("SELECT COALESCE(MAX(origin_seq), 0) + 1 AS next FROM events WHERE origin_node = ?").get(ctx.nodeId) as { next: number }
-  ).next;
+  const nextOriginSeq = allocateOriginSeq(db, ctx.nodeId);
   // Only the first open flag actually bumps status_rev (materialize.ts leaves it alone once an
   // entry is already flagged); this rev is only ever consumed on that path, but it still has to
   // be a well-formed rev string, since a later flag/status event builds the next one from it.
@@ -92,6 +92,7 @@ export function flagEntry(ctx: WriteContext, input: FlagInput): FlagResult {
       canonicalJson(payload),
       nowIso(),
     );
+    signStoredEvent(db, eventId, ctx.flags);
     applyEvent(db, { eventId, scopeId: scope.id, entryId: row.entry_id, op: "flag", part: "status", rev, clientId: ctx.clientId, hlc, payload, prev: null });
   })();
 
@@ -128,15 +129,14 @@ export function unflagEntry(ctx: WriteContext, ref: string): UnflagResult {
   const eventId = newId();
   const hlc = ctx.clock.tick();
   const rev = makeRev(revVersion(row.status_rev) + 1, eventId);
-  const nextOriginSeq = (
-    db.prepare("SELECT COALESCE(MAX(origin_seq), 0) + 1 AS next FROM events WHERE origin_node = ?").get(ctx.nodeId) as { next: number }
-  ).next;
+  const nextOriginSeq = allocateOriginSeq(db, ctx.nodeId);
 
   db.transaction(() => {
     db.prepare(
       `INSERT INTO events (event_id, origin_node, origin_seq, hlc, scope_id, entry_id, op, part, parent_revs, rev, client_id, session_ref, request_id, request_hash, payload, prev, received_at)
        VALUES (?, ?, ?, ?, ?, ?, 'unflag', 'status', ?, ?, ?, NULL, NULL, NULL, '{}', NULL, ?)`,
     ).run(eventId, ctx.nodeId, nextOriginSeq, hlc, row.scope_id, row.entry_id, canonicalJson([row.status_rev]), rev, ctx.clientId, nowIso());
+    signStoredEvent(db, eventId, ctx.flags);
     applyEvent(db, { eventId, scopeId: row.scope_id, entryId: row.entry_id, op: "unflag", part: "status", rev, clientId: ctx.clientId, hlc, payload: {}, prev: null });
   })();
 

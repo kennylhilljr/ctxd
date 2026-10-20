@@ -9,6 +9,8 @@ import { canonicalJson } from "./idempotency.js";
 import { applyEvent, recordSibling } from "./materialize.js";
 import { loadClient, loadScopeByName } from "./snapshot.js";
 import type { WriteContext } from "./write.js";
+import { signStoredEvent } from "../security/event-signatures.js";
+import { allocateOriginSeq } from "./origin-seq.js";
 
 /**
  * Quarantine, revert and release (SPEC v6 section 7.6.2-7.6.4): human-only cleanup for a
@@ -68,7 +70,7 @@ interface MemberRow {
   outcome: string | null;
 }
 
-interface SelEvent {
+export interface SelEvent {
   event_id: string;
   scope_id: string;
   entry_id: string;
@@ -94,7 +96,8 @@ interface HygieneEventSpec {
   hlc: string;
 }
 
-function requireHuman(db: Database.Database, clientId: string, what: string): void {
+/** Exported for src/store/rollback.ts (SPEC 7.6.5), which selects and reverts in one step rather than two separate human actions, and reuses this same human-only check at batch-creation time. */
+export function requireHuman(db: Database.Database, clientId: string, what: string): void {
   const client = loadClient(db, clientId);
   if (!client) throw new CtxdError("UNAUTHORIZED", "Unknown or revoked client");
   if (client.vendor !== "human") throw new CtxdError("NOT_ALLOWED", `${what} is human only`);
@@ -106,7 +109,7 @@ function entryIdFromRef(ref: string): string {
 }
 
 function nextOriginSeq(db: Database.Database, nodeId: string): number {
-  return (db.prepare("SELECT COALESCE(MAX(origin_seq), 0) + 1 AS next FROM events WHERE origin_node = ?").get(nodeId) as { next: number }).next;
+  return allocateOriginSeq(db, nodeId);
 }
 
 /** Allocates origin_seq once per transaction, matching store/write.ts's own seqAllocator. */
@@ -151,6 +154,7 @@ function appendAndApply(db: Database.Database, ctx: WriteContext, allocSeq: () =
     spec.prev ? canonicalJson(spec.prev) : null,
     nowIso(),
   );
+  signStoredEvent(db, spec.eventId, ctx.flags);
   applyEvent(db, {
     eventId: spec.eventId,
     scopeId: spec.scopeId,
@@ -171,7 +175,8 @@ function loadBatch(db: Database.Database, batchId: string): BatchRow {
   return row;
 }
 
-function isWithin(t: number, from: number | undefined, to: number): boolean {
+/** Exported for src/store/rollback.ts. */
+export function isWithin(t: number, from: number | undefined, to: number): boolean {
   return (from === undefined || t >= from) && t <= to;
 }
 

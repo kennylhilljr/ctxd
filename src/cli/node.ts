@@ -1,17 +1,23 @@
 /** `ctxd node add-peer|revoke`: manage sync peers (Spec v8 7.1, 13). */
 import { parseArgs } from "node:util";
-import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import type Database from "better-sqlite3";
 import { resolveConfigPath, resolveDataDir, tokensDir } from "./common.js";
 import { openDatabase } from "../store/db.js";
 import { newId } from "../core/ids.js";
 import { nowIso } from "../core/time.js";
 import { newToken } from "../core/hash.js";
+import { configSchema, loadConfig } from "../config/config.js";
+import { parse, stringify } from "smol-toml";
+import { probeServer } from "./mcp.js";
+import { pinPublicKey } from "../security/event-signatures.js";
 
 export interface AddPeerOptions {
   role: "home" | "roaming";
   token?: string;
+  nodeId?: string;
+  publicKey?: string;
 }
 
 /**
@@ -30,7 +36,11 @@ export interface AddPeerOptions {
  * alone and refused, since there would be nothing to do.
  */
 export function addPeer(db: Database.Database, name: string, url: string, opts: AddPeerOptions, configPath: string): number {
-  const existing = db.prepare("SELECT peer_id, role FROM peers WHERE name = ?").get(name) as { peer_id: string; role: string } | undefined;
+  if ((opts.nodeId === undefined) !== (opts.publicKey === undefined)) {
+    console.error("ctxd node: --node-id and --public-key must be supplied together.");
+    return 1;
+  }
+  const existing = db.prepare("SELECT peer_id, role, remote_node_id, remote_public_key FROM peers WHERE name = ?").get(name) as { peer_id: string; role: string; remote_node_id: string | null; remote_public_key: string | null } | undefined;
   if (existing) {
     if (!opts.token) {
       console.error(`ctxd node: peer "${name}" already exists. Pass --token to update its outgoing token.`);
@@ -40,14 +50,27 @@ export function addPeer(db: Database.Database, name: string, url: string, opts: 
       console.error(`ctxd node: peer "${name}" is registered as "${existing.role}", not "${opts.role}". This call only updates its outgoing token; role is not mutable here.`);
       return 1;
     }
-    db.prepare("UPDATE peers SET outgoing_token = ? WHERE peer_id = ?").run(opts.token, existing.peer_id);
+    if (existing.remote_node_id && opts.nodeId && existing.remote_node_id !== opts.nodeId) {
+      console.error(`ctxd node: peer "${name}" is already bound to a different node id.`);
+      return 1;
+    }
+    if (existing.remote_public_key && opts.publicKey && existing.remote_public_key !== opts.publicKey) {
+      console.error(`ctxd node: peer "${name}" is already bound to a different public key.`);
+      return 1;
+    }
+    db.transaction(() => {
+      db.prepare("UPDATE peers SET outgoing_token = ?, remote_node_id = COALESCE(remote_node_id, ?), remote_public_key = COALESCE(remote_public_key, ?) WHERE peer_id = ?")
+        .run(opts.token, opts.nodeId ?? null, opts.publicKey ?? null, existing.peer_id);
+      if (opts.nodeId && opts.publicKey) pinPublicKey(db, opts.nodeId, opts.publicKey, 0);
+    })();
     console.log(`ctxd node: peer ${name}: outgoing token updated.`);
     return 0;
   }
   const { raw, hash } = newToken();
   db.prepare(
-    "INSERT INTO peers (peer_id, name, url, role, incoming_token_hash, outgoing_token, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-  ).run(newId(), name, url, opts.role, hash, opts.token ?? null, nowIso());
+    "INSERT INTO peers (peer_id, name, url, role, incoming_token_hash, outgoing_token, created_at, remote_node_id, remote_public_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  ).run(newId(), name, url, opts.role, hash, opts.token ?? null, nowIso(), opts.nodeId ?? null, opts.publicKey ?? null);
+  if (opts.nodeId && opts.publicKey) pinPublicKey(db, opts.nodeId, opts.publicKey, 0);
 
   const dir = tokensDir(configPath);
   mkdirSync(dir, { recursive: true });
@@ -80,11 +103,60 @@ export function revokePeer(db: Database.Database, name: string): number {
   return 0;
 }
 
-export function run(argv: string[]): number {
+export async function adoptNode(
+  db: Database.Database,
+  configPath: string,
+  newName: string,
+  probe: (listen: string) => Promise<boolean> = probeServer,
+): Promise<number> {
+  if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(newName)) {
+    console.error("ctxd node adopt: name must be a lowercase DNS label using letters, digits and interior hyphens.");
+    return 1;
+  }
+  const config = loadConfig(configPath);
+  if (await probe(config.mcp.listen)) {
+    console.error("ctxd node adopt: the server is running. Stop it before adopting this data directory.");
+    return 1;
+  }
+  const node = db.prepare("SELECT node_id, name FROM nodes").all() as { node_id: string; name: string }[];
+  if (node.length !== 1) {
+    console.error("ctxd node adopt: expected exactly one local node identity.");
+    return 1;
+  }
+  if (node[0]!.name === newName && config.node.name === newName) {
+    console.log(`ctxd node adopt: already named ${newName}; node id ${node[0]!.node_id} is unchanged.`);
+    return 0;
+  }
+  if (db.prepare("SELECT 1 FROM peers WHERE name = ? AND revoked_at IS NULL").get(newName)) {
+    console.error(`ctxd node adopt: "${newName}" collides with an active peer name.`);
+    return 1;
+  }
+  const originalConfig = readFileSync(configPath, "utf8");
+  const raw = parse(originalConfig) as Record<string, unknown>;
+  const validated = configSchema.parse({ ...raw, node: { ...(raw.node as Record<string, unknown>), name: newName } });
+  const temp = join(dirname(configPath), `.ctxd-adopt-${process.pid}.toml`);
+  writeFileSync(temp, stringify(validated), { mode: 0o600 });
+  try {
+    db.transaction(() => {
+      db.prepare("UPDATE nodes SET name = ? WHERE node_id = ?").run(newName, node[0]!.node_id);
+      renameSync(temp, configPath);
+    })();
+  } catch (err) {
+    rmSync(temp, { force: true });
+    const rollback = `${temp}.rollback`;
+    writeFileSync(rollback, originalConfig, { mode: 0o600 });
+    renameSync(rollback, configPath);
+    throw err;
+  }
+  console.log(`ctxd node adopted: ${newName}; node id ${node[0]!.node_id} preserved.`);
+  return 0;
+}
+
+export async function run(argv: string[]): Promise<number> {
   const [sub, ...rest] = argv;
   const { values, positionals } = parseArgs({
     args: rest,
-    options: { role: { type: "string" }, token: { type: "string" }, "data-dir": { type: "string" }, config: { type: "string" } },
+    options: { role: { type: "string" }, token: { type: "string" }, "node-id": { type: "string" }, "public-key": { type: "string" }, "data-dir": { type: "string" }, config: { type: "string" } },
     allowPositionals: true,
     strict: true,
   });
@@ -102,7 +174,7 @@ export function run(argv: string[]): number {
         console.error("ctxd node: --role must be \"home\" or \"roaming\".");
         return 1;
       }
-      return addPeer(db, name, url, { role: values.role, token: values.token }, configPath);
+      return addPeer(db, name, url, { role: values.role, token: values.token, nodeId: values["node-id"], publicKey: values["public-key"] }, configPath);
     }
     if (sub === "revoke") {
       const name = positionals[0];
@@ -112,7 +184,12 @@ export function run(argv: string[]): number {
       }
       return revokePeer(db, name);
     }
-    console.error(`ctxd node: unknown subcommand "${sub}". Use add-peer or revoke.`);
+    if (sub === "adopt") {
+      const name = positionals[0];
+      if (!name) { console.error("Usage: ctxd node adopt <new-name>"); return 1; }
+      return await adoptNode(db, configPath, name);
+    }
+    console.error(`ctxd node: unknown subcommand "${sub}". Use add-peer, revoke or adopt.`);
     return 2;
   } finally {
     db.close();

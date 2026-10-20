@@ -3,12 +3,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
-import { HlcClock } from "../../src/core/hlc.js";
+import { encodeHlc, HlcClock } from "../../src/core/hlc.js";
 import { newId } from "../../src/core/ids.js";
 import { openDatabase } from "../../src/store/db.js";
 import { writeEntry, type WriteContext } from "../../src/store/write.js";
 import type { RequestContext } from "../../src/server/context.js";
 import { assembleBrief } from "../../src/brief/assemble.js";
+import { formatRef } from "../../src/model/refs.js";
 import { CtxdError } from "../../src/core/errors.js";
 
 function freshDb(): Database.Database {
@@ -48,8 +49,8 @@ function writeCtx(f: Fixture, clientId: string): WriteContext {
   return { db: f.db, clock: f.clock, nodeId: f.nodeId, clientId };
 }
 
-function requestCtx(f: Fixture, clientId: string, clientName: string): RequestContext {
-  return { db: f.db, clock: f.clock, nodeId: f.nodeId, clientId, clientName, vendor: "human", assumedPools: [] };
+function requestCtx(f: Fixture, clientId: string, clientName: string, flags?: Map<string, boolean>): RequestContext {
+  return { db: f.db, clock: f.clock, nodeId: f.nodeId, clientId, clientName, vendor: "human", assumedPools: [], flags };
 }
 
 describe("assembleBrief (SPEC v6 section 11.1)", () => {
@@ -134,5 +135,97 @@ describe("assembleBrief (SPEC v6 section 11.1)", () => {
     expect(result.brief).toContain("Open signals:");
     expect(result.brief).toContain("BLOCKER");
     expect(result.brief).toContain(created.ref);
+  });
+
+  describe("sync freshness header and stale-sync notice (M3 slice 7)", () => {
+    it("reports sync: null and no notice when this node has no peers at all", () => {
+      const f = setup();
+      const result = assembleBrief(requestCtx(f, f.humanId, "human"), { scope: "notes", size: "normal" }) as { sync: unknown; notices: string[] };
+      expect(result.sync).toBeNull();
+      expect(result.notices).toEqual([]);
+    });
+
+    it("reports sync.stale: false and no notice when a peer synced recently", () => {
+      const f = setup();
+      f.db
+        .prepare(
+          "INSERT INTO peers (peer_id, name, url, role, incoming_token_hash, created_at, last_synced_at) VALUES (?, 'laptop', 'https://laptop.example/ctxd-sync', 'home', ?, ?, ?)",
+        )
+        .run(newId(), newId(), now(), now());
+
+      const result = assembleBrief(requestCtx(f, f.humanId, "human"), { scope: "notes", size: "normal" }) as {
+        sync: { last_synced_at: string; stale: boolean } | null;
+        notices: string[];
+      };
+      expect(result.sync?.stale).toBe(false);
+      expect(result.notices).toEqual([]);
+    });
+
+    it("reports sync.stale: true and a stale-sync notice when no peer has synced in over 10 minutes", () => {
+      const f = setup();
+      const staleSync = new Date(Date.now() - 11 * 60_000).toISOString();
+      f.db
+        .prepare(
+          "INSERT INTO peers (peer_id, name, url, role, incoming_token_hash, created_at, last_synced_at) VALUES (?, 'laptop', 'https://laptop.example/ctxd-sync', 'home', ?, ?, ?)",
+        )
+        .run(newId(), newId(), now(), staleSync);
+
+      const result = assembleBrief(requestCtx(f, f.humanId, "human"), { scope: "notes", size: "normal" }) as {
+        sync: { last_synced_at: string; stale: boolean } | null;
+        notices: string[];
+      };
+      expect(result.sync?.stale).toBe(true);
+      expect(result.notices).toContain("No successful sync in over 10 minutes; this brief may be missing recent changes from other machines.");
+    });
+  });
+});
+
+describe("assembleBrief's importance ranking (SPEC 11.3, M5): the importance feature flag", () => {
+  it("ranks a heavily-linked older convention above a newer unlinked one when importance is on, but by recency alone when it is off", () => {
+    const f = setup();
+    const older = writeEntry(writeCtx(f, f.humanId), {
+      scope: "notes",
+      kind: "convention",
+      title: "Older convention",
+      summary: "Older, heavily linked convention",
+      body: "x",
+      request_id: newId(),
+    } as never);
+    const newer = writeEntry(writeCtx(f, f.humanId), {
+      scope: "notes",
+      kind: "convention",
+      title: "Newer convention",
+      summary: "Newer, unlinked convention",
+      body: "y",
+      request_id: newId(),
+    } as never);
+    if ("held" in older || "held" in newer) throw new Error("unexpected hold");
+
+    // Backdate `older` by 180 days (importance's recency half-life is 90 days), so its recency
+    // score alone would lose to `newer`'s; ten inbound links should outweigh that under
+    // importance, but recency-only ranking (the flag off) only ever sees the dates.
+    const oldHlc = encodeHlc({ physical: Date.now() - 180 * 86_400_000, counter: 0, node: f.nodeId });
+    f.db.prepare("UPDATE entries SET updated_hlc = ? WHERE entry_id = ?").run(oldHlc, older.id);
+    const olderRef = formatRef("notes", older.id);
+    for (let i = 0; i < 10; i++) {
+      f.db
+        .prepare("INSERT INTO relations (link_id, entry_id, type, target, added_event) VALUES (?, ?, 'relates_to', ?, ?)")
+        .run(newId(), newId(), olderRef, newId());
+    }
+
+    const withImportance = assembleBrief(requestCtx(f, f.humanId, "human"), { scope: "notes", size: "normal" }) as { brief: string };
+    const olderIdx = withImportance.brief.indexOf("Older, heavily linked convention");
+    const newerIdx = withImportance.brief.indexOf("Newer, unlinked convention");
+    expect(olderIdx).toBeGreaterThanOrEqual(0);
+    expect(newerIdx).toBeGreaterThanOrEqual(0);
+    expect(olderIdx).toBeLessThan(newerIdx); // importance on: links outweigh the 180-day recency gap
+
+    const withoutImportance = assembleBrief(requestCtx(f, f.humanId, "human", new Map([["importance", false]])), {
+      scope: "notes",
+      size: "normal",
+    }) as { brief: string };
+    const olderIdxOff = withoutImportance.brief.indexOf("Older, heavily linked convention");
+    const newerIdxOff = withoutImportance.brief.indexOf("Newer, unlinked convention");
+    expect(newerIdxOff).toBeLessThan(olderIdxOff); // importance off: pure recency, newer sorts first
   });
 });

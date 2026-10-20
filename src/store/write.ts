@@ -1,4 +1,5 @@
 import type Database from "better-sqlite3";
+import { allocateOriginSeq } from "./origin-seq.js";
 import type { z } from "zod";
 import type { contextWriteInput } from "../tools/schemas.js";
 import { accessLevel, atLeast, decideWrite, effectiveVendorPolicy, type ClientInfo } from "../access/level.js";
@@ -16,6 +17,7 @@ import { canonicalJson, requestHash } from "./idempotency.js";
 import { applyEvent } from "./materialize.js";
 import { loadAccessSnapshot, loadClient, loadClientName, loadScopeByName, loadScopeById } from "./snapshot.js";
 import { syncSignalsForScope } from "../journal/sync.js";
+import { signStoredEvent } from "../security/event-signatures.js";
 
 /**
  * The single write path (SPEC v6 section 6): auth, idempotency, validation, redaction,
@@ -39,11 +41,23 @@ export type WriteResult =
 
 type Input = z.infer<typeof contextWriteInput>;
 
+/** Per-kind review-by defaults (Knowledge model 3.1, SPEC 7.6.7): "never, unless set" for every other kind. */
+const REVIEW_AFTER_DAYS: Readonly<Partial<Record<Kind, number>>> = {
+  status: 14,
+  handoff: 30,
+  fact: 180,
+  lesson: 180,
+  preference: 365,
+};
+
+/** `review_after` is set at creation from the table above, as an ISO date; SPEC 7.6.7. */
+function defaultReviewAfter(kind: Kind, createdAtMs: number): string | null {
+  const days = REVIEW_AFTER_DAYS[kind];
+  return days === undefined ? null : new Date(createdAtMs + days * 86_400_000).toISOString().slice(0, 10);
+}
+
 export function nextOriginSeq(db: Database.Database, nodeId: string): number {
-  const row = db.prepare("SELECT COALESCE(MAX(origin_seq), 0) + 1 AS next FROM events WHERE origin_node = ?").get(nodeId) as {
-    next: number;
-  };
-  return row.next;
+  return allocateOriginSeq(db, nodeId);
 }
 
 function recordRejection(
@@ -173,9 +187,14 @@ function performDirectWrite(
       reject(db, ctx.clientId, scope.id, input.id, new CtxdError("VALIDATION", "expected_rev is required with id", {}, "expected_rev"));
     }
     const row = db
-      .prepare("SELECT entry_id, kind, content_rev, status, scope_id FROM entries WHERE entry_id = ?")
-      .get(input.id) as { entry_id: string; kind: Kind; content_rev: string; status: Status; scope_id: string } | undefined;
-    if (!row || row.scope_id !== scope.id) {
+      .prepare("SELECT entry_id, kind, content_rev, status, scope_id, purged_at FROM entries WHERE entry_id = ?")
+      .get(input.id) as { entry_id: string; kind: Kind; content_rev: string; status: Status; scope_id: string; purged_at: string | null } | undefined;
+    // A purged entry is erased (SPEC 7.6.6), never a live update target: without this check, the
+    // node that ran the purge locally could still "revive" it by writing a fresh update on top of
+    // the purge's placeholder row, while every synced peer refuses to materialize that same event
+    // (sync/apply.ts's own `purged_at` guard) -- a real, found-via-property-test convergence split
+    // between the purging node and everyone else.
+    if (!row || row.scope_id !== scope.id || row.purged_at != null) {
       reject(db, ctx.clientId, scope.id, input.id, new CtxdError("NOT_FOUND", `Entry not found: ${input.id}`));
     }
     if (row.kind !== input.kind) {
@@ -318,6 +337,7 @@ function performDirectWrite(
         confirmed_by_user: input.confirmed_by_user ?? false,
         supersedes: supersedesTarget ? formatRef(supersedesTarget.scopeName, supersedesTarget.id) : null,
         skill_name: skillName ?? null,
+        review_after: defaultReviewAfter(input.kind, Date.now()),
       };
       appendPrimaryEvent(db, ctx, input, hash, allocSeq, { scopeId: scope.id, entryId, op: "create", part: "content", rev: contentRev, parentRevs: [], payload, eventId, hlc });
       applyEvent(db, { eventId, scopeId: scope.id, entryId, op: "create", part: "content", rev: contentRev, clientId: ctx.clientId, hlc, payload, prev: null });
@@ -477,6 +497,7 @@ function insertEvent(
     spec.prev ? canonicalJson(spec.prev) : null,
     nowIso(),
   );
+  signStoredEvent(db, spec.eventId, ctx.flags);
 }
 
 function performHeldWrite(

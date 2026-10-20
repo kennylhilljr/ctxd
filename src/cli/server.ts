@@ -9,6 +9,16 @@ import { checkDatabaseIntegrity, openDatabase } from "../store/db.js";
 import { startServer } from "../server/mcp.js";
 import { startSyncServer } from "../server/sync.js";
 import { runSync } from "./sync.js";
+import { HlcClock } from "../core/hlc.js";
+import type { WriteContext } from "../store/write.js";
+import { runDueDigests } from "../journal/digest.js";
+import { embedPendingEntries, ensureEmbedClient } from "../embed/compute.js";
+import { syncMirror } from "../mirror/markdown.js";
+import { expandHome } from "../config/config.js";
+import { KeyHelperProvider } from "../sealed/key-provider.js";
+import { createSealedPurgeReplay, SealedPoolStore, SqlCipherDatabaseProvider } from "../sealed/store.js";
+import { LoopbackTextModel } from "../local-model/client.js";
+import { runLocalModelSuggestions } from "../local-model/suggestions.js";
 
 export async function run(argv: string[]): Promise<number> {
   const { values } = parseArgs({
@@ -76,10 +86,26 @@ export async function run(argv: string[]): Promise<number> {
   // existence), so there is no live-reload property to preserve for these two flags.
   const flags = resolveFlags(config);
   const syncServeOn = isFlagOn(flags, "sync.serve");
+  const sealedKeys = isFlagOn(flags, "sealed_pools") ? new KeyHelperProvider(config.sealed.key_helper) : undefined;
+  const human = db.prepare("SELECT client_id FROM clients WHERE name = 'human'").get() as { client_id: string } | undefined;
+  const sealedStore = sealedKeys && human
+    ? new SealedPoolStore(db, dataDir, sealedKeys, new SqlCipherDatabaseProvider(), config.sealed.unlock_minutes, createSealedPurgeReplay(node.node_id, human.client_id, flags))
+    : undefined;
+  let localModel: LoopbackTextModel | undefined;
+  if (isFlagOn(flags, "local_model")) {
+    try {
+      localModel = new LoopbackTextModel(config.local_model.endpoint, config.local_model.model, config.local_model.timeout_ms);
+    } catch (err) {
+      sealedStore?.close();
+      db.close();
+      console.error(`ctxd server: invalid local model configuration: ${err instanceof Error ? err.message : String(err)}`);
+      return 1;
+    }
+  }
 
   const [server, syncServer] = await Promise.all([
-    startServer({ db, nodeId: node.node_id, listen: config.mcp.listen, configPath }),
-    syncServeOn ? startSyncServer({ db, nodeId: node.node_id, listen: config.sync.listen }) : undefined,
+    startServer({ db, nodeId: node.node_id, listen: config.mcp.listen, configPath, sealedStore }),
+    syncServeOn ? startSyncServer({ db, nodeId: node.node_id, listen: config.sync.listen, sealedKeys, sealedStore }) : undefined,
   ]);
   console.log(`ctxd server listening on ${config.mcp.listen}`);
   if (syncServeOn) console.log(`ctxd server: sync listener on ${config.sync.listen}`);
@@ -90,10 +116,88 @@ export async function run(argv: string[]): Promise<number> {
     pullInterval = setInterval(() => {
       if (pulling) return;
       pulling = true;
-      void runSync(db, node.node_id, undefined).finally(() => {
+      void runSync(db, node.node_id, undefined, sealedKeys, sealedStore).finally(() => {
         pulling = false;
       });
     }, config.sync.interval_seconds * 1000);
+  }
+
+  // Runs once immediately (the offline-catch-up case) and then hourly: cheap enough to check
+  // every tick, since digestAlreadyWritten makes every call but the first a no-op.
+  let digestInterval: NodeJS.Timeout | undefined;
+  if (isFlagOn(flags, "digest")) {
+    const human = db.prepare("SELECT client_id FROM clients WHERE name = 'human'").get() as { client_id: string } | undefined;
+    if (human) {
+      const digestCtx: WriteContext = { db, clock: new HlcClock(node.node_id), nodeId: node.node_id, clientId: human.client_id };
+      const tick = (): void => {
+        try {
+          runDueDigests(digestCtx, config, Date.now());
+        } catch (err) {
+          console.error(`ctxd server: weekly digest check failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      };
+      tick();
+      digestInterval = setInterval(tick, 3_600_000);
+    }
+  }
+
+  // Catch-up embedding (SPEC 11.2.1): off by default (writes outside ctxd's own data folder
+  // stay off by default -- the model cache -- and this also skips entirely, with no error, if
+  // the model was never fetched via `ctxd model fetch`).
+  let embedInterval: NodeJS.Timeout | undefined;
+  if (isFlagOn(flags, "semantic_search.compute")) {
+    let embedding = false;
+    const embedCtx: WriteContext = { db, clock: new HlcClock(node.node_id), nodeId: node.node_id, clientId: ensureEmbedClient(db, node.node_id) };
+    const tick = (): void => {
+      if (embedding) return;
+      embedding = true;
+      embedPendingEntries(embedCtx, dataDir)
+        .catch((err: unknown) => {
+          console.error(`ctxd server: embedding tick failed: ${err instanceof Error ? err.message : String(err)}`);
+        })
+        .finally(() => {
+          embedding = false;
+        });
+    };
+    tick();
+    embedInterval = setInterval(tick, 30_000);
+  }
+
+  let mirrorInterval: NodeJS.Timeout | undefined;
+  if (isFlagOn(flags, "mirror")) {
+    const human = db.prepare("SELECT client_id FROM clients WHERE name = 'human'").get() as { client_id: string } | undefined;
+    if (human) {
+      const mirrorCtx: WriteContext = { db, clock: new HlcClock(node.node_id), nodeId: node.node_id, clientId: human.client_id, flags };
+      let mirroring = false;
+      const tick = (): void => {
+        if (mirroring) return;
+        mirroring = true;
+        try { syncMirror(mirrorCtx, expandHome(config.mirror.dir)); }
+        catch (err) { console.error(`ctxd server: mirror tick failed: ${err instanceof Error ? err.message : String(err)}`); }
+        finally { mirroring = false; }
+      };
+      tick();
+      mirrorInterval = setInterval(tick, 2_000);
+    }
+  }
+
+  let localModelInterval: NodeJS.Timeout | undefined;
+  if (isFlagOn(flags, "local_model")) {
+    const human = db.prepare("SELECT client_id FROM clients WHERE name = 'human'").get() as { client_id: string } | undefined;
+    if (human) {
+      const modelCtx: WriteContext = { db, clock: new HlcClock(node.node_id), nodeId: node.node_id, clientId: human.client_id, flags };
+      const model = localModel!;
+      let generating = false;
+      const tick = (): void => {
+        if (generating) return;
+        generating = true;
+        void runLocalModelSuggestions(modelCtx, model).catch((err: unknown) => {
+          console.error(`ctxd server: local model tick failed: ${err instanceof Error ? err.message : String(err)}`);
+        }).finally(() => { generating = false; });
+      };
+      tick();
+      localModelInterval = setInterval(tick, 60_000);
+    }
   }
 
   let stopping = false;
@@ -101,7 +205,12 @@ export async function run(argv: string[]): Promise<number> {
     if (stopping) return;
     stopping = true;
     if (pullInterval) clearInterval(pullInterval);
+    if (digestInterval) clearInterval(digestInterval);
+    if (embedInterval) clearInterval(embedInterval);
+    if (mirrorInterval) clearInterval(mirrorInterval);
+    if (localModelInterval) clearInterval(localModelInterval);
     void Promise.all([server.close(), syncServer?.close()]).then(() => {
+      sealedStore?.close();
       db.close();
       process.exit(0);
     });

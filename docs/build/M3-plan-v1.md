@@ -23,7 +23,7 @@ unchanged, renumbered.
 | 4 | Purge propagation | `m3/sync-purge` | `m3/sync-conflicts` | Spec 7.6.6; purge (`meta`/`purge`) events now fast-forward unconditionally when received via sync, closing the gap that `decide` previously deferred every `meta` event; step 3's strip-on-receipt for any event (of any op) arriving for an already-purged entry |
 | 5 | Claims across nodes | `m3/sync-claims` | `m3/sync-purge` | Spec 7.4's claim rows; tentative claims while offline; deterministic earliest-claim_hlc tie-break (loser recorded as a lost `entry_siblings` row, not a `leases.state`); local- and sync-origin overlap detection into `claim_overlaps` |
 | 6 | ACL and scope metadata as events | `m3/sync-acl-events` | `m3/sync-claims` | Spec v8 4; review rules, grants, pool changes and scope/pool creation itself travel as `acl` events in the reserved `_system` scope instead of direct table writes (closes the M2 handoff gap in `src/cli/grant.ts`, `src/cli/pool.ts`, `src/store/review.ts`); closes the gap slice 2 found (named project scopes created independently on two nodes did not share a `scope_id`) by deriving scope and pool ids from their names (`core/ids.ts`'s `deterministicId`) instead of needing event-order conflict resolution for identity at all |
-| 7 | Freshness and property tests | `m3/sync-freshness` | `m3/sync-acl-events` | Spec 10.2; sync freshness in brief headers, the stale-sync notice; the N-node partition property suite |
+| 7 | Freshness and property tests | `m3/sync-freshness` | `m3/sync-acl-events` | Spec 11.1; sync freshness in brief headers, the stale-sync notice; the N-node partition property suite |
 
 Slice 1 is PR #26, merged. Slice 2 is this PR. Slices 3 to 7 follow in order; each is the stated
 milestone exit criterion's own piece, so M3 is not done until slice 7's property suite passes (the
@@ -427,10 +427,52 @@ duplicates this slice's own `/simplify` pass had just consolidated down to.
   nothing reads an acl event's own rev, but would need to change if a future feature ever needs
   to reference one acl event from another.
 
-## Slice 7
+## Slice 7: freshness and the N-node partition property suite
 
-Its own PR restates its piece of the bullet list in `docs/build/M3-M6-kickoff-v1.md` section 1 in
-the same level of detail as slices 1 to 6 above, written at the start of that slice's branch
-rather than all up front here, since it depends on decisions earlier slices made along the way.
-This document is updated with a row in the table above, not rewritten, as the slice's branch
-opens.
+**Freshness** (`src/sync/freshness.ts`, new): `syncFreshness(db)` reports `{hasPeers,
+lastSyncedAt, stale}` from `peers.last_synced_at`, `stale` true past ten minutes since the last
+successful pull, no peer at all not counted as stale. Shared by `store/claim.ts`'s slice 5
+tentative-claim check and by `context_brief`'s own `sync` header field (Spec 11.1), which was
+hardcoded `null` through slice 6; a stale-sync notice is added to the brief when `stale` is true.
+
+**The property suite** (`test/unit/sync-partition-property.test.ts`, new) is M3's own stated exit
+criterion: three in-process SQLite nodes exchange `WireEvent`s through the real
+`servePull`/`applyEvent` functions directly (no HTTP, so the whole matrix runs fast), under random
+partitions, heals and delivery orders, asserting every node converges to the same materialized
+state. `test/conformance/sync.test.ts` still covers the transport itself with two real servers.
+
+The suite found six real, independent convergence bugs, all stemming from the same root cause:
+`servePull` orders its page by `(origin_node, origin_seq)` (Spec 7.1), which preserves each
+origin's own order but not causal order across origins, so a dependent cross-origin event can
+arrive before what it depends on. Fixed:
+
+- A released-and-reclaimed claim lineage was invisible to its own conflict check once the lease
+  left the `active` state; `currentClaimHeadFor` now reports a lease's `claim_hlc` regardless of
+  state, and a new claim's parentRevs references whatever local row already exists, active or
+  closed.
+- A new `leases.earliest_claim_hlc` column tracks a task's smallest claim_hlc across every epoch,
+  as a monotonic minimum that never resets, so a straggler claim racing an already-closed-and-
+  reclaimed epoch is resolved against the task's true earliest claimant the same way on every
+  node regardless of delivery order.
+- A purged entry could be revived by a local update on the node that purged it; `write.ts`'s
+  update path now treats a purged entry as not found, the same as a missing one.
+- A new `events.materialized` column and `retryPendingFor` (`src/sync/apply.ts`) defer a
+  cross-origin event whose parent has not arrived yet instead of dropping it or misjudging a
+  clean chain as conflicted, retrying every deferred event for an entry each time a sibling event
+  for it materializes.
+- Two independent releases of the same still-active claim (a human client can release a claim it
+  never held) now resolve by HLC, not arrival order, with the same guarded-upsert pattern the
+  purge guard already used (shared as `isStaleByHlc`).
+- `SCHEMA_VERSION` is bumped to 12 for the two new columns above.
+
+**Deliberately out of scope, named rather than guessed at:** the random fuzzer excludes `release`.
+A claim made in isolation that references its own prior claim as parent (a legitimate renewal or
+reclaim) is indistinguishable at the wire-event level from the same claim racing a cross-origin
+release of that exact lineage it never saw, specifically when the release is a human override of a
+claim issued by a third node, since `servePull`'s per-origin ordering only guarantees a claim
+arrives before its *own* later release. Closing this needs the claim/release wire events to carry
+proof of what they observed, not a targeted patch; eight hand-written regression tests, one per
+scenario the suite does reliably converge on (including every release case above), stand in for
+fuzzer coverage of this gap in the meantime.
+
+Full detail: [M3-slice7-handoff-v1](M3-slice7-handoff-v1.md).

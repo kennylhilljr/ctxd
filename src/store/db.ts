@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import Database from "better-sqlite3";
 import { SCHEMA_SQL, SCHEMA_VERSION } from "./schema.js";
+import { loadVecExtension, VEC0_TABLE_SQL } from "../embed/vec.js";
 
 export interface OpenDatabaseOptions {
   /** Allow initializing a fresh database. Only `ctxd init` passes true (SPEC v6 section 12). */
@@ -46,6 +47,10 @@ export function openDatabase(path: string, { create = false }: OpenDatabaseOptio
   const db = new Database(path);
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
+  // Loaded unconditionally, independent of semantic_search.compute: every node must be able to
+  // store and query vectors that arrive through sync, even one that never computes its own
+  // (ADR 0004). No model and no network dependency, so this is always cheap and safe.
+  loadVecExtension(db);
   const version = db.pragma("user_version", { simple: true }) as number;
   if (version === 0) {
     if (!create) {
@@ -54,11 +59,58 @@ export function openDatabase(path: string, { create = false }: OpenDatabaseOptio
     }
     db.transaction(() => {
       db.exec(SCHEMA_SQL);
+      db.exec(VEC0_TABLE_SQL);
       db.pragma(`user_version = ${SCHEMA_VERSION}`);
     })();
-  } else if (version !== SCHEMA_VERSION) {
+  } else if (version === 13 && SCHEMA_VERSION >= 14) {
+    db.transaction(() => {
+      db.exec("ALTER TABLE events ADD COLUMN payload_hash TEXT; ALTER TABLE events ADD COLUMN signature TEXT; ALTER TABLE events ADD COLUMN public_key TEXT;");
+      db.exec("CREATE TABLE node_keys (node_id TEXT PRIMARY KEY, public_key TEXT NOT NULL, first_seen_at TEXT NOT NULL)");
+      db.pragma("user_version = 14");
+    })();
+  }
+  const migratedVersion = db.pragma("user_version", { simple: true }) as number;
+  if (migratedVersion === 14 && SCHEMA_VERSION >= 15) {
+    db.transaction(() => {
+      db.exec("CREATE TABLE mirror_conflicts (path TEXT PRIMARY KEY, entry_id TEXT NOT NULL, file_rev TEXT, current_rev TEXT NOT NULL, reason TEXT NOT NULL, created_at TEXT NOT NULL)");
+      db.exec("CREATE TABLE archive_requests (entry_id TEXT PRIMARY KEY, path TEXT NOT NULL, created_at TEXT NOT NULL)");
+      db.pragma("user_version = 15");
+    })();
+  }
+  const mirrorVersion = db.pragma("user_version", { simple: true }) as number;
+  if (mirrorVersion === 15 && SCHEMA_VERSION >= 16) {
+    db.transaction(() => {
+      db.exec("CREATE TABLE sealed_purge_queue (pool_id TEXT NOT NULL, entry_id TEXT NOT NULL, requested_at TEXT NOT NULL, PRIMARY KEY (pool_id, entry_id))");
+      db.pragma("user_version = 16");
+    })();
+  }
+  const sealedVersion = db.pragma("user_version", { simple: true }) as number;
+  if (sealedVersion === 16 && SCHEMA_VERSION >= 17) {
+    db.transaction(() => {
+      db.exec("ALTER TABLE events ADD COLUMN prev_hash TEXT; ALTER TABLE node_keys ADD COLUMN first_signed_seq INTEGER NOT NULL DEFAULT 0; ALTER TABLE peers ADD COLUMN remote_node_id TEXT; ALTER TABLE peers ADD COLUMN remote_public_key TEXT;");
+      db.pragma("user_version = 17");
+    })();
+  }
+  const finalVersion = db.pragma("user_version", { simple: true }) as number;
+  if (finalVersion === 17 && SCHEMA_VERSION >= 18) {
+    db.transaction(() => {
+      db.exec("ALTER TABLE events ADD COLUMN payload_stripped INTEGER NOT NULL DEFAULT 0");
+      db.exec("UPDATE events SET payload_stripped = 1 WHERE payload = '{\"purged\":true}' AND op != 'purge'");
+      db.pragma("user_version = 18");
+    })();
+  }
+  const purgeMetadataVersion = db.pragma("user_version", { simple: true }) as number;
+  if (purgeMetadataVersion === 18 && SCHEMA_VERSION >= 19) {
+    db.transaction(() => {
+      db.exec("CREATE TABLE node_origin_sequences (node_id TEXT PRIMARY KEY, next_seq INTEGER NOT NULL)");
+      db.exec("INSERT INTO node_origin_sequences (node_id, next_seq) SELECT origin_node, MAX(origin_seq) FROM events GROUP BY origin_node");
+      db.pragma("user_version = 19");
+    })();
+  }
+  const sequenceVersion = db.pragma("user_version", { simple: true }) as number;
+  if (sequenceVersion !== SCHEMA_VERSION) {
     db.close();
-    throw new Error(`Database schema version ${version} does not match ${SCHEMA_VERSION}; no migration is defined yet.`);
+    throw new Error(`Database schema version ${sequenceVersion} does not match ${SCHEMA_VERSION}; no migration is defined yet.`);
   }
   return db;
 }

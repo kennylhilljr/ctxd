@@ -17,6 +17,7 @@
  * to apply to all of them (SPEC v8 4; `src/store/materialize.ts`'s `applyAclEvent`).
  */
 import type Database from "better-sqlite3";
+import { allocateOriginSeq } from "./origin-seq.js";
 import { makeRev, newId, revVersion } from "../core/ids.js";
 import { nowIso } from "../core/time.js";
 import { CtxdError } from "../core/errors.js";
@@ -27,6 +28,7 @@ import { appendAclEvent } from "./acl.js";
 import { applyEvent } from "./materialize.js";
 import { loadClient, loadClientName, loadScopeByName } from "./snapshot.js";
 import type { WriteContext } from "./write.js";
+import { signStoredEvent } from "../security/event-signatures.js";
 
 export interface ReviewRule {
   kind: string;
@@ -77,6 +79,24 @@ export interface ReviewReport {
   drift: DriftNotice[];
   takeovers: Takeover[];
   rejections: RejectionSummary[];
+  mirror_conflicts: { path: string; ref: string; reason: string; at: string }[];
+  archive_requests: { path: string; ref: string; at: string }[];
+}
+
+function mirrorConflicts(db: Database.Database): ReviewReport["mirror_conflicts"] {
+  const rows = db.prepare("SELECT path, entry_id, reason, created_at FROM mirror_conflicts ORDER BY created_at DESC").all() as { path: string; entry_id: string; reason: string; created_at: string }[];
+  return rows.map((row) => {
+    const entry = db.prepare("SELECT scope_id FROM entries WHERE entry_id = ?").get(row.entry_id) as { scope_id: string };
+    return { path: row.path, ref: entryRef(db, entry.scope_id, row.entry_id), reason: row.reason, at: row.created_at };
+  });
+}
+
+function archiveRequests(db: Database.Database): ReviewReport["archive_requests"] {
+  const rows = db.prepare("SELECT path, entry_id, created_at FROM archive_requests ORDER BY created_at DESC").all() as { path: string; entry_id: string; created_at: string }[];
+  return rows.map((row) => {
+    const entry = db.prepare("SELECT scope_id FROM entries WHERE entry_id = ?").get(row.entry_id) as { scope_id: string };
+    return { path: row.path, ref: entryRef(db, entry.scope_id, row.entry_id), at: row.created_at };
+  });
 }
 
 function entryRef(db: Database.Database, scopeId: string, entryId: string): string {
@@ -194,11 +214,13 @@ export function buildReviewReport(db: Database.Database, rejectionWindowDays = 7
     drift: driftNotices(db),
     takeovers: takeovers(db),
     rejections: rejectionSummary(db, rejectionWindowDays),
+    mirror_conflicts: mirrorConflicts(db),
+    archive_requests: archiveRequests(db),
   };
 }
 
 function nextOriginSeq(db: Database.Database, nodeId: string): number {
-  return (db.prepare("SELECT COALESCE(MAX(origin_seq), 0) + 1 AS next FROM events WHERE origin_node = ?").get(nodeId) as { next: number }).next;
+  return allocateOriginSeq(db, nodeId);
 }
 
 /** `ctxd review --approve <ref>` (human only): moves a proposed or conflicted entry to active. */
@@ -227,6 +249,7 @@ export function resolveEntry(ctx: WriteContext, ref: string): { ref: string; sta
       `INSERT INTO events (event_id, origin_node, origin_seq, hlc, scope_id, entry_id, op, part, parent_revs, rev, client_id, session_ref, request_id, request_hash, payload, prev, received_at)
        VALUES (?, ?, ?, ?, ?, ?, 'resolve', 'status', ?, ?, ?, NULL, NULL, NULL, '{}', NULL, ?)`,
     ).run(eventId, ctx.nodeId, nextOriginSeq(db, ctx.nodeId), hlc, row.scope_id, row.entry_id, canonicalJson([row.status_rev]), rev, ctx.clientId, nowIso());
+    signStoredEvent(db, eventId, ctx.flags);
     applyEvent(db, { eventId, scopeId: row.scope_id, entryId: row.entry_id, op: "resolve", part: "status", rev, clientId: ctx.clientId, hlc, payload: {}, prev: null });
   })();
 

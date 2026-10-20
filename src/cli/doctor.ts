@@ -16,7 +16,9 @@ import { parseArgs } from "node:util";
 import type Database from "better-sqlite3";
 import { resolveConfigPath, resolveDataDir, tokensDir } from "./common.js";
 import { type CtxdConfig, loadConfig } from "../config/config.js";
+import { isFlagOn, resolveFlags } from "../config/flags.js";
 import { checkDatabaseIntegrity, openDatabase } from "../store/db.js";
+import { isModelCached, modelCacheDir } from "../embed/model.js";
 import {
   claudeCodeSettingsPath,
   codexConfigPath,
@@ -132,6 +134,20 @@ export function checkFileVault(execFile: typeof execFileSync = execFileSync): Do
   }
 }
 
+/** Semantic search (SPEC v8 11.2): informational when off; flags the gap when on but the model is not cached, since search still runs but silently as keyword-only. */
+export function checkSemanticSearch(config: CtxdConfig, dataDir: string): DoctorCheck {
+  const on = isFlagOn(resolveFlags(config), "semantic_search");
+  if (!on) return { name: "semantic search", ok: true, detail: "semantic_search is off; keyword search only" };
+  const cached = isModelCached(dataDir);
+  return {
+    name: "semantic search",
+    ok: cached,
+    detail: cached
+      ? "embedding model is cached; hybrid search is active"
+      : `semantic_search is on but the embedding model is not cached at ${modelCacheDir(dataDir)}; search degrades to keyword-only. Run "ctxd model fetch".`,
+  };
+}
+
 export function checkHookInstallation(home: string = homedir()): DoctorCheck {
   const claudeCode = isClaudeCodeHooksInstalled(claudeCodeSettingsPath(home));
   const codex = isCodexHooksInstalled(codexConfigPath(home));
@@ -145,6 +161,7 @@ export function checkHookInstallation(home: string = homedir()): DoctorCheck {
 
 export interface DoctorOptions {
   configPath: string;
+  dataDir: string;
   home?: string;
   fetchImpl?: typeof fetch;
   execFile?: typeof execFileSync;
@@ -159,6 +176,7 @@ export async function runDoctor(db: Database.Database, config: CtxdConfig, opts:
     await checkPeers(db, opts.fetchImpl),
     checkFileVault(opts.execFile),
     checkHookInstallation(opts.home),
+    checkSemanticSearch(config, opts.dataDir),
   ];
 }
 
@@ -184,7 +202,7 @@ export async function run(argv: string[]): Promise<number> {
     return 1;
   }
 
-  const checks = await runDoctor(db, config, { configPath });
+  const checks = await runDoctor(db, config, { configPath, dataDir });
   db.close();
 
   let allOk = true;

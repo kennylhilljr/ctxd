@@ -7,6 +7,8 @@ import { canonicalJson, requestHash } from "./idempotency.js";
 import { applyEvent } from "./materialize.js";
 import { loadClient } from "./snapshot.js";
 import type { WriteContext } from "./write.js";
+import { signStoredEvent } from "../security/event-signatures.js";
+import { allocateOriginSeq } from "./origin-seq.js";
 
 /**
  * `ctxd purge <ref> --reason <text>` (SPEC v7 section 7.6.6): human only, confirmed. Erases
@@ -72,9 +74,7 @@ export function purgeEntry(ctx: WriteContext, ref: string, reason: string): Purg
 
   const eventId = newId();
   const hlc = ctx.clock.tick();
-  const nextOriginSeq = (
-    db.prepare("SELECT COALESCE(MAX(origin_seq), 0) + 1 AS next FROM events WHERE origin_node = ?").get(ctx.nodeId) as { next: number }
-  ).next;
+  const nextOriginSeq = allocateOriginSeq(db, ctx.nodeId);
   // scope_id, kind and slug travel in the payload (not just fingerprint/reason) so a replay of
   // this event alone -- e.g. a rebuild, where the entry's create event has already been neutered
   // to {"purged": true} -- has enough to reconstruct the stub row (materialize.ts's purge
@@ -86,6 +86,7 @@ export function purgeEntry(ctx: WriteContext, ref: string, reason: string): Purg
       `INSERT INTO events (event_id, origin_node, origin_seq, hlc, scope_id, entry_id, op, part, parent_revs, rev, client_id, session_ref, request_id, request_hash, payload, prev, received_at)
        VALUES (?, ?, ?, ?, ?, ?, 'purge', 'meta', '[]', ?, ?, NULL, NULL, NULL, ?, NULL, ?)`,
     ).run(eventId, ctx.nodeId, nextOriginSeq, hlc, row.scope_id, row.entry_id, makeRev(1, eventId), ctx.clientId, canonicalJson(payload), nowIso());
+    signStoredEvent(db, eventId, ctx.flags);
     applyEvent(db, {
       eventId,
       scopeId: row.scope_id,

@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import { openDatabase } from "../../src/store/db.js";
 import { newId } from "../../src/core/ids.js";
 import { sha256Hex } from "../../src/core/hash.js";
-import { resolveBearerAuth } from "../../src/server/auth.js";
+import { resolveBearerAuth, resolvePeerAuth } from "../../src/server/auth.js";
 
 function freshDb(): Database.Database {
   const path = join(mkdtempSync(join(tmpdir(), "ctxd-auth-")), "ctxd.db");
@@ -115,5 +115,15 @@ describe("resolveBearerAuth (SPEC v6 sections 8.4, 10.5)", () => {
     );
 
     expect(resolveBearerAuth(db, token)).toBeNull();
+  });
+});
+
+describe("resolvePeerAuth", () => {
+  it("returns the durable remote node identity and key bound to the token", () => {
+    const db = freshDb();
+    const token = "peer-token";
+    db.prepare("INSERT INTO peers (peer_id, name, url, role, incoming_token_hash, created_at, remote_node_id, remote_public_key) VALUES (?, 'node-b', 'http://127.0.0.1:7412', 'home', ?, ?, ?, ?)")
+      .run(newId(), sha256Hex(token), now(), "remote-node-id", "remote-public-key");
+    expect(resolvePeerAuth(db, token)).toMatchObject({ remoteNodeId: "remote-node-id", remotePublicKey: "remote-public-key" });
   });
 });

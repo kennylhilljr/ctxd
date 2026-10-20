@@ -16,8 +16,28 @@
  * `acl_cursors` table backs an HLC guard (found during `/simplify`) so a grant and a revoke of
  * the same pool/scope applied out of causal order converge on whichever is actually later,
  * instead of letting a stale grant silently un-revoke what a later revoke already took away.
+ * Bumped to 12 for M3 slice 7 (sync freshness and the N-node partition property suite, Spec
+ * 7.1-7.4): `events.materialized` marks a stored event that `src/sync/apply.ts`'s `decide`
+ * deferred as missing-parent (per-origin pull batching does not guarantee cross-origin causal
+ * delivery order), retried once a sibling event for the same entry materializes
+ * (`retryPendingFor`); `leases.earliest_claim_hlc` tracks a task's smallest claim_hlc across every
+ * epoch, so a late-arriving concurrent claim is always resolved against the task's true earliest
+ * claimant, not whichever claim happens to be current right now.
+ * Bumped to 13 for M5 slice 8 (semantic search, Spec 11.2.1): `events.part`'s CHECK now allows
+ * `'embedding'`; the new `embeddings` table materializes embedding vectors, current content
+ * only (like FTS), keyed by (entry_id, model_id) so a different model's vector is kept alongside
+ * rather than overwritten.
+ * Bumped to 14 for M6 slice 1 (signed events, Spec v9 section 7.7): immutable payload hashes,
+ * Ed25519 signatures, and trusted per-origin public keys survive purge and verify on replay.
+ * Bumped to 15 for M6 slice 2: mirror conflicts and deletion archive requests are local review
+ * records. Successful edits and imports still travel through ordinary events.
+ * Bumped to 16 for M6 slice 3: sealed purge work may wait for its pool key.
+ * Bumped to 17 for M6 hardening: signatures cover the immutable envelope and separate retained
+ * payload hashes; peer records bind authenticated tokens to remote node identities and keys.
+ * Bumped to 18: payload_stripped is trusted stored state for verified purge erasure.
+ * Bumped to 19: one durable origin sequence allocator coordinates shared and sealed stores.
  */
-export const SCHEMA_VERSION = 11;
+export const SCHEMA_VERSION = 19;
 
 export const SCHEMA_SQL = `
 CREATE TABLE nodes (
@@ -26,6 +46,18 @@ CREATE TABLE nodes (
   role         TEXT NOT NULL CHECK (role IN ('home','roaming')),
   revoked_at   TEXT,
   created_at   TEXT NOT NULL
+);
+
+CREATE TABLE node_origin_sequences (
+  node_id TEXT PRIMARY KEY,
+  next_seq INTEGER NOT NULL
+);
+
+CREATE TABLE node_keys (
+  node_id      TEXT PRIMARY KEY,
+  public_key   TEXT NOT NULL,
+  first_seen_at TEXT NOT NULL,
+  first_signed_seq INTEGER NOT NULL
 );
 
 CREATE TABLE peers (                   -- a machine we sync with (Spec 7.1); never a row in nodes
@@ -38,6 +70,8 @@ CREATE TABLE peers (                   -- a machine we sync with (Spec 7.1); nev
   revoked_at          TEXT,
   created_at          TEXT NOT NULL,
   last_synced_at      TEXT                -- set when a pull from this peer last completed successfully (Spec 7.4's tentative-claim check)
+  ,remote_node_id     TEXT
+  ,remote_public_key  TEXT
 );
 
 CREATE TABLE clients (
@@ -73,7 +107,7 @@ CREATE TABLE events (
   scope_id     TEXT NOT NULL,
   entry_id     TEXT NOT NULL,
   op           TEXT NOT NULL CHECK (op IN ('create','update','status','delete','resolve','claim','release','relate','unrelate','flag','unflag','quarantine','unquarantine','revert','purge','acl','suspend','resume')),
-  part         TEXT NOT NULL CHECK (part IN ('content','status','relations','claim','meta')),
+  part         TEXT NOT NULL CHECK (part IN ('content','status','relations','claim','meta','embedding')),
   parent_revs  TEXT NOT NULL DEFAULT '[]',
   rev          TEXT NOT NULL,
   client_id    TEXT NOT NULL,
@@ -82,7 +116,17 @@ CREATE TABLE events (
   request_hash TEXT,                 -- SHA-256 of the canonical request input, for idempotency checks
   payload      TEXT NOT NULL,
   prev         TEXT,                   -- JSON: prior values of the changed fields of this part (NULL on create)
+  payload_hash TEXT,                   -- SHA-256 of canonical payload and prev; retained by purge
+  prev_hash    TEXT,                   -- SHA-256 of canonical prior values; retained by purge
+  signature    TEXT,                   -- base64 Ed25519 signature over payload_hash; NULL for unsigned legacy events
+  public_key   TEXT,                   -- base64 SPKI key, pinned in node_keys on first verified event
+  payload_stripped INTEGER NOT NULL DEFAULT 0,
   received_at  TEXT NOT NULL,
+  materialized INTEGER NOT NULL DEFAULT 1, -- 0: stored but deferred, sync/apply.ts's "missing-parent"
+                                            -- row (its own create, or an earlier rev, hasn't arrived
+                                            -- yet); retried once a sibling event for the same entry
+                                            -- materializes (its own real apply, every local write and
+                                            -- rebuild, always sets this to 1 up front)
   UNIQUE (origin_node, origin_seq),
   UNIQUE (client_id, request_id)
 );
@@ -195,6 +239,13 @@ CREATE TABLE pool_enrollments (        -- machines allowed to hold a sealed pool
   PRIMARY KEY (pool_id, node_id)
 );
 
+CREATE TABLE sealed_purge_queue (
+  pool_id      TEXT NOT NULL,
+  entry_id     TEXT NOT NULL,
+  requested_at TEXT NOT NULL,
+  PRIMARY KEY (pool_id, entry_id)
+);
+
 CREATE TABLE client_grants (           -- temporary grants
   client_id    TEXT NOT NULL,
   scope_id     TEXT NOT NULL,
@@ -292,6 +343,21 @@ CREATE TABLE mirror_files (            -- local only: Markdown mirror state (12.
   written_at   TEXT NOT NULL
 );
 
+CREATE TABLE mirror_conflicts (
+  path         TEXT PRIMARY KEY,
+  entry_id     TEXT NOT NULL,
+  file_rev     TEXT,
+  current_rev  TEXT NOT NULL,
+  reason       TEXT NOT NULL,
+  created_at   TEXT NOT NULL
+);
+
+CREATE TABLE archive_requests (
+  entry_id     TEXT PRIMARY KEY,
+  path         TEXT NOT NULL,
+  created_at   TEXT NOT NULL
+);
+
 CREATE TABLE tool_metrics (            -- local only: response metering (8.5)
   at           TEXT NOT NULL,
   client_id    TEXT NOT NULL,
@@ -327,6 +393,11 @@ CREATE TABLE leases (
   paths        TEXT,                 -- JSON array of normalized patterns; NULL = unknown, '[]' = no writes
   claim_event  TEXT NOT NULL,
   claim_hlc    TEXT NOT NULL,
+  earliest_claim_hlc TEXT NOT NULL, -- the smallest claim_hlc this task has EVER contended (7.4): a
+                                     -- late-arriving concurrent claim from a closed-and-reclaimed
+                                     -- epoch is still compared against this, not the current
+                                     -- (possibly much later) claim_hlc, so "earliest wins" holds
+                                     -- regardless of delivery order even across a release/reclaim
   session_ref  TEXT,
   base_head    TEXT,                 -- git HEAD when claimed, for the drift audit
   expires_at   TEXT NOT NULL,
@@ -373,6 +444,16 @@ CREATE TABLE sync_state (
 
 CREATE VIRTUAL TABLE entries_fts USING fts5(
   title, body, tags, content='entries', content_rowid='rowid'
+);
+
+CREATE TABLE embeddings (               -- materialized from 'embedding' events (M5, 11.2.1); current content only, like FTS
+  entry_id     TEXT NOT NULL,
+  model_id     TEXT NOT NULL,           -- e.g. "Xenova/all-MiniLM-L6-v2@q8"
+  dim          INTEGER NOT NULL,
+  vector       TEXT NOT NULL,           -- JSON array of floats; sqlite-vec reads this into its own virtual table at query time
+  rev          TEXT NOT NULL,           -- the content rev this embedding was computed from
+  updated_hlc  TEXT NOT NULL,
+  PRIMARY KEY (entry_id, model_id)
 );
 
 CREATE TABLE commits (                 -- local facts recorded by the PostToolUse hook (SPEC v7 7.5)

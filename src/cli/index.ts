@@ -40,6 +40,15 @@ import { runBackupCommand, runRestoreCommand } from "./backup.js";
 import { run as runDoctorCommand } from "./doctor.js";
 import { runStatus, runStatusline } from "./status.js";
 import { run as runWorkerCommand } from "./worker.js";
+import { run as runTidyCommand } from "./tidy.js";
+import { run as runDigestCommand } from "./digest.js";
+import { run as runSkillsCommand } from "./skills.js";
+import { run as runModelCommand } from "./model.js";
+import { run as runExportCommand } from "./export.js";
+import { run as runMirrorCommand } from "./mirror.js";
+import { run as runImportCommand } from "./import.js";
+import { run as runOpenCommand } from "./open.js";
+import { run as runArchiveRequestCommand } from "./archive-request.js";
 
 /** Each command's parsed-args entry point, added as its milestone lands. */
 const COMMAND_RUNNERS: Record<string, (argv: string[]) => number | Promise<number>> = {
@@ -54,6 +63,7 @@ const COMMAND_RUNNERS: Record<string, (argv: string[]) => number | Promise<numbe
   persona: runPersonaCommand,
   server: runServerCommand,
   mcp: runMcpCommand,
+  stdio: runMcpCommand, // SPEC v8 calls the same command "ctxd stdio" in 9.6/16.3 and "ctxd mcp" in 8.4; both names stay live (src/cli/mcp.ts's own header)
   flag: runFlagCommand,
   purge: runPurgeCommand,
   quarantine: runQuarantineCommand,
@@ -81,6 +91,15 @@ const COMMAND_RUNNERS: Record<string, (argv: string[]) => number | Promise<numbe
   status: runStatus,
   statusline: runStatusline,
   worker: runWorkerCommand,
+  tidy: runTidyCommand,
+  digest: runDigestCommand,
+  skills: runSkillsCommand,
+  model: runModelCommand,
+  export: runExportCommand,
+  mirror: runMirrorCommand,
+  import: runImportCommand,
+  open: runOpenCommand,
+  "archive-request": runArchiveRequestCommand,
 };
 
 const COMMANDS: Record<string, { milestone: string; summary: string }> = {
@@ -123,8 +142,9 @@ const COMMANDS: Record<string, { milestone: string; summary: string }> = {
   grep: { milestone: "M2", summary: "Full-text search within a subtree" },
   open: { milestone: "M6", summary: "Open an entry's mirror file in $EDITOR" },
   mirror: { milestone: "M6", summary: "Start, stop or check the Markdown mirror" },
+  "archive-request": { milestone: "M6", summary: "Confirm a mirror deletion archive request" },
   import: { milestone: "M6", summary: "Import Markdown files as proposed entries" },
-  skills: { milestone: "M2", summary: "List, show, sync or import skills" },
+  skills: { milestone: "M5", summary: "List, show, sync or import skills" },
   remember: { milestone: "M2", summary: "Record a preference, convention or fact in _me" },
   log: { milestone: "M2", summary: "Add a journal entry" },
   journal: { milestone: "M2", summary: "Read the journal by day or time" },
@@ -132,6 +152,7 @@ const COMMANDS: Record<string, { milestone: string; summary: string }> = {
   signals: { milestone: "M2", summary: "Open blockers, incidents, blocking tasks and flags" },
   stats: { milestone: "M1", summary: "Response sizes per tool and client" },
   features: { milestone: "M3", summary: "List or set feature flags" },
+  model: { milestone: "M5", summary: "Fetch or check the local embedding model" },
 };
 
 function usage(): string {

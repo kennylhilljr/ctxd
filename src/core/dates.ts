@@ -58,3 +58,26 @@ export function isoWeekOfDate(y: number, m: number, d: number): string {
   const week = 1 + Math.floor((thursday - Date.UTC(year, 0, 1)) / (7 * DAY_MS));
   return `${year}-W${String(week).padStart(2, "0")}`;
 }
+
+/** The Monday-to-Monday instant range of an ISO week id, e.g. "2026-W42", in a time zone (weekly digest, SPEC v8 11.5). */
+export function isoWeekBounds(weekId: string, timeZone?: string): { from: number; to: number } {
+  const m = /^(\d{4})-W(\d{2})$/.exec(weekId);
+  if (!m) throw new Error(`Invalid ISO week id: ${weekId}`);
+  const year = Number(m[1]);
+  const week = Number(m[2]);
+  // Jan 4 is always in ISO week 1, so its week's Monday anchors every other week of the year.
+  const jan4 = Date.UTC(year, 0, 4);
+  const jan4Weekday = (new Date(jan4).getUTCDay() + 6) % 7; // Monday = 0
+  const monday = new Date(jan4 - jan4Weekday * DAY_MS + (week - 1) * 7 * DAY_MS);
+  const from = zonedTime(monday.getUTCFullYear(), monday.getUTCMonth() + 1, monday.getUTCDate(), 0, 0, 0, 0, timeZone);
+  return { from, to: from + 7 * DAY_MS };
+}
+
+/** Weekday name (lowercase, e.g. "sunday") and hour (0-23) of an instant in a time zone, for the weekly digest's day/time gate (SPEC v8 11.5). */
+export function localWeekdayAndHour(at: number, timeZone?: string): { weekday: string; hour: number } {
+  const found = new Intl.DateTimeFormat("en-US", { timeZone, weekday: "long", hour: "2-digit", hourCycle: "h23" }).formatToParts(at);
+  return {
+    weekday: (found.find((p) => p.type === "weekday")?.value ?? "").toLowerCase(),
+    hour: Number(found.find((p) => p.type === "hour")?.value ?? 0),
+  };
+}

@@ -6,10 +6,13 @@ import { CtxdError } from "../core/errors.js";
 import { formatRef, parseRef } from "../model/refs.js";
 import { IntentError, computeDrift, normalizeChangedPath, normalizeIntent, type OverlapPair } from "../claims/intent.js";
 import { persistOverlaps, scanOverlappingLeases } from "../claims/overlap.js";
+import { syncFreshness } from "../sync/freshness.js";
 import { canonicalJson, requestHash } from "./idempotency.js";
 import { applyEvent } from "./materialize.js";
 import { loadAccessSnapshot, loadClient, loadClientName, loadScopeByName } from "./snapshot.js";
 import { writeEntry, type WriteContext } from "./write.js";
+import { signStoredEvent } from "../security/event-signatures.js";
+import { allocateOriginSeq } from "./origin-seq.js";
 
 /**
  * context_claim (SPEC v6 section 7.5): claims are events in the task entry's history; `leases`
@@ -145,8 +148,7 @@ function resolveOrCreateTask(ctx: WriteContext, input: ClaimInput, scope: { id: 
 }
 
 function nextOriginSeq(db: Database.Database, nodeId: string): number {
-  return (db.prepare("SELECT COALESCE(MAX(origin_seq), 0) + 1 AS next FROM events WHERE origin_node = ?").get(nodeId) as { next: number })
-    .next;
+  return allocateOriginSeq(db, nodeId);
 }
 
 /** The session's last-observed git HEAD (src/cli/hook.ts writes this on every hook call), or null if unknown. */
@@ -155,23 +157,9 @@ function sessionHead(db: Database.Database, sessionRef: string): string | null {
   return row?.head ?? null;
 }
 
-const TENTATIVE_AFTER_MS = 10 * 60_000;
-
-/**
- * Spec 7.4: "Claims made while a node has had no successful sync for 10 minutes are flagged
- * tentative." A node with no peers at all has nothing to be partitioned from, so it is exempt
- * (every claim behaves exactly as it did before sync existed); one with peers is tentative from
- * the moment 10 minutes pass with no peer's `last_synced_at` refreshed (src/sync/pull.ts sets it
- * on every successful pull, whether or not `sync` is currently switched on for this node).
- */
+/** Spec 7.4: "Claims made while a node has had no successful sync for 10 minutes are flagged tentative." Same check the brief header's stale-sync notice uses (M3 slice 7, src/sync/freshness.ts). */
 function isTentative(db: Database.Database): boolean {
-  const row = db.prepare("SELECT COUNT(*) AS n, MAX(last_synced_at) AS latest FROM peers WHERE revoked_at IS NULL").get() as {
-    n: number;
-    latest: string | null;
-  };
-  if (row.n === 0) return false;
-  if (row.latest === null) return true;
-  return Date.now() - Date.parse(row.latest) >= TENTATIVE_AFTER_MS;
+  return syncFreshness(db).stale;
 }
 
 function claimTask(ctx: WriteContext, input: ClaimInput, scope: { id: string; name: string }, client: ClientInfo): unknown {
@@ -225,9 +213,15 @@ function claimTask(ctx: WriteContext, input: ClaimInput, scope: { id: string; na
   const sessionRef = input.session ?? null;
   const baseHead = sessionRef ? sessionHead(db, sessionRef) : null;
   // Spec 7.3's parent-vs-head check (src/sync/apply.ts's `decide`) needs a real parent to tell a
-  // genuinely concurrent claim (made offline, unaware of this one) from a renewal or take-over of
-  // this exact lease: the prior claim_hlc when one is active (even expired), nothing otherwise.
-  const parentRevs = existing && existing.state === "active" ? [existing.claim_hlc] : [];
+  // genuinely concurrent claim (made offline, unaware of this one) from a renewal, take-over or
+  // reclaim of this exact lease: the prior claim_hlc whenever this node has ANY local row for the
+  // task, active or closed, nothing only when it has never seen one at all. Referencing the row
+  // even when closed is what lets a receiving node tell a proven, locally-observed reclaim (this
+  // node's own parentRevs names the exact claim_hlc it saw) from a claim made in total ignorance
+  // of this task's history (parentRevs=[] while a row already exists locally): only the latter
+  // must be compared against the task's all-time earliest claim (Spec 7.4), not whichever HLC it
+  // happens to carry relative to a clock it never synced with.
+  const parentRevs = existing ? [existing.claim_hlc] : [];
   const payload = {
     holder: ctx.clientId,
     paths: myPaths ?? null,
@@ -259,6 +253,7 @@ function claimTask(ctx: WriteContext, input: ClaimInput, scope: { id: string; na
       canonicalJson(payload),
       nowIso(),
     );
+    signStoredEvent(db, eventId, ctx.flags);
     applyEvent(db, { eventId, scopeId: scope.id, entryId: task.id, op: "claim", part: "claim", rev, clientId: ctx.clientId, hlc, payload, prev: null });
     // Persisted here too, not just when a replicated claim finds the same thing (Spec 7.4,
     // src/store/materialize.ts's recordClaimOverlaps): so `ctxd rebuild`, which replays every
@@ -376,6 +371,7 @@ function releaseTask(ctx: WriteContext, input: ClaimInput, scope: { id: string; 
       `INSERT INTO events (event_id, origin_node, origin_seq, hlc, scope_id, entry_id, op, part, parent_revs, rev, client_id, session_ref, request_id, request_hash, payload, prev, received_at)
        VALUES (?, ?, ?, ?, ?, ?, 'release', 'claim', ?, ?, ?, ?, ?, NULL, ?, NULL, ?)`,
     ).run(eventId, ctx.nodeId, nextOriginSeq(db, ctx.nodeId), hlc, scope.id, taskId, canonicalJson([lease.claim_hlc]), rev, ctx.clientId, sessionRef, input.request_id ?? null, canonicalJson(payload), nowIso());
+    signStoredEvent(db, eventId, ctx.flags);
     applyEvent(db, { eventId, scopeId: scope.id, entryId: taskId, op: "release", part: "claim", rev, clientId: ctx.clientId, hlc, payload, prev: null });
   })();
 

@@ -1,8 +1,10 @@
 import type Database from "better-sqlite3";
 import { accessLevel, atLeast } from "../access/level.js";
 import { loadAccessSnapshot } from "../store/snapshot.js";
+import { isFlagOn } from "../config/flags.js";
 import { CtxdError } from "../core/errors.js";
 import { nowIso } from "../core/time.js";
+import { syncFreshness } from "../sync/freshness.js";
 import { parseSkill, catalogLine, buildCatalog } from "../skills/skillmd.js";
 import { formatRef } from "../model/refs.js";
 import {
@@ -23,18 +25,13 @@ import type { RequestContext } from "../server/context.js";
  * for a scope. Sections are filled in priority order until their own soft cap is spent; lists use
  * each entry's summary line, never its body (bodies are for the pinned brief and handoffs only).
  *
- * M1 scope notes (flagged for SPEC-v7 / the slice 6 handoff, not silently cut):
- * - The interrupted-work notice and the brief's own "session" value both depend on the hook
- *   lifecycle upserting `sessions` (SPEC 9.3, "every hook call upserts the sessions row"), which
- *   lands in M2. This brief neither reads nor writes `sessions`.
- * - Claim overlaps/drift/lost-claim notices depend on context_claim (M1 slice 6) and the drift
- *   audit (M2); only a plain proposed/conflicted count is surfaced here.
- * - Open signals (section 3) is already live: store/write.ts calls journal/sync.ts's
- *   syncSignalsForScope on every touched scope, so a journal entry with significance blocker or
- *   incident, or a task with a blocks link, opens a real signal as soon as it's written -- it
- *   just has no MCP tool to create one through yet (that's context_write, this slice).
- * - Open claims (section 7) reads `leases` correctly, but nothing writes to it until
- *   context_claim lands (M1 slice 6), so that half of the section is empty until then.
+ * Carried forward from earlier milestones, still open:
+ * - The brief's own "session" value depends on a session ref reaching this call; nothing between
+ *   the hook dispatcher and the MCP tool layer threads one into `RequestContext` yet, so this
+ *   stays `null` (not a sync concern, out of scope for M3 slice 7).
+ * - Interrupted-work, lost/taken-over claim, overlap and drift notices (SPEC 11.1's Notices row)
+ *   are not yet surfaced here; only proposed/conflicted counts and the sync freshness notice
+ *   (M3 slice 7, below) are.
  * - Spec gives a concrete total budget (session_start_max_chars, default 9,500) only for the
  *   *hook-injected* brief, not for a plain context_brief tool call. The BASE_CHARS constants below
  *   are this file's own reasonable choice, not a spec number.
@@ -65,18 +62,23 @@ function fitLines(lines: readonly string[], maxChars: number, moreHint?: string)
   return kept;
 }
 
-/** Sort entries so ones past review_after sort last, each marked; otherwise by importance desc. */
-function byImportanceReviewLast(db: Database.Database, rows: EntryRow[], now: number): { row: EntryRow; reviewDue: boolean }[] {
+/** Sort entries so ones past review_after sort last, each marked; otherwise by importance desc, or by recency desc when the importance flag is off (SPEC v6 ranking). */
+function byImportanceReviewLast(db: Database.Database, rows: EntryRow[], now: number, importanceOn: boolean): { row: EntryRow; reviewDue: boolean }[] {
   const nowDate = nowIso().slice(0, 10);
   return rows
-    .map((row) => ({ row, reviewDue: row.review_after !== null && row.review_after <= nowDate, imp: entryImportance(db, row, now) }))
-    .sort((a, b) => (a.reviewDue !== b.reviewDue ? (a.reviewDue ? 1 : -1) : b.imp - a.imp))
+    .map((row) => ({
+      row,
+      reviewDue: row.review_after !== null && row.review_after <= nowDate,
+      rank: importanceOn ? entryImportance(db, row, now) : hlcToMs(row.updated_hlc),
+    }))
+    .sort((a, b) => (a.reviewDue !== b.reviewDue ? (a.reviewDue ? 1 : -1) : b.rank - a.rank))
     .map(({ row, reviewDue }) => ({ row, reviewDue }));
 }
 
 export function assembleBrief(ctx: RequestContext, input: BriefInput): unknown {
   const { db } = ctx;
   const now = Date.now();
+  const importanceOn = isFlagOn(ctx.flags, "importance");
   const snapshot = loadAccessSnapshot(db);
   const client = clientInfoOf(ctx);
   const scopes = loadScopeInfos(db);
@@ -116,6 +118,10 @@ export function assembleBrief(ctx: RequestContext, input: BriefInput): unknown {
     ) as { n: number }
   ).n;
   if (conflictedCount > 0) notices.push(`${conflictedCount} conflicted entr${conflictedCount === 1 ? "y" : "ies"} need resolution.`);
+  // Sync freshness (M3 slice 7): same "no successful sync in 10 minutes" rule the tentative-claim
+  // check uses (Spec 7.4, src/sync/freshness.ts), surfaced here as SPEC 11.1's "stale sync warning".
+  const freshness = syncFreshness(db);
+  if (freshness.stale) notices.push("No successful sync in over 10 minutes; this brief may be missing recent changes from other machines.");
 
   // 3. Open signals (SPEC 11.4)
   const openSignals = db
@@ -218,7 +224,7 @@ export function assembleBrief(ctx: RequestContext, input: BriefInput): unknown {
     const rows = db
       .prepare(`SELECT ${entryColumns("e")} FROM entries e WHERE e.scope_id = ? AND e.kind = 'convention' AND e.status IN ${activeStatuses}`)
       .all(named.row.scope_id) as EntryRow[];
-    const ranked = byImportanceReviewLast(db, rows, now);
+    const ranked = byImportanceReviewLast(db, rows, now, importanceOn);
     if (ranked.length) {
       const lines = ranked.map(({ row, reviewDue }) => `- ${row.summary}${reviewDue ? " (review due)" : ""}`);
       ranked.forEach(({ row }) => touchBriefed(row.entry_id));
@@ -253,7 +259,7 @@ export function assembleBrief(ctx: RequestContext, input: BriefInput): unknown {
           )
           .all(...meProfileIds) as EntryRow[])
       : [];
-    const ranked = byImportanceReviewLast(db, rows, now);
+    const ranked = byImportanceReviewLast(db, rows, now, importanceOn);
     if (ranked.length) {
       const lines = ranked.map(({ row, reviewDue }) => `- ${row.summary}${reviewDue ? " (review due)" : ""}`);
       ranked.forEach(({ row }) => touchBriefed(row.entry_id));
@@ -338,9 +344,11 @@ export function assembleBrief(ctx: RequestContext, input: BriefInput): unknown {
     scope: input.scope,
     as_of: new Date(now).toISOString(),
     node: ctx.nodeId,
-    // Last-sync age (M3, no replication yet) and the hook-driven session value (M2, SPEC 9.3)
-    // are both out of M1's reach; reporting null is honest, not a silent omission of the field.
-    sync: null,
+    // null when this node has no peers at all (sync not in use); otherwise the last successful
+    // pull from any peer and whether it's stale (M3 slice 7, src/sync/freshness.ts).
+    sync: freshness.hasPeers ? { last_synced_at: freshness.lastSyncedAt, stale: freshness.stale } : null,
+    // The hook-driven session value (SPEC 9.3) has no path into RequestContext yet; see the
+    // file-level comment above.
     session: null,
     brief: sections.join("\n\n"),
     notices,
