@@ -9,6 +9,7 @@ import { canonicalJson, requestHash } from "./idempotency.js";
 import { applyEvent } from "./materialize.js";
 import { loadAccessSnapshot, loadClient, loadScopeById } from "./snapshot.js";
 import type { WriteContext } from "./write.js";
+import { signStoredEvent } from "../security/event-signatures.js";
 
 /**
  * context_flag (SPEC v6 section 7.6.1): any client with at least `read` access to the entry's
@@ -92,6 +93,7 @@ export function flagEntry(ctx: WriteContext, input: FlagInput): FlagResult {
       canonicalJson(payload),
       nowIso(),
     );
+    signStoredEvent(db, eventId, ctx.flags);
     applyEvent(db, { eventId, scopeId: scope.id, entryId: row.entry_id, op: "flag", part: "status", rev, clientId: ctx.clientId, hlc, payload, prev: null });
   })();
 
@@ -137,6 +139,7 @@ export function unflagEntry(ctx: WriteContext, ref: string): UnflagResult {
       `INSERT INTO events (event_id, origin_node, origin_seq, hlc, scope_id, entry_id, op, part, parent_revs, rev, client_id, session_ref, request_id, request_hash, payload, prev, received_at)
        VALUES (?, ?, ?, ?, ?, ?, 'unflag', 'status', ?, ?, ?, NULL, NULL, NULL, '{}', NULL, ?)`,
     ).run(eventId, ctx.nodeId, nextOriginSeq, hlc, row.scope_id, row.entry_id, canonicalJson([row.status_rev]), rev, ctx.clientId, nowIso());
+    signStoredEvent(db, eventId, ctx.flags);
     applyEvent(db, { eventId, scopeId: row.scope_id, entryId: row.entry_id, op: "unflag", part: "status", rev, clientId: ctx.clientId, hlc, payload: {}, prev: null });
   })();
 

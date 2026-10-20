@@ -1,0 +1,67 @@
+import { describe, expect, it } from "vitest";
+import { HlcClock } from "../../src/core/hlc.js";
+import { newId } from "../../src/core/ids.js";
+import { openDatabase } from "../../src/store/db.js";
+import { writeEntry, type WriteContext } from "../../src/store/write.js";
+import { purgeEntry } from "../../src/store/purge.js";
+import { rebuild } from "../../src/store/rebuild.js";
+import { applyEvent, toWireEvent, type EventRow } from "../../src/sync/apply.js";
+
+function fixture() {
+  const db = openDatabase(":memory:", { create: true });
+  const nodeId = newId();
+  const humanId = newId();
+  const scopeId = newId();
+  db.prepare("INSERT INTO nodes (node_id, name, role, created_at) VALUES (?, 'node-a', 'home', ?)").run(nodeId, new Date().toISOString());
+  db.prepare("INSERT INTO clients (client_id, name, vendor, node_id, token_hash, created_at) VALUES (?, 'human', 'human', ?, ?, ?)").run(humanId, nodeId, newId(), new Date().toISOString());
+  db.prepare("INSERT INTO scopes (scope_id, name, created_at) VALUES (?, 'sample-app', ?)").run(scopeId, new Date().toISOString());
+  return { db, nodeId, humanId, scopeId };
+}
+
+function ctx(f: ReturnType<typeof fixture>, signed: boolean): WriteContext {
+  return { db: f.db, clock: new HlcClock(f.nodeId), nodeId: f.nodeId, clientId: f.humanId, flags: new Map([["signed_events", signed]]) };
+}
+
+function firstWire(f: ReturnType<typeof fixture>) {
+  return toWireEvent(f.db.prepare("SELECT * FROM events ORDER BY origin_seq LIMIT 1").get() as EventRow);
+}
+
+describe("signed events (Spec v9 section 7.7)", () => {
+  it("signs new events only while the flag is on", () => {
+    const on = fixture();
+    writeEntry(ctx(on, true), { scope: "sample-app", kind: "note", title: "Signed", body: "Signed body", request_id: newId() });
+    expect(on.db.prepare("SELECT payload_hash, signature, public_key FROM events").get()).toMatchObject({
+      payload_hash: expect.stringMatching(/^[0-9a-f]{64}$/), signature: expect.any(String), public_key: expect.any(String),
+    });
+
+    const off = fixture();
+    writeEntry(ctx(off, false), { scope: "sample-app", kind: "note", title: "Unsigned", body: "Unsigned body", request_id: newId() });
+    expect(off.db.prepare("SELECT payload_hash, signature, public_key FROM events").get()).toEqual({ payload_hash: null, signature: null, public_key: null });
+  });
+
+  it("verifies a signature on apply even when local signing is off, and rejects tampering", () => {
+    const source = fixture();
+    writeEntry(ctx(source, true), { scope: "sample-app", kind: "note", title: "Signed", body: "Original body", request_id: newId() });
+    const wire = firstWire(source);
+
+    const target = fixture();
+    target.db.prepare("DELETE FROM scopes").run();
+    target.db.prepare("INSERT INTO scopes (scope_id, name, created_at) VALUES (?, 'sample-app', ?)").run(source.scopeId, new Date().toISOString());
+    expect(applyEvent(target.db, wire).outcome).toBe("fast-forward");
+
+    const tampered = fixture();
+    tampered.db.prepare("DELETE FROM scopes").run();
+    tampered.db.prepare("INSERT INTO scopes (scope_id, name, created_at) VALUES (?, 'sample-app', ?)").run(source.scopeId, new Date().toISOString());
+    expect(() => applyEvent(tampered.db, { ...wire, payload: { ...wire.payload, body: "Changed" } })).toThrow(/Payload hash mismatch/);
+  });
+
+  it("retains verifiable hashes and signatures after purge and rebuild", () => {
+    const f = fixture();
+    const result = writeEntry(ctx(f, true), { scope: "sample-app", kind: "note", title: "Erase", body: "Erase this body", request_id: newId() });
+    if ("held" in result) throw new Error("unexpected held write");
+    purgeEntry(ctx(f, true), result.ref, "test purge");
+    const before = f.db.prepare("SELECT payload_hash, signature, public_key FROM events WHERE event_id = (SELECT event_id FROM events ORDER BY origin_seq LIMIT 1)").get();
+    rebuild(f.db);
+    expect(f.db.prepare("SELECT payload_hash, signature, public_key FROM events WHERE event_id = (SELECT event_id FROM events ORDER BY origin_seq LIMIT 1)").get()).toEqual(before);
+  });
+});

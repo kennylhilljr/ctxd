@@ -23,6 +23,7 @@ import { loadClient } from "./snapshot.js";
 import { unflagEntry } from "./flag.js";
 import { entryColumns, entryImportance, hlcToMs, type EntryRow } from "../tools/support.js";
 import type { WriteContext } from "./write.js";
+import { signStoredEvent } from "../security/event-signatures.js";
 
 const DAY_MS = 86_400_000;
 const SUPERSEDED_ARCHIVE_DAYS = 90;
@@ -195,6 +196,7 @@ function setEntryStatus(ctx: WriteContext, ref: string, newStatus: string): void
       `INSERT INTO events (event_id, origin_node, origin_seq, hlc, scope_id, entry_id, op, part, parent_revs, rev, client_id, session_ref, request_id, request_hash, payload, prev, received_at)
        VALUES (?, ?, ?, ?, ?, ?, 'status', 'status', ?, ?, ?, NULL, NULL, NULL, ?, ?, ?)`,
     ).run(eventId, ctx.nodeId, nextSeq, hlc, row.scope_id, row.entry_id, canonicalJson([row.status_rev]), rev, ctx.clientId, canonicalJson(payload), canonicalJson(prev), nowIso());
+    signStoredEvent(db, eventId, ctx.flags);
     applyEvent(db, { eventId, scopeId: row.scope_id, entryId: row.entry_id, op: "status", part: "status", rev, clientId: ctx.clientId, hlc, payload, prev });
   })();
 }

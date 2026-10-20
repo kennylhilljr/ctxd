@@ -40,7 +40,8 @@ export function servePull(db: Database.Database, requesterRole: NodeRole, req: P
   const rows = db
     .prepare(
       `SELECT e.event_id, e.origin_node, e.origin_seq, e.hlc, e.scope_id, e.entry_id, e.op, e.part, e.parent_revs, e.rev,
-              e.client_id, e.session_ref, e.request_id, e.request_hash, e.payload, e.prev, s.replication AS scope_replication
+              e.client_id, e.session_ref, e.request_id, e.request_hash, e.payload, e.prev, e.payload_hash, e.signature, e.public_key,
+              s.replication AS scope_replication
        FROM events e JOIN scopes s ON s.scope_id = e.scope_id
        WHERE ${whereParts.join(" OR ")}
        ORDER BY e.origin_node, e.origin_seq

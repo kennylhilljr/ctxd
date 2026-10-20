@@ -62,6 +62,12 @@ export function openDatabase(path: string, { create = false }: OpenDatabaseOptio
       db.exec(VEC0_TABLE_SQL);
       db.pragma(`user_version = ${SCHEMA_VERSION}`);
     })();
+  } else if (version === 13 && SCHEMA_VERSION === 14) {
+    db.transaction(() => {
+      db.exec("ALTER TABLE events ADD COLUMN payload_hash TEXT; ALTER TABLE events ADD COLUMN signature TEXT; ALTER TABLE events ADD COLUMN public_key TEXT;");
+      db.exec("CREATE TABLE node_keys (node_id TEXT PRIMARY KEY, public_key TEXT NOT NULL, first_seen_at TEXT NOT NULL)");
+      db.pragma("user_version = 14");
+    })();
   } else if (version !== SCHEMA_VERSION) {
     db.close();
     throw new Error(`Database schema version ${version} does not match ${SCHEMA_VERSION}; no migration is defined yet.`);

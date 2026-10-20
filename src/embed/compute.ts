@@ -22,6 +22,7 @@ import { canonicalJson } from "../store/idempotency.js";
 import { applyEvent } from "../store/materialize.js";
 import type { WriteContext } from "../store/write.js";
 import { EMBEDDING_DIM, MODEL_DTYPE, MODEL_ID, loadEmbedder } from "./model.js";
+import { signStoredEvent } from "../security/event-signatures.js";
 
 export const FULL_MODEL_ID = `${MODEL_ID}@${MODEL_DTYPE}`;
 
@@ -71,6 +72,7 @@ function appendEmbeddingEvent(ctx: WriteContext, row: PendingRow, vector: readon
       `INSERT INTO events (event_id, origin_node, origin_seq, hlc, scope_id, entry_id, op, part, parent_revs, rev, client_id, session_ref, request_id, request_hash, payload, prev, received_at)
        VALUES (?, ?, ?, ?, ?, ?, 'update', 'embedding', '[]', ?, ?, NULL, NULL, NULL, ?, NULL, ?)`,
     ).run(eventId, ctx.nodeId, nextOriginSeq, hlc, row.scopeId, row.entryId, row.contentRev, ctx.clientId, canonicalJson(payload), nowIso());
+    signStoredEvent(db, eventId, ctx.flags);
     applyEvent(db, {
       eventId,
       scopeId: row.scopeId,

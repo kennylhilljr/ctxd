@@ -11,6 +11,7 @@ import { canonicalJson, requestHash } from "./idempotency.js";
 import { applyEvent } from "./materialize.js";
 import { loadAccessSnapshot, loadClient, loadClientName, loadScopeByName } from "./snapshot.js";
 import { writeEntry, type WriteContext } from "./write.js";
+import { signStoredEvent } from "../security/event-signatures.js";
 
 /**
  * context_claim (SPEC v6 section 7.5): claims are events in the task entry's history; `leases`
@@ -252,6 +253,7 @@ function claimTask(ctx: WriteContext, input: ClaimInput, scope: { id: string; na
       canonicalJson(payload),
       nowIso(),
     );
+    signStoredEvent(db, eventId, ctx.flags);
     applyEvent(db, { eventId, scopeId: scope.id, entryId: task.id, op: "claim", part: "claim", rev, clientId: ctx.clientId, hlc, payload, prev: null });
     // Persisted here too, not just when a replicated claim finds the same thing (Spec 7.4,
     // src/store/materialize.ts's recordClaimOverlaps): so `ctxd rebuild`, which replays every
@@ -369,6 +371,7 @@ function releaseTask(ctx: WriteContext, input: ClaimInput, scope: { id: string; 
       `INSERT INTO events (event_id, origin_node, origin_seq, hlc, scope_id, entry_id, op, part, parent_revs, rev, client_id, session_ref, request_id, request_hash, payload, prev, received_at)
        VALUES (?, ?, ?, ?, ?, ?, 'release', 'claim', ?, ?, ?, ?, ?, NULL, ?, NULL, ?)`,
     ).run(eventId, ctx.nodeId, nextOriginSeq(db, ctx.nodeId), hlc, scope.id, taskId, canonicalJson([lease.claim_hlc]), rev, ctx.clientId, sessionRef, input.request_id ?? null, canonicalJson(payload), nowIso());
+    signStoredEvent(db, eventId, ctx.flags);
     applyEvent(db, { eventId, scopeId: scope.id, entryId: taskId, op: "release", part: "claim", rev, clientId: ctx.clientId, hlc, payload, prev: null });
   })();
 

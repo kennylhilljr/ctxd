@@ -1,5 +1,6 @@
 import type Database from "better-sqlite3";
 import { applyEvent as materializeEvent, applyReplicatedEvent as materializeReplicatedEvent, type EventForMaterialize } from "../store/materialize.js";
+import { verifyEventSignature } from "../security/event-signatures.js";
 
 /**
  * Apply one incoming replicated event (Spec v8 7.3), idempotently: fast-forward, already-known,
@@ -29,6 +30,9 @@ export interface WireEvent {
   requestHash: string | null;
   payload: Record<string, unknown>;
   prev: Record<string, unknown> | null;
+  payloadHash?: string | null;
+  signature?: string | null;
+  publicKey?: string | null;
 }
 
 export interface ApplyResult {
@@ -198,6 +202,9 @@ export interface EventRow {
   request_hash: string | null;
   payload: string;
   prev: string | null;
+  payload_hash: string | null;
+  signature: string | null;
+  public_key: string | null;
 }
 
 export function toWireEvent(row: EventRow): WireEvent {
@@ -218,6 +225,9 @@ export function toWireEvent(row: EventRow): WireEvent {
     requestHash: row.request_hash,
     payload: JSON.parse(row.payload) as Record<string, unknown>,
     prev: row.prev === null ? null : (JSON.parse(row.prev) as Record<string, unknown>),
+    payloadHash: row.payload_hash,
+    signature: row.signature,
+    publicKey: row.public_key,
   };
 }
 
@@ -238,7 +248,7 @@ function retryPendingFor(db: Database.Database, entryId: string): void {
     const rows = db
       .prepare(
         `SELECT event_id, origin_node, origin_seq, hlc, scope_id, entry_id, op, part, parent_revs, rev,
-                client_id, session_ref, request_id, request_hash, payload, prev
+                client_id, session_ref, request_id, request_hash, payload, prev, payload_hash, signature, public_key
          FROM events WHERE entry_id = ? AND materialized = 0 ORDER BY hlc`,
       )
       .all(entryId) as EventRow[];
@@ -264,6 +274,7 @@ function retryPendingFor(db: Database.Database, entryId: string): void {
 
 /** Apply one event idempotently (Spec 7.1's puller loop step 1; 7.3). */
 export function applyEvent(db: Database.Database, event: WireEvent): ApplyResult {
+  verifyEventSignature(db, event, event.payload.purged !== true);
   if (db.prepare("SELECT 1 FROM events WHERE event_id = ?").get(event.eventId)) {
     return { outcome: "already-known" };
   }
@@ -278,8 +289,8 @@ export function applyEvent(db: Database.Database, event: WireEvent): ApplyResult
 
   const result = db.transaction((): ApplyResult => {
     db.prepare(
-      `INSERT INTO events (event_id, origin_node, origin_seq, hlc, scope_id, entry_id, op, part, parent_revs, rev, client_id, session_ref, request_id, request_hash, payload, prev, received_at, materialized)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO events (event_id, origin_node, origin_seq, hlc, scope_id, entry_id, op, part, parent_revs, rev, client_id, session_ref, request_id, request_hash, payload, prev, payload_hash, signature, public_key, received_at, materialized)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       event.eventId,
       event.originNode,
@@ -297,6 +308,9 @@ export function applyEvent(db: Database.Database, event: WireEvent): ApplyResult
       event.requestHash,
       JSON.stringify(payload),
       prev === null ? null : JSON.stringify(prev),
+      event.payloadHash,
+      event.signature,
+      event.publicKey,
       new Date().toISOString(),
       materialized ? 1 : 0,
     );

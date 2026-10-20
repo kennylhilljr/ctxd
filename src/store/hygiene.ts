@@ -9,6 +9,7 @@ import { canonicalJson } from "./idempotency.js";
 import { applyEvent, recordSibling } from "./materialize.js";
 import { loadClient, loadScopeByName } from "./snapshot.js";
 import type { WriteContext } from "./write.js";
+import { signStoredEvent } from "../security/event-signatures.js";
 
 /**
  * Quarantine, revert and release (SPEC v6 section 7.6.2-7.6.4): human-only cleanup for a
@@ -152,6 +153,7 @@ function appendAndApply(db: Database.Database, ctx: WriteContext, allocSeq: () =
     spec.prev ? canonicalJson(spec.prev) : null,
     nowIso(),
   );
+  signStoredEvent(db, spec.eventId, ctx.flags);
   applyEvent(db, {
     eventId: spec.eventId,
     scopeId: spec.scopeId,

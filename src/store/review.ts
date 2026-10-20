@@ -27,6 +27,7 @@ import { appendAclEvent } from "./acl.js";
 import { applyEvent } from "./materialize.js";
 import { loadClient, loadClientName, loadScopeByName } from "./snapshot.js";
 import type { WriteContext } from "./write.js";
+import { signStoredEvent } from "../security/event-signatures.js";
 
 export interface ReviewRule {
   kind: string;
@@ -227,6 +228,7 @@ export function resolveEntry(ctx: WriteContext, ref: string): { ref: string; sta
       `INSERT INTO events (event_id, origin_node, origin_seq, hlc, scope_id, entry_id, op, part, parent_revs, rev, client_id, session_ref, request_id, request_hash, payload, prev, received_at)
        VALUES (?, ?, ?, ?, ?, ?, 'resolve', 'status', ?, ?, ?, NULL, NULL, NULL, '{}', NULL, ?)`,
     ).run(eventId, ctx.nodeId, nextOriginSeq(db, ctx.nodeId), hlc, row.scope_id, row.entry_id, canonicalJson([row.status_rev]), rev, ctx.clientId, nowIso());
+    signStoredEvent(db, eventId, ctx.flags);
     applyEvent(db, { eventId, scopeId: row.scope_id, entryId: row.entry_id, op: "resolve", part: "status", rev, clientId: ctx.clientId, hlc, payload: {}, prev: null });
   })();
 

@@ -16,6 +16,7 @@ import { canonicalJson, requestHash } from "./idempotency.js";
 import { applyEvent } from "./materialize.js";
 import { loadAccessSnapshot, loadClient, loadClientName, loadScopeByName, loadScopeById } from "./snapshot.js";
 import { syncSignalsForScope } from "../journal/sync.js";
+import { signStoredEvent } from "../security/event-signatures.js";
 
 /**
  * The single write path (SPEC v6 section 6): auth, idempotency, validation, redaction,
@@ -498,6 +499,7 @@ function insertEvent(
     spec.prev ? canonicalJson(spec.prev) : null,
     nowIso(),
   );
+  signStoredEvent(db, spec.eventId, ctx.flags);
 }
 
 function performHeldWrite(

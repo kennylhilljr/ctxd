@@ -1,6 +1,7 @@
 import type Database from "better-sqlite3";
 import { applyReplicatedEvent } from "./materialize.js";
 import { syncSignalsForScope } from "../journal/sync.js";
+import { fieldsFromRow, verifyEventSignature } from "../security/event-signatures.js";
 
 /**
  * Rebuilds materialized state (entries, relations, signals, FTS) from the event log, the
@@ -23,7 +24,7 @@ export function rebuild(db: Database.Database): void {
       "DELETE FROM relations; DELETE FROM entries; DELETE FROM signals; DELETE FROM flags; DELETE FROM leases; DELETE FROM pool_grants; DELETE FROM pool_members; DELETE FROM pools; DELETE FROM client_grants; DELETE FROM acl_cursors;",
     );
 
-    const events = db.prepare("SELECT * FROM events ORDER BY hlc, event_id").all() as {
+    const events = db.prepare("SELECT * FROM events ORDER BY hlc, event_id").all() as ({
       event_id: string;
       scope_id: string;
       entry_id: string;
@@ -35,10 +36,16 @@ export function rebuild(db: Database.Database): void {
       hlc: string;
       payload: string;
       prev: string | null;
-    }[];
+      payload_hash: string | null;
+      signature: string | null;
+      public_key: string | null;
+    } & Record<string, unknown>)[];
 
     const touchedScopes = new Set<string>();
     for (const e of events) {
+      const fields = fieldsFromRow(e);
+      const wasPurged = fields.payload.purged === true;
+      verifyEventSignature(db, { ...fields, payloadHash: e.payload_hash, signature: e.signature, publicKey: e.public_key }, !wasPurged);
       if (e.part !== "content" && e.part !== "status" && e.part !== "relations" && e.part !== "claim" && e.part !== "meta") continue;
       applyReplicatedEvent(db, {
         eventId: e.event_id,

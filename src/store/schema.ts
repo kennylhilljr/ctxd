@@ -27,8 +27,10 @@
  * `'embedding'`; the new `embeddings` table materializes embedding vectors, current content
  * only (like FTS), keyed by (entry_id, model_id) so a different model's vector is kept alongside
  * rather than overwritten.
+ * Bumped to 14 for M6 slice 1 (signed events, Spec v9 section 7.7): immutable payload hashes,
+ * Ed25519 signatures, and trusted per-origin public keys survive purge and verify on replay.
  */
-export const SCHEMA_VERSION = 13;
+export const SCHEMA_VERSION = 14;
 
 export const SCHEMA_SQL = `
 CREATE TABLE nodes (
@@ -37,6 +39,12 @@ CREATE TABLE nodes (
   role         TEXT NOT NULL CHECK (role IN ('home','roaming')),
   revoked_at   TEXT,
   created_at   TEXT NOT NULL
+);
+
+CREATE TABLE node_keys (
+  node_id      TEXT PRIMARY KEY,
+  public_key   TEXT NOT NULL,
+  first_seen_at TEXT NOT NULL
 );
 
 CREATE TABLE peers (                   -- a machine we sync with (Spec 7.1); never a row in nodes
@@ -93,6 +101,9 @@ CREATE TABLE events (
   request_hash TEXT,                 -- SHA-256 of the canonical request input, for idempotency checks
   payload      TEXT NOT NULL,
   prev         TEXT,                   -- JSON: prior values of the changed fields of this part (NULL on create)
+  payload_hash TEXT,                   -- SHA-256 of canonical payload and prev; retained by purge
+  signature    TEXT,                   -- base64 Ed25519 signature over payload_hash; NULL for unsigned legacy events
+  public_key   TEXT,                   -- base64 SPKI key, pinned in node_keys on first verified event
   received_at  TEXT NOT NULL,
   materialized INTEGER NOT NULL DEFAULT 1, -- 0: stored but deferred, sync/apply.ts's "missing-parent"
                                             -- row (its own create, or an earlier rev, hasn't arrived
