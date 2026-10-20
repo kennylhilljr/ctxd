@@ -4,6 +4,7 @@ import { sha256Hex } from "../core/hash.js";
 import { isFlagOn } from "../config/flags.js";
 import { recordRejection, writeEntry, type WriteContext } from "../store/write.js";
 import { inboxEntrySchema, type InboxEntry, type InboxTransport } from "./types.js";
+import { exclusionReason, loadScopeExclusionRow } from "./scopeExclusion.js";
 
 /**
  * Hub pull engine (M7 kickoff section 2; PRD-mobile-inbox-v1 MI-3 to MI-7): at-least-once pull,
@@ -33,31 +34,6 @@ const MAX_TAG_CHARS = 40;
 /** MI-5: schema validation already happened; this is the separate, byte-exact size bound (zod's .max() counts UTF-16 code units, not bytes). */
 export const INBOX_MAX_BODY_BYTES = 16 * 1024;
 export const INBOX_MAX_PAYLOAD_BYTES = 32 * 1024;
-
-interface ScopeRow {
-  id: string;
-  replication: string;
-  vendorPolicy: string;
-}
-
-function loadScopeRow(db: Database.Database, name: string): ScopeRow | null {
-  const row = db.prepare("SELECT scope_id, replication, vendor_policy FROM scopes WHERE name = ?").get(name) as
-    | { scope_id: string; replication: string; vendor_policy: string }
-    | undefined;
-  return row ? { id: row.scope_id, replication: row.replication, vendorPolicy: row.vendor_policy } : null;
-}
-
-/**
- * MI-7: a sealed pool's scopes are excluded by construction (they live only inside the pool's own
- * encrypted file, never in this query against the main database); `home` replication and
- * `local-only` vendor policy are excluded explicitly, here, so a mismatch gets a hard rejection
- * rather than the generic hold-for-review every other out-of-grant scope gets.
- */
-function exclusionReason(scope: ScopeRow): string | null {
-  if (scope.replication === "home") return "scope is home replication-only";
-  if (scope.vendorPolicy === "local-only") return "scope is local-only";
-  return null;
-}
 
 /** Provenance (MI-8), carried as tags since entries has no generic metadata column: origin, capture time, and the external reference if the client gave one, ahead of whatever tags the entry itself declared. */
 function provenanceTags(entry: InboxEntry): string[] {
@@ -94,7 +70,7 @@ function applyOneInboxEntry(ctx: WriteContext, inboxEntryId: string, raw: unknow
     return "rejected";
   }
 
-  const scope = loadScopeRow(db, entry.scope);
+  const scope = loadScopeExclusionRow(db, entry.scope);
   if (scope) {
     const reason = exclusionReason(scope);
     if (reason) {
