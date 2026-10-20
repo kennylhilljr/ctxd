@@ -6,6 +6,8 @@ import BetterSqlite3 from "better-sqlite3";
 import { SCHEMA_SQL, SCHEMA_VERSION } from "../store/schema.js";
 import type { SealedKeyProvider } from "./key-provider.js";
 import { loadVecExtension, VEC0_TABLE_SQL } from "../embed/vec.js";
+import { HlcClock } from "../core/hlc.js";
+import { purgeEntry } from "../store/purge.js";
 
 export interface SealedDatabaseProvider {
   open(path: string, key: Buffer, create: boolean): Database.Database;
@@ -71,6 +73,11 @@ function transferContent(source: Database.Database, target: Database.Database, s
   const marks = scopes.map(() => "?").join(",");
   copyRows(source, target, "scopes", `scope_id IN (${marks})`, scopes);
   copyRows(source, target, "entries", `scope_id IN (${marks})`, scopes);
+  const indexed = target.prepare(`SELECT rowid, title, body, tags FROM entries WHERE scope_id IN (${marks})`).all(...scopes) as { rowid: number; title: string; body: string; tags: string }[];
+  const insertFts = target.prepare("INSERT INTO entries_fts(rowid, title, body, tags) VALUES (?, ?, ?, ?)");
+  target.transaction(() => {
+    for (const row of indexed) insertFts.run(row.rowid, row.title, row.body, (JSON.parse(row.tags) as string[]).join(" "));
+  })();
   copyRows(source, target, "events", `scope_id IN (${marks})`, scopes);
   const entryIds = (source.prepare(`SELECT entry_id FROM entries WHERE scope_id IN (${marks})`).all(...scopes) as { entry_id: string }[]).map((row) => row.entry_id);
   if (entryIds.length) {
@@ -82,11 +89,30 @@ function transferContent(source: Database.Database, target: Database.Database, s
   }
 }
 
+function copyRoutingMetadata(source: Database.Database, target: Database.Database): void {
+  for (const table of ["nodes", "node_keys", "clients", "pools"] as const) {
+    copyRows(source, target, table, "1 = 1", []);
+  }
+}
+
+export function createSealedPurgeReplay(
+  nodeId: string,
+  humanClientId: string,
+  flags?: Map<string, boolean>,
+): (db: Database.Database, entryId: string) => void {
+  return (db, entryId) => {
+    purgeEntry({ db, clock: new HlcClock(nodeId), nodeId, clientId: humanClientId, flags }, entryId, "queued while sealed pool was locked");
+  };
+}
+
 function eraseContent(db: Database.Database, scopes: string[]): void {
   if (!scopes.length) return;
   const marks = scopes.map(() => "?").join(",");
   const ids = (db.prepare(`SELECT entry_id FROM entries WHERE scope_id IN (${marks})`).all(...scopes) as { entry_id: string }[]).map((row) => row.entry_id);
+  const indexed = db.prepare(`SELECT rowid, title, body, tags FROM entries WHERE scope_id IN (${marks})`).all(...scopes) as { rowid: number; title: string; body: string; tags: string }[];
   db.transaction(() => {
+    const deleteFts = db.prepare("INSERT INTO entries_fts(entries_fts, rowid, title, body, tags) VALUES ('delete', ?, ?, ?, ?)");
+    for (const row of indexed) deleteFts.run(row.rowid, row.title, row.body, (JSON.parse(row.tags) as string[]).join(" "));
     if (ids.length) {
       const entryMarks = ids.map(() => "?").join(",");
       for (const table of ENTRY_TABLES) {
@@ -118,6 +144,7 @@ export class SealedPoolStore {
     const key = this.keys.create(poolId);
     const sealed = this.databases.open(`${this.dataDir}/${relative}`, key, true);
     const scopes = scopeIds(this.main, poolId);
+    copyRoutingMetadata(this.main, sealed);
     transferContent(this.main, sealed, scopes);
     eraseContent(this.main, scopes);
     sealed.close();

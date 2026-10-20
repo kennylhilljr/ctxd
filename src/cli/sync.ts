@@ -9,7 +9,7 @@ import type { SealedKeyProvider } from "../sealed/key-provider.js";
 import { KeyHelperProvider } from "../sealed/key-provider.js";
 import { loadConfig } from "../config/config.js";
 import { isFlagOn, resolveFlags } from "../config/flags.js";
-import { SealedPoolStore, SqlCipherDatabaseProvider } from "../sealed/store.js";
+import { createSealedPurgeReplay, SealedPoolStore, SqlCipherDatabaseProvider } from "../sealed/store.js";
 
 interface PeerRow {
   peer_id: string;
@@ -65,16 +65,19 @@ export async function run(argv: string[]): Promise<number> {
   const config = loadConfig(resolveConfigPath({ configPath: values.config }));
   const sealedKeys = isFlagOn(resolveFlags(config), "sealed_pools") ? new KeyHelperProvider(config.sealed.key_helper) : undefined;
   const db = openDatabase(join(dataDir, "ctxd.db"));
-  const sealedStore = sealedKeys ? new SealedPoolStore(db, dataDir, sealedKeys, new SqlCipherDatabaseProvider(), config.sealed.unlock_minutes) : undefined;
+  const human = db.prepare("SELECT client_id FROM clients WHERE name = 'human'").get() as { client_id: string } | undefined;
   try {
     const node = db.prepare("SELECT node_id FROM nodes LIMIT 1").get() as { node_id: string } | undefined;
     if (!node) {
       console.error("ctxd sync: no node identity found; run ctxd init first.");
       return 1;
     }
-    return await runSync(db, node.node_id, values.peer, sealedKeys, sealedStore);
+    const sealedStore = sealedKeys && human
+      ? new SealedPoolStore(db, dataDir, sealedKeys, new SqlCipherDatabaseProvider(), config.sealed.unlock_minutes, createSealedPurgeReplay(node.node_id, human.client_id, resolveFlags(config)))
+      : undefined;
+    try { return await runSync(db, node.node_id, values.peer, sealedKeys, sealedStore); }
+    finally { sealedStore?.close(); }
   } finally {
-    sealedStore?.close();
     db.close();
   }
 }

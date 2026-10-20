@@ -7,7 +7,7 @@ import { HlcClock } from "../../src/core/hlc.js";
 import { newId } from "../../src/core/ids.js";
 import { decryptSealed, encryptSealed } from "../../src/sealed/crypto.js";
 import { TestKeyProvider } from "../../src/sealed/key-provider.js";
-import { SealedPoolStore, TestDatabaseProvider } from "../../src/sealed/store.js";
+import { createSealedPurgeReplay, SealedPoolStore, TestDatabaseProvider } from "../../src/sealed/store.js";
 import { openDatabase } from "../../src/store/db.js";
 import { writeEntry } from "../../src/store/write.js";
 import { servePull } from "../../src/sync/pull.js";
@@ -27,7 +27,7 @@ function fixture() {
   writeEntry({ db, clock: new HlcClock(nodeId), nodeId, clientId }, { scope: "private-a", kind: "note", title: "Sealed note", body: "Sensitive body", request_id: newId() } as never);
   const keys = new TestKeyProvider();
   const store = new SealedPoolStore(db, root, keys, new TestDatabaseProvider(), 1);
-  return { root, db, nodeId, poolId, keys, store };
+  return { root, db, nodeId, humanId: clientId, poolId, keys, store };
 }
 
 describe("sealed pools (Spec v9 section 10.6)", () => {
@@ -74,10 +74,9 @@ describe("sealed pools (Spec v9 section 10.6)", () => {
     f.store.queuePurge(f.poolId, entryId);
 
     f.store.close();
-    const replayingStore = new SealedPoolStore(f.db, f.root, f.keys, new TestDatabaseProvider(), 1, (db, id) => {
-      db.prepare("UPDATE entries SET title = '[purged]', body = '', purged_at = ? WHERE entry_id = ?").run(new Date().toISOString(), id);
-      db.prepare("UPDATE events SET payload = '{\"purged\":true}', prev = NULL WHERE entry_id = ?").run(id);
-    });
+    const replayingStore = new SealedPoolStore(
+      f.db, f.root, f.keys, new TestDatabaseProvider(), 1, createSealedPurgeReplay(f.nodeId, f.humanId),
+    );
     replayingStore.unlock(f.poolId);
     expect(f.db.prepare("SELECT COUNT(*) AS n FROM sealed_purge_queue").get()).toEqual({ n: 0 });
     expect(replayingStore.withPool(f.poolId, (db) => db.prepare("SELECT title, body FROM entries WHERE entry_id = ?").get(entryId))).toEqual({ title: "[purged]", body: "" });

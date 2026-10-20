@@ -16,7 +16,7 @@ import { embedPendingEntries, ensureEmbedClient } from "../embed/compute.js";
 import { syncMirror } from "../mirror/markdown.js";
 import { expandHome } from "../config/config.js";
 import { KeyHelperProvider } from "../sealed/key-provider.js";
-import { SealedPoolStore, SqlCipherDatabaseProvider } from "../sealed/store.js";
+import { createSealedPurgeReplay, SealedPoolStore, SqlCipherDatabaseProvider } from "../sealed/store.js";
 import { LoopbackTextModel } from "../local-model/client.js";
 import { runLocalModelSuggestions } from "../local-model/suggestions.js";
 
@@ -87,7 +87,10 @@ export async function run(argv: string[]): Promise<number> {
   const flags = resolveFlags(config);
   const syncServeOn = isFlagOn(flags, "sync.serve");
   const sealedKeys = isFlagOn(flags, "sealed_pools") ? new KeyHelperProvider(config.sealed.key_helper) : undefined;
-  const sealedStore = sealedKeys ? new SealedPoolStore(db, dataDir, sealedKeys, new SqlCipherDatabaseProvider(), config.sealed.unlock_minutes) : undefined;
+  const human = db.prepare("SELECT client_id FROM clients WHERE name = 'human'").get() as { client_id: string } | undefined;
+  const sealedStore = sealedKeys && human
+    ? new SealedPoolStore(db, dataDir, sealedKeys, new SqlCipherDatabaseProvider(), config.sealed.unlock_minutes, createSealedPurgeReplay(node.node_id, human.client_id, flags))
+    : undefined;
 
   const [server, syncServer] = await Promise.all([
     startServer({ db, nodeId: node.node_id, listen: config.mcp.listen, configPath }),
