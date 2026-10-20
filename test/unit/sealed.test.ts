@@ -46,7 +46,7 @@ describe("sealed pools (Spec v9 section 10.6)", () => {
     }), { numRuns: 100 });
   });
 
-  it("moves pool content out of the main database while locked", () => {
+  it("routes each unlocked request to the sealed database without copying plaintext into main", () => {
     const f = fixture();
     const relative = f.store.seal(f.poolId, f.nodeId);
     f.db.prepare("UPDATE pools SET storage = 'sealed', sealed_file = ? WHERE pool_id = ?").run(relative, f.poolId);
@@ -58,8 +58,29 @@ describe("sealed pools (Spec v9 section 10.6)", () => {
     expect(f.db.prepare("SELECT node_id FROM pool_enrollments WHERE pool_id = ?").get(f.poolId)).toEqual({ node_id: f.nodeId });
 
     f.store.unlock(f.poolId);
-    expect(f.db.prepare("SELECT title, body FROM entries").get()).toEqual({ title: "Sealed note", body: "Sensitive body" });
+    expect(f.db.prepare("SELECT COUNT(*) AS n FROM entries").get()).toEqual({ n: 0 });
+    expect(f.store.withPool(f.poolId, (db) => db.prepare("SELECT title, body FROM entries").get())).toEqual({ title: "Sealed note", body: "Sensitive body" });
+    expect(f.db.prepare("SELECT COUNT(*) AS n FROM entries").get()).toEqual({ n: 0 });
     f.store.lock(f.poolId);
+    expect(f.db.prepare("SELECT COUNT(*) AS n FROM entries").get()).toEqual({ n: 0 });
+  });
+
+  it("replays queued purges inside the sealed store and removes the queue only after success", () => {
+    const f = fixture();
+    const relative = f.store.seal(f.poolId, f.nodeId);
+    f.db.prepare("UPDATE pools SET storage = 'sealed', sealed_file = ? WHERE pool_id = ?").run(relative, f.poolId);
+    const entryId = f.store.withPool(f.poolId, (db) => (db.prepare("SELECT entry_id FROM entries").get() as { entry_id: string }).entry_id);
+    f.store.lock(f.poolId);
+    f.store.queuePurge(f.poolId, entryId);
+
+    f.store.close();
+    const replayingStore = new SealedPoolStore(f.db, f.root, f.keys, new TestDatabaseProvider(), 1, (db, id) => {
+      db.prepare("UPDATE entries SET title = '[purged]', body = '', purged_at = ? WHERE entry_id = ?").run(new Date().toISOString(), id);
+      db.prepare("UPDATE events SET payload = '{\"purged\":true}', prev = NULL WHERE entry_id = ?").run(id);
+    });
+    replayingStore.unlock(f.poolId);
+    expect(f.db.prepare("SELECT COUNT(*) AS n FROM sealed_purge_queue").get()).toEqual({ n: 0 });
+    expect(replayingStore.withPool(f.poolId, (db) => db.prepare("SELECT title, body FROM entries WHERE entry_id = ?").get(entryId))).toEqual({ title: "[purged]", body: "" });
     expect(f.db.prepare("SELECT COUNT(*) AS n FROM entries").get()).toEqual({ n: 0 });
   });
 

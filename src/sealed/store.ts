@@ -107,6 +107,7 @@ export class SealedPoolStore {
     private readonly keys: SealedKeyProvider,
     private readonly databases: SealedDatabaseProvider,
     private readonly unlockMinutes = 60,
+    private readonly purgeReplay?: (db: Database.Database, entryId: string) => void,
   ) {}
 
   seal(poolId: string, nodeId: string): string {
@@ -130,9 +131,8 @@ export class SealedPoolStore {
     const pool = this.main.prepare("SELECT sealed_file FROM pools WHERE pool_id = ? AND storage = 'sealed'").get(poolId) as { sealed_file: string } | undefined;
     if (!pool?.sealed_file) throw new Error("sealed pool not found");
     const sealed = this.databases.open(`${this.dataDir}/${pool.sealed_file}`, this.keys.get(poolId), false);
-    const scopes = scopeIds(this.main, poolId);
-    transferContent(sealed, this.main, scopes);
     this.openPools.set(poolId, { db: sealed, expiresAt: Date.now() + this.unlockMinutes * 60_000 });
+    if (this.purgeReplay) this.replayQueuedPurges(poolId, this.purgeReplay);
   }
 
   lock(poolId: string): void {
@@ -142,9 +142,6 @@ export class SealedPoolStore {
       if (!pool?.sealed_file) return;
       opened = { db: this.databases.open(`${this.dataDir}/${pool.sealed_file}`, this.keys.get(poolId), false), expiresAt: 0 };
     }
-    const scopes = scopeIds(this.main, poolId);
-    transferContent(this.main, opened.db, scopes);
-    eraseContent(this.main, scopes);
     opened.db.close();
     this.openPools.delete(poolId);
   }
@@ -158,6 +155,53 @@ export class SealedPoolStore {
   enroll(poolId: string, nodeId: string): void {
     this.keys.get(poolId);
     void nodeId;
+  }
+
+  /**
+   * Route one request to an unlocked sealed database. The callback must not retain the handle.
+   * Plaintext rows never enter the main database during the unlock window.
+   */
+  withPool<T>(poolId: string, request: (db: Database.Database) => T): T {
+    this.unlock(poolId);
+    const opened = this.openPools.get(poolId);
+    if (!opened) throw new Error("sealed pool failed to unlock");
+    opened.expiresAt = Date.now() + this.unlockMinutes * 60_000;
+    return request(opened.db);
+  }
+
+  /** Resolve a scope to its sealed store, or use the ordinary database for an unsealed scope. */
+  forScope<T>(scopeId: string, request: (db: Database.Database) => T): T {
+    const sealed = this.main.prepare(
+      `SELECT p.pool_id FROM pool_grants pg JOIN pools p ON p.pool_id = pg.pool_id
+       WHERE pg.scope_id = ? AND p.storage = 'sealed' LIMIT 1`,
+    ).get(scopeId) as { pool_id: string } | undefined;
+    return sealed ? this.withPool(sealed.pool_id, request) : request(this.main);
+  }
+
+  /** Queue a purge without opening the encrypted file. It is replayed on the next routed request. */
+  queuePurge(poolId: string, entryId: string): void {
+    this.main.prepare(
+      "INSERT OR IGNORE INTO sealed_purge_queue (pool_id, entry_id, requested_at) VALUES (?, ?, ?)",
+    ).run(poolId, entryId, new Date().toISOString());
+  }
+
+  /**
+   * Replay queued purges inside the encrypted store. A queue row is removed only after its
+   * callback succeeds, so a crash or rejected purge remains retryable.
+   */
+  replayQueuedPurges(poolId: string, purge: (db: Database.Database, entryId: string) => void): number {
+    return this.withPool(poolId, (db) => {
+      const queued = this.main.prepare(
+        "SELECT entry_id FROM sealed_purge_queue WHERE pool_id = ? ORDER BY requested_at, entry_id",
+      ).all(poolId) as { entry_id: string }[];
+      let replayed = 0;
+      for (const row of queued) {
+        purge(db, row.entry_id);
+        this.main.prepare("DELETE FROM sealed_purge_queue WHERE pool_id = ? AND entry_id = ?").run(poolId, row.entry_id);
+        replayed++;
+      }
+      return replayed;
+    });
   }
 
   isUnlocked(poolId: string): boolean { return this.openPools.has(poolId); }
