@@ -19,8 +19,10 @@ export const configSchema = z.object({
     .object({
       listen: listen.default("127.0.0.1:7412"),
       interval_seconds: z.number().int().min(15).default(120),
+      /** `ctxd doctor`'s per-peer "last sync age" warning threshold (W3). */
+      stale_hours: z.number().int().min(1).default(24),
     })
-    .default({ listen: "127.0.0.1:7412", interval_seconds: 120 }),
+    .default({ listen: "127.0.0.1:7412", interval_seconds: 120, stale_hours: 24 }),
   brief: z
     .object({
       micro_tokens: z.number().int().default(300),

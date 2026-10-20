@@ -24,6 +24,7 @@ Claim semantics (7.5) are in [LLD: Claims](LLD-claims-v1.md); cleanup operations
 - **Response:** `{ "events": [...], "through": { "<origin_node>": <seq>, ... }, "more": true|false }`
 - **What the server returns:** events where `origin_seq > vector[origin]`, ordered by `(origin_node, origin_seq)`, filtered by the replication policy for the requesting node (7.2).
 - **How `through` works:** it reports the highest seq the server *considered* per origin, including filtered events. The puller can therefore advance past events it is not allowed to receive without seeing a gap.
+- **Served watermark:** after serving a page, the handler records, per origin, the highest `origin_seq` served to the requesting peer in `peer_watermarks` (`recordServedThrough`), never lowering an existing value. Pull itself stays stateless for correctness; the watermark is for reporting only (W3).
 - **Relaying:** a node serves events from every origin it holds, not just its own, so replication works through the hub.
 - **Puller loop:**
   1. Apply each event idempotently; `event_id` is unique, so duplicates are ignored.

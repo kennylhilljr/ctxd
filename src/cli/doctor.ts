@@ -3,10 +3,9 @@
  * for diagnosing a node, each read-only. Printed as one line per check so a human can scan it;
  * exit code is 0 only if every check passes.
  *
- * "Last sync age" (one of the spec's own bullets, under peer reachability) cannot be reported
- * yet: `sync_state` (M3) stores only `through_seq` per peer, no timestamp of when that was last
- * updated. Flagged in the peer-reachability check's own detail text rather than guessed at or
- * silently dropped; adding the column is M3's own table to change, not this slice's.
+ * "Last sync age" (one of the spec's own bullets, under peer reachability): W3 closes this,
+ * using `peers.last_synced_at` (already recorded per peer by a successful pull) rather than
+ * `sync_state`, which never carried a timestamp. Warns past `sync.stale_hours` (default 24).
  */
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, statSync } from "node:fs";
@@ -19,6 +18,7 @@ import { type CtxdConfig, loadConfig } from "../config/config.js";
 import { isFlagOn, resolveFlags } from "../config/flags.js";
 import { checkDatabaseIntegrity, openDatabase } from "../store/db.js";
 import { isModelCached, modelCacheDir } from "../embed/model.js";
+import { peerSyncAges } from "../sync/freshness.js";
 import {
   claudeCodeSettingsPath,
   codexConfigPath,
@@ -99,7 +99,7 @@ export function checkReviewRuleNarrowness(db: Database.Database): DoctorCheck {
   };
 }
 
-export async function checkPeers(db: Database.Database, fetchImpl: typeof fetch = fetch): Promise<DoctorCheck> {
+export async function checkPeers(db: Database.Database, fetchImpl: typeof fetch = fetch, staleHours = 24): Promise<DoctorCheck> {
   const peers = db.prepare("SELECT name, url FROM peers WHERE revoked_at IS NULL").all() as { name: string; url: string }[];
   if (peers.length === 0) return { name: "peer reachability", ok: true, detail: "no peers configured" };
 
@@ -118,11 +118,20 @@ export async function checkPeers(db: Database.Database, fetchImpl: typeof fetch 
     }),
   );
   const unreachable = results.filter((r) => !r.reachable).map((r) => r.name);
-  const summary = results.map((r) => `${r.name}: ${r.reachable ? "reachable" : "unreachable"}`).join(", ");
+
+  const ages = new Map(peerSyncAges(db, staleHours).map((a) => [a.name, a]));
+  const stale = results.map((r) => r.name).filter((name) => ages.get(name)?.stale);
+  const summary = results
+    .map((r) => {
+      const age = ages.get(r.name);
+      const ageText = age ? (age.lastSyncedAt === null ? "never synced" : `last sync ${age.ageHours.toFixed(1)}h ago`) : "last sync unknown";
+      return `${r.name}: ${r.reachable ? "reachable" : "unreachable"} (${ageText}${age?.stale ? ", STALE" : ""})`;
+    })
+    .join(", ");
   return {
     name: "peer reachability",
-    ok: unreachable.length === 0,
-    detail: `${summary} (last sync age: not tracked yet; sync_state has no timestamp column)`,
+    ok: unreachable.length === 0 && stale.length === 0,
+    detail: summary,
   };
 }
 
@@ -191,7 +200,7 @@ export async function runDoctor(db: Database.Database, config: CtxdConfig, opts:
     checkTokenFilePermissions(opts.configPath),
     checkDatabaseHealth(db),
     checkReviewRuleNarrowness(db),
-    await checkPeers(db, opts.fetchImpl),
+    await checkPeers(db, opts.fetchImpl, config.sync.stale_hours),
     checkFileVault(opts.execFile),
     checkHookInstallation(opts.home),
     checkSemanticSearch(config, opts.dataDir),
