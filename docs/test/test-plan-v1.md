@@ -42,7 +42,7 @@ Criteria: [PRD-briefs-search-v5](../prd/components/PRD-briefs-search-v5.md).
 | ID | Status | Verified by | Note |
 |---|---|---|---|
 | BS-AC-1 | Partial | [`brief.test.ts:62`](../../test/unit/brief.test.ts#L62) includes the latest status entry and the pinned brief body, but not in micro size<br>[`read-moments.test.ts:98`](../../test/unit/read-moments.test.ts#L98) builds a normal-size brief for a bound scope on startup, containing real content | No test asserts the handoff and claim sections together within budget. |
-| BS-AC-2 | Partial | [`tools-read.test.ts:78`](../../test/unit/tools-read.test.ts#L78) finds a matching entry by full-text query, scoped to a readable scope<br>[`hybrid-search.test.ts:162`](../../test/unit/hybrid-search.test.ts#L162) ranks an entry matching on both FTS and vector above one matching on only the vector side | Top-3 rank is not asserted against a corpus. |
+| BS-AC-2 | Partial | [`tools-read.test.ts:78`](../../test/unit/tools-read.test.ts#L78) finds a matching entry by full-text query, scoped to a readable scope<br>[`hybrid-search.test.ts:193`](../../test/unit/hybrid-search.test.ts#L193) ranks an entry matching on both FTS and vector above one matching on only the vector side | Top-3 rank is not asserted against a corpus. |
 | BS-AC-3 | Covered | [`tool-footprint.test.ts:8`](../../test/unit/tool-footprint.test.ts#L8) keeps the tools/list payload under about 1,500 tokens |  |
 | BS-AC-4 | Partial | [`brief.test.ts:122`](../../test/unit/brief.test.ts#L122) surfaces an open signal from a blocker journal entry (store/write.ts syncs signals on every write) | Only one size is exercised. |
 | BS-AC-5 | Diverges | None | Code contradicts Spec 11.1: `src/hooks/readMoments.ts` cuts the text at the limit and appends a marker (up to 2 characters over, and it can cut open signals) instead of dropping sections lowest priority first. Raised for the owner; then fix the code and add the test. |
@@ -184,9 +184,9 @@ Criteria: [PRD-replication-v6](../prd/components/PRD-replication-v6.md).
 | RP-AC-1 | Covered | [`sync-conflicts.test.ts:100`](../../test/unit/sync-conflicts.test.ts#L100) the later-HLC side wins as head, the earlier side is kept as a conflict sibling, and ctxd review lists it<br>[`sync-conflicts.test.ts:127`](../../test/unit/sync-conflicts.test.ts#L127) converges to the same outcome regardless of which concurrent event is applied first |  |
 | RP-AC-2 | Partial | [`sync-partition-property.test.ts:371`](../../test/unit/sync-partition-property.test.ts#L371) is deterministic across random sequences of operations, random partitions, heals and delivery order | Same gap as KM-AC-1. |
 | RP-AC-3 | Covered | [`policy.test.ts:5`](../../test/unit/policy.test.ts#L5) filters replication by scope policy and node role |  |
-| RP-AC-4 | Partial | [`sync.test.ts:135`](../../test/conformance/sync.test.ts#L135) a second sync with nothing new applies zero events<br>[`sync-purge.test.ts:116`](../../test/unit/sync-purge.test.ts#L116) is idempotent: the same purge event applied twice is already-known the second time | No test interrupts a transfer. |
+| RP-AC-4 | Partial | [`sync.test.ts:150`](../../test/conformance/sync.test.ts#L150) a second sync with nothing new applies zero events<br>[`sync-purge.test.ts:116`](../../test/unit/sync-purge.test.ts#L116) is idempotent: the same purge event applied twice is already-known the second time | No test interrupts a transfer. |
 | RP-AC-5 | Covered | [`sync-partition-property.test.ts:371`](../../test/unit/sync-partition-property.test.ts#L371) is deterministic across random sequences of operations, random partitions, heals and delivery order |  |
-| RP-AC-6 | Partial | [`hybrid-search.test.ts:179`](../../test/unit/hybrid-search.test.ts#L179) degrades a single entry to FTS-only ranking when it has no vector yet, without affecting others | No test syncs vectors into a non-computing node. |
+| RP-AC-6 | Partial | [`hybrid-search.test.ts:210`](../../test/unit/hybrid-search.test.ts#L210) degrades a single entry to FTS-only ranking when it has no vector yet, without affecting others | No test syncs vectors into a non-computing node. |
 
 ## SK: Skills
 
@@ -210,7 +210,7 @@ Criteria: [PRD-trust-safety-v5](../prd/components/PRD-trust-safety-v5.md).
 | TS-AC-3 | Covered | [`redact.test.ts:23`](../../test/unit/redact.test.ts#L23) catches a secret split by a zero-width character |  |
 | TS-AC-4 | Covered | [`write.test.ts:220`](../../test/unit/write.test.ts#L220) holds a write to a scope outside the client's pools and opens an access request<br>[`claim.test.ts:244`](../../test/unit/claim.test.ts#L244) rejects claim/release below propose access, but allows list at read |  |
 | TS-AC-5 | Covered | [`access.test.ts:80`](../../test/unit/access.test.ts#L80) applies pool vendor defaults: local-only beats any grant for cloud agents<br>[`policy.test.ts:12`](../../test/unit/policy.test.ts#L12) hides local-only scopes from cloud vendors |  |
-| TS-AC-6 | Covered | [`policy.test.ts:19`](../../test/unit/policy.test.ts#L19) refuses non-loopback listeners<br>[`doctor.test.ts:38`](../../test/unit/doctor.test.ts#L38) fails when a listener binds to a non-loopback address |  |
+| TS-AC-6 | Covered | [`policy.test.ts:19`](../../test/unit/policy.test.ts#L19) refuses non-loopback listeners<br>[`doctor.test.ts:39`](../../test/unit/doctor.test.ts#L39) fails when a listener binds to a non-loopback address |  |
 | TS-AC-7 | Gap | None | Import preflight is tested (`mirror.test.ts:147`); export warnings are not. |
 | TS-AC-8 | Covered | [`path-guard.test.ts:16`](../../test/unit/path-guard.test.ts#L16) denies a Read/Edit/Write whose file_path is under the guarded directory<br>[`path-guard.test.ts:83`](../../test/unit/path-guard.test.ts#L83) blocks a PreToolUse call targeting the resolved data directory |  |
 | TS-AC-9 | Partial | [`scope.test.ts:89`](../../test/unit/scope.test.ts#L89) honors the environment flag | Same gap as HK-AC-7. |
