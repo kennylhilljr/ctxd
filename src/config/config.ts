@@ -61,6 +61,9 @@ export const configSchema = z.object({
   sealed: z
     .object({ unlock_minutes: z.number().int().min(1).default(60), key_helper: z.string().default("ctxd-keyhelper") })
     .default({ unlock_minutes: 60, key_helper: "ctxd-keyhelper" }),
+  local_model: z
+    .object({ endpoint: z.string().url().default("http://127.0.0.1:11434/api/generate"), model: z.string().min(1).default("ctxd-local"), timeout_ms: z.number().int().min(100).default(30_000) })
+    .default({ endpoint: "http://127.0.0.1:11434/api/generate", model: "ctxd-local", timeout_ms: 30_000 }),
   /** Weekly digest (SPEC v8 11.5): only digest_node writes digests, on digest_weekday after 18:00 local. */
   journal: z
     .object({

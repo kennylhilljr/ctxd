@@ -16,6 +16,8 @@ import { embedPendingEntries, ensureEmbedClient } from "../embed/compute.js";
 import { syncMirror } from "../mirror/markdown.js";
 import { expandHome } from "../config/config.js";
 import { KeyHelperProvider } from "../sealed/key-provider.js";
+import { LoopbackTextModel } from "../local-model/client.js";
+import { runLocalModelSuggestions } from "../local-model/suggestions.js";
 
 export async function run(argv: string[]): Promise<number> {
   const { values } = parseArgs({
@@ -163,6 +165,25 @@ export async function run(argv: string[]): Promise<number> {
     }
   }
 
+  let localModelInterval: NodeJS.Timeout | undefined;
+  if (isFlagOn(flags, "local_model")) {
+    const human = db.prepare("SELECT client_id FROM clients WHERE name = 'human'").get() as { client_id: string } | undefined;
+    if (human) {
+      const modelCtx: WriteContext = { db, clock: new HlcClock(node.node_id), nodeId: node.node_id, clientId: human.client_id, flags };
+      const model = new LoopbackTextModel(config.local_model.endpoint, config.local_model.model, config.local_model.timeout_ms);
+      let generating = false;
+      const tick = (): void => {
+        if (generating) return;
+        generating = true;
+        void runLocalModelSuggestions(modelCtx, model).catch((err: unknown) => {
+          console.error(`ctxd server: local model tick failed: ${err instanceof Error ? err.message : String(err)}`);
+        }).finally(() => { generating = false; });
+      };
+      tick();
+      localModelInterval = setInterval(tick, 60_000);
+    }
+  }
+
   let stopping = false;
   const stop = (): void => {
     if (stopping) return;
@@ -171,6 +192,7 @@ export async function run(argv: string[]): Promise<number> {
     if (digestInterval) clearInterval(digestInterval);
     if (embedInterval) clearInterval(embedInterval);
     if (mirrorInterval) clearInterval(mirrorInterval);
+    if (localModelInterval) clearInterval(localModelInterval);
     void Promise.all([server.close(), syncServer?.close()]).then(() => {
       db.close();
       process.exit(0);

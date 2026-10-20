@@ -213,6 +213,11 @@ crash_grace_minutes = 30           # crash sweep (9.10)
 enabled = false
 dir = "~/Library/Application Support/ctxd/mirror"
 
+[local_model]                      # M6 proposal worker; loopback HTTP only
+endpoint = "http://127.0.0.1:11434/api/generate"
+model = "ctxd-local"
+timeout_ms = 30000
+
 [skills]                           # native skill sync (12.2)
 sync_clients = []                  # e.g. ["claude-code", "codex"]
 include_scopes = ["_me"]           # pool profiles or projects only if listed explicitly
@@ -1662,6 +1667,14 @@ Implements [Memory and journal](../prd/components/PRD-memory-journal-v1.md) sect
 - **Contents.** Assembled without a model: counts of new entries by kind; milestones and breakthroughs (titles); blockers and incidents opened and resolved, with time to resolve; decisions made; lessons, preferences and skills added; and sessions and commits from `auto` journal entries.
 - **Shape.** A `journal` entry, significance `routine`, tags `digest` and the ISO week, at most 1,000 characters of body; longer lists end with a folder path.
 - **Optional summary.** A local model may add a prose summary in M6, labeled as machine-written.
+
+### 11.6 Local model proposals
+
+The `local_model` flag is off by default. When enabled, the server may send active entry text to the configured loopback HTTP model. Non-loopback endpoints are rejected before a request is made.
+
+The model returns JSON with optional `summary` and `lesson` strings. ctxd stores each result as a new proposal through the normal write, sanitization, access and event path. Summary proposals are `brief` entries. Lesson suggestions are `lesson` entries. Both carry `machine-written`, `local-model` and model identity tags plus a `derived_from` relation to the source. The local model client receives only propose access to each target scope.
+
+The source revision is part of each request id. A retry cannot create duplicates, while a later source revision may produce a new proposal. A timeout, invalid response or unavailable model leaves the deterministic source summary unchanged and does not block hooks or ordinary writes.
 
 ## 12. Operations
 

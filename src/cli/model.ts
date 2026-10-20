@@ -1,7 +1,13 @@
 /** `ctxd model fetch|status` (SPEC v8 11.2.1): downloads and caches the pinned embedding model, or reports whether it is cached. */
 import { parseArgs } from "node:util";
-import { resolveDataDir } from "./common.js";
+import { join } from "node:path";
+import { resolveConfigPath, resolveDataDir, resolveHumanWriteContext } from "./common.js";
 import { fetchModel, isModelCached, MODEL_ID, MODEL_REVISION, modelCacheDir } from "../embed/model.js";
+import { loadConfig } from "../config/config.js";
+import { requireFlag, resolveFlags } from "../config/flags.js";
+import { openDatabase } from "../store/db.js";
+import { LoopbackTextModel } from "../local-model/client.js";
+import { runLocalModelSuggestions } from "../local-model/suggestions.js";
 
 async function runFetch(dataDir: string): Promise<number> {
   if (isModelCached(dataDir)) {
@@ -28,8 +34,8 @@ function runStatus(dataDir: string): number {
 
 export async function run(argv: string[]): Promise<number> {
   const [sub, ...rest] = argv;
-  if (sub !== "fetch" && sub !== "status") {
-    console.error(`ctxd model: unknown subcommand "${sub}". Use fetch or status.`);
+  if (sub !== "fetch" && sub !== "status" && sub !== "suggest") {
+    console.error(`ctxd model: unknown subcommand "${sub}". Use fetch, status or suggest.`);
     return 2;
   }
   const { values } = parseArgs({
@@ -38,5 +44,16 @@ export async function run(argv: string[]): Promise<number> {
     strict: true,
   });
   const dataDir = resolveDataDir({ dataDir: values["data-dir"], configPath: values.config });
-  return sub === "fetch" ? runFetch(dataDir) : runStatus(dataDir);
+  if (sub === "fetch") return runFetch(dataDir);
+  if (sub === "status") return runStatus(dataDir);
+  const config = loadConfig(resolveConfigPath({ configPath: values.config }));
+  const flags = resolveFlags(config);
+  requireFlag(flags, "local_model");
+  const db = openDatabase(join(dataDir, "ctxd.db"));
+  try {
+    const ctx = resolveHumanWriteContext(db); ctx.flags = flags;
+    const result = await runLocalModelSuggestions(ctx, new LoopbackTextModel(config.local_model.endpoint, config.local_model.model, config.local_model.timeout_ms));
+    console.log(`ctxd model: ${result.proposed} proposal(s), ${result.failed} failed source(s).`);
+    return result.failed > 0 ? 1 : 0;
+  } finally { db.close(); }
 }
