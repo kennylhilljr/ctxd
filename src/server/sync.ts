@@ -81,7 +81,12 @@ async function handleRequest(
       res.writeHead(400, { "content-type": "application/json" }).end(JSON.stringify({ error: "invalid pull request" }));
       return;
     }
-    const response = servePull(db, auth.peerRole, { node: body.node, vector: body.vector, limit: body.limit }, sealedKeys, sealedStore);
+    if (auth.remoteNodeId !== null && body.node !== auth.remoteNodeId) {
+      res.writeHead(403, { "content-type": "application/json" }).end(JSON.stringify({ error: "pull node identity does not match authenticated peer" }));
+      return;
+    }
+    const authenticatedNode = auth.remoteNodeId ?? "";
+    const response = servePull(db, auth.peerRole, { node: authenticatedNode, vector: body.vector, limit: body.limit }, sealedKeys, sealedStore);
     res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(response));
     return;
   }

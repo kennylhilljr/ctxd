@@ -11,10 +11,13 @@ import { newToken } from "../core/hash.js";
 import { configSchema, loadConfig } from "../config/config.js";
 import { parse, stringify } from "smol-toml";
 import { probeServer } from "./mcp.js";
+import { pinPublicKey } from "../security/event-signatures.js";
 
 export interface AddPeerOptions {
   role: "home" | "roaming";
   token?: string;
+  nodeId?: string;
+  publicKey?: string;
 }
 
 /**
@@ -33,7 +36,11 @@ export interface AddPeerOptions {
  * alone and refused, since there would be nothing to do.
  */
 export function addPeer(db: Database.Database, name: string, url: string, opts: AddPeerOptions, configPath: string): number {
-  const existing = db.prepare("SELECT peer_id, role FROM peers WHERE name = ?").get(name) as { peer_id: string; role: string } | undefined;
+  if ((opts.nodeId === undefined) !== (opts.publicKey === undefined)) {
+    console.error("ctxd node: --node-id and --public-key must be supplied together.");
+    return 1;
+  }
+  const existing = db.prepare("SELECT peer_id, role, remote_node_id, remote_public_key FROM peers WHERE name = ?").get(name) as { peer_id: string; role: string; remote_node_id: string | null; remote_public_key: string | null } | undefined;
   if (existing) {
     if (!opts.token) {
       console.error(`ctxd node: peer "${name}" already exists. Pass --token to update its outgoing token.`);
@@ -43,14 +50,27 @@ export function addPeer(db: Database.Database, name: string, url: string, opts: 
       console.error(`ctxd node: peer "${name}" is registered as "${existing.role}", not "${opts.role}". This call only updates its outgoing token; role is not mutable here.`);
       return 1;
     }
-    db.prepare("UPDATE peers SET outgoing_token = ? WHERE peer_id = ?").run(opts.token, existing.peer_id);
+    if (existing.remote_node_id && opts.nodeId && existing.remote_node_id !== opts.nodeId) {
+      console.error(`ctxd node: peer "${name}" is already bound to a different node id.`);
+      return 1;
+    }
+    if (existing.remote_public_key && opts.publicKey && existing.remote_public_key !== opts.publicKey) {
+      console.error(`ctxd node: peer "${name}" is already bound to a different public key.`);
+      return 1;
+    }
+    db.transaction(() => {
+      db.prepare("UPDATE peers SET outgoing_token = ?, remote_node_id = COALESCE(remote_node_id, ?), remote_public_key = COALESCE(remote_public_key, ?) WHERE peer_id = ?")
+        .run(opts.token, opts.nodeId ?? null, opts.publicKey ?? null, existing.peer_id);
+      if (opts.nodeId && opts.publicKey) pinPublicKey(db, opts.nodeId, opts.publicKey, 0);
+    })();
     console.log(`ctxd node: peer ${name}: outgoing token updated.`);
     return 0;
   }
   const { raw, hash } = newToken();
   db.prepare(
-    "INSERT INTO peers (peer_id, name, url, role, incoming_token_hash, outgoing_token, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-  ).run(newId(), name, url, opts.role, hash, opts.token ?? null, nowIso());
+    "INSERT INTO peers (peer_id, name, url, role, incoming_token_hash, outgoing_token, created_at, remote_node_id, remote_public_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  ).run(newId(), name, url, opts.role, hash, opts.token ?? null, nowIso(), opts.nodeId ?? null, opts.publicKey ?? null);
+  if (opts.nodeId && opts.publicKey) pinPublicKey(db, opts.nodeId, opts.publicKey, 0);
 
   const dir = tokensDir(configPath);
   mkdirSync(dir, { recursive: true });
@@ -123,7 +143,7 @@ export async function run(argv: string[]): Promise<number> {
   const [sub, ...rest] = argv;
   const { values, positionals } = parseArgs({
     args: rest,
-    options: { role: { type: "string" }, token: { type: "string" }, "data-dir": { type: "string" }, config: { type: "string" } },
+    options: { role: { type: "string" }, token: { type: "string" }, "node-id": { type: "string" }, "public-key": { type: "string" }, "data-dir": { type: "string" }, config: { type: "string" } },
     allowPositionals: true,
     strict: true,
   });
@@ -141,7 +161,7 @@ export async function run(argv: string[]): Promise<number> {
         console.error("ctxd node: --role must be \"home\" or \"roaming\".");
         return 1;
       }
-      return addPeer(db, name, url, { role: values.role, token: values.token }, configPath);
+      return addPeer(db, name, url, { role: values.role, token: values.token, nodeId: values["node-id"], publicKey: values["public-key"] }, configPath);
     }
     if (sub === "revoke") {
       const name = positionals[0];

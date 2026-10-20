@@ -226,13 +226,16 @@ export function run(argv: string[]): number {
         requireFlag(flags, "sealed_pools");
         const [name, nodeName] = positionals;
         const pool = name ? findPool(db, name) : undefined;
-        const node = nodeName ? db.prepare("SELECT node_id FROM nodes WHERE name = ? OR node_id = ?").get(nodeName, nodeName) as { node_id: string } | undefined : undefined;
+        const node = nodeName ? db.prepare("SELECT remote_node_id AS node_id FROM peers WHERE (name = ? OR remote_node_id = ?) AND revoked_at IS NULL AND remote_node_id IS NOT NULL AND remote_public_key IS NOT NULL").get(nodeName, nodeName) as { node_id: string } | undefined : undefined;
         if (!name || !nodeName || !pool || !node) { console.error("Usage: ctxd pool enroll <pool> <node>"); return 1; }
         const store = new SealedPoolStore(db, dataDir, new KeyHelperProvider(config.sealed.key_helper), new SqlCipherDatabaseProvider(), config.sealed.unlock_minutes);
-        store.enroll(pool.pool_id, node.node_id);
-        appendAclEvent(humanContext(), pool.pool_id, { action: "pool_enroll", node_id: node.node_id });
-        console.log(`ctxd pool enrolled: ${name} -> ${nodeName}`);
-        return 0;
+        try {
+          store.enroll(pool.pool_id, node.node_id);
+          return 0;
+        } catch (err) {
+          console.error(`ctxd pool enroll: ${err instanceof Error ? err.message : String(err)}`);
+          return 1;
+        }
       }
       case "lock": {
         requireFlag(flags, "sealed_pools");

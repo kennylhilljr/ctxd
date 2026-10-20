@@ -12,7 +12,7 @@
  * it replaces, matching `install-hooks`' own "back up the original first" rule.
  */
 import { execFileSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, unlinkSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, unlinkSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { parseArgs } from "node:util";
@@ -45,6 +45,7 @@ export interface BackupOptions {
 export interface BackupResult {
   path: string;
   sealedPaths: string[];
+  nodeKeyPath?: string;
   copiedTo?: string;
   pruned: string[];
 }
@@ -64,6 +65,8 @@ function pruneBackups(dir: string, keep: number): string[] {
     for (const companion of all.filter((name) => name.startsWith(`${stamp}.sealed-`) && name.endsWith(".age"))) {
       unlinkSync(join(dir, companion));
     }
+    const nodeKey = join(dir, `${stamp}.node-key.age`);
+    if (existsSync(nodeKey)) unlinkSync(nodeKey);
   }
   return removed;
 }
@@ -100,6 +103,13 @@ export function runBackup(db: Database.Database, opts: BackupOptions): BackupRes
     }
   }
 
+  const nodeKey = join(opts.dataDir, "node.ed25519.pem");
+  let nodeKeyPath: string | undefined;
+  if (existsSync(nodeKey)) {
+    nodeKeyPath = join(dir, `${stamp}.node-key.age`);
+    execFileSync("age", ["-r", opts.ageRecipient, "-o", nodeKeyPath, nodeKey]);
+  }
+
   const pruned = pruneBackups(dir, opts.keep ?? KEEP);
 
   let copiedTo: string | undefined;
@@ -108,8 +118,9 @@ export function runBackup(db: Database.Database, opts: BackupOptions): BackupRes
     copiedTo = join(opts.copyTo, basename(destPath));
     copyFileSync(destPath, copiedTo);
     for (const path of sealedPaths) copyFileSync(path, join(opts.copyTo, basename(path)));
+    if (nodeKeyPath) copyFileSync(nodeKeyPath, join(opts.copyTo, basename(nodeKeyPath)));
   }
-  return { path: destPath, sealedPaths, copiedTo, pruned };
+  return { path: destPath, sealedPaths, nodeKeyPath, copiedTo, pruned };
 }
 
 export interface RestoreOptions {
@@ -122,6 +133,7 @@ export interface RestoreOptions {
 export interface RestoreResult {
   restoredTo: string;
   sealedRestored: string[];
+  nodeKeyRestored?: string;
   replacedBackupPath?: string;
 }
 
@@ -150,6 +162,11 @@ export function runRestore(opts: RestoreOptions): RestoreResult {
   const companions = readdirSync(backupDir)
     .filter((name) => name.startsWith(companionPrefix) && name.endsWith(".db.age"))
     .map((name) => ({ name, database: name.slice(companionPrefix.length, -".age".length) }));
+  const nodeKeyCompanion = join(backupDir, `${stamp}.node-key.age`);
+  const nodeKeyTarget = join(opts.dataDir, "node.ed25519.pem");
+  if (existsSync(nodeKeyCompanion) && !opts.force && existsSync(nodeKeyTarget)) {
+    throw new Error(`${nodeKeyTarget} already exists; refusing to overwrite it without --force.`);
+  }
   const sealedDir = join(opts.dataDir, "sealed");
   for (const companion of companions) {
     const target = join(sealedDir, companion.database);
@@ -189,7 +206,15 @@ export function runRestore(opts: RestoreOptions): RestoreResult {
     renameSync(temporary, target);
     sealedRestored.push(target);
   }
-  return { restoredTo: dbPath, sealedRestored, replacedBackupPath };
+  let nodeKeyRestored: string | undefined;
+  if (existsSync(nodeKeyCompanion)) {
+    const temporary = `${nodeKeyTarget}.restore-${randomBytes(6).toString("hex")}`;
+    execFileSync("age", ["--decrypt", "-i", opts.identity, "-o", temporary, nodeKeyCompanion]);
+    chmodSync(temporary, 0o600);
+    renameSync(temporary, nodeKeyTarget);
+    nodeKeyRestored = nodeKeyTarget;
+  }
+  return { restoredTo: dbPath, sealedRestored, nodeKeyRestored, replacedBackupPath };
 }
 
 function usage(): string {

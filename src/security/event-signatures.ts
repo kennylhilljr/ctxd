@@ -1,5 +1,6 @@
 import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, sign, verify, type KeyObject } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import type Database from "better-sqlite3";
 import { canonicalJson } from "../store/idempotency.js";
 
@@ -40,7 +41,7 @@ export class FileEventKeyProvider implements EventKeyProvider {
       memoryKeys.set(nodeId, created);
       return created;
     }
-    const path = `${this.databasePath}.ed25519.pem`;
+    const path = join(dirname(this.databasePath), "node.ed25519.pem");
     if (existsSync(path)) {
       const privateKey = readFileSync(path);
       const privateObject = createPrivateKey(privateKey);

@@ -31,6 +31,11 @@ function fixture() {
 }
 
 describe("sealed pools (Spec v9 section 10.6)", () => {
+  it("fails closed for remote enrollment until authenticated key transfer exists", () => {
+    const f = fixture();
+    expect(() => f.store.enroll(f.poolId, "node-b")).toThrow(/key transfer is not implemented/);
+    expect(f.db.prepare("SELECT 1 FROM pool_enrollments WHERE pool_id = ? AND node_id = 'node-b'").get(f.poolId)).toBeUndefined();
+  });
   it("round trips XChaCha20-Poly1305 envelopes and authenticates event ids", () => {
     const key = Buffer.alloc(32, 7);
     const envelope = encryptSealed(Buffer.from("payload"), key, "event-a");

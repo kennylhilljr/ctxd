@@ -180,8 +180,9 @@ export class SealedPoolStore {
   }
 
   enroll(poolId: string, nodeId: string): void {
-    this.keys.get(poolId);
+    void poolId;
     void nodeId;
+    throw new Error("remote sealed key transfer is not implemented; enrollment refused");
   }
 
   /**

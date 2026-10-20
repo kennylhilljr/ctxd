@@ -15,7 +15,7 @@ import { verifyEventSignature } from "../security/event-signatures.js";
  */
 export interface WireEvent {
   eventId: string;
-  schemaVersion: number;
+  schemaVersion?: number;
   originNode: string;
   originSeq: number;
   hlc: string;
@@ -283,7 +283,8 @@ export function applyEvent(db: Database.Database, event: WireEvent): ApplyResult
   if (db.prepare("SELECT 1 FROM events WHERE event_id = ?").get(event.eventId)) {
     return { outcome: "already-known" };
   }
-  verifyEventSignature(db, event, true);
+  const schemaVersion = event.schemaVersion ?? 1;
+  verifyEventSignature(db, { ...event, schemaVersion }, true);
 
   const decision = decide(db, event);
   // 7.6.6 step 3: an event for an already-purged entry is stored with its content already gone,
@@ -299,7 +300,7 @@ export function applyEvent(db: Database.Database, event: WireEvent): ApplyResult
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       event.eventId,
-      event.schemaVersion,
+      schemaVersion,
       event.originNode,
       event.originSeq,
       event.hlc,

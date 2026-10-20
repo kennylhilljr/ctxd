@@ -125,6 +125,21 @@ describe("runBackup", () => {
     expect(main.prepare("SELECT COUNT(*) AS n FROM entries").get()).toEqual({ n: 0 });
     main.close();
   });
+
+  it("round-trips the node signing key only as an age-encrypted companion", () => {
+    const sourceDir = tmpDataDir();
+    const key = Buffer.from("private signing key fixture");
+    writeFileSync(join(sourceDir, "node.ed25519.pem"), key, { mode: 0o600 });
+    const db = openDatabase(realDbPath(sourceDir));
+    const backup = runBackup(db, { dataDir: sourceDir, ageRecipient: "age1testrecipient" });
+    db.close();
+    expect(backup.nodeKeyPath).toBeDefined();
+    expect(readFileSync(backup.nodeKeyPath!)).toEqual(key);
+    const targetDir = tmpDataDir();
+    const restored = runRestore({ file: backup.path, identity: "unused", dataDir: targetDir });
+    expect(restored.nodeKeyRestored).toBe(join(targetDir, "node.ed25519.pem"));
+    expect(readFileSync(restored.nodeKeyRestored!)).toEqual(key);
+  });
 });
 
 describe("runRestore", () => {
