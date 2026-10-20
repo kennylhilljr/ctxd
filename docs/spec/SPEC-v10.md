@@ -20,6 +20,7 @@ Earlier changes are listed in [Spec v9](SPEC-v9.md), [v8](SPEC-v8.md) and before
 | **Stable section numbers.** Every numbered section keeps its Spec v9 number, in this document and in the LLDs, so `SPEC 9.1` or `Spec 7.6.6` in code comments, PRDs and AGENTS.md still points at the right text. Two previously unnumbered parts of section 3 now have numbers: 3.2 (additional configuration keys) and 3.3 (scope resolution and bypass) | "How this spec is organized" below |
 | **Schema caught up.** The data model LLD now carries the executable schema (version 21) from `src/store/schema.ts`, which adds `acl_cursors`, `node_origin_sequences`, `node_encryption_keys`, `sealed_key_transfers` and `sessions.cwd` that Spec v9's SQL lacked | [LLD: Data model](../lld/LLD-data-model-v1.md) 4 |
 | **Spec v10 draft folded in.** W5.1 approval timestamps (data model 4, digest 11.5); W5.2 crash sweep mechanical work (9.10); W5.3 list-mode ordering (11.2); W5.4 automatic skill sync and W5.5 Codex skills folder (12.2, closes open issue 16); the W5 PreCompact limitation (9.2); W2 sealed pool key transfer (10.6.1, CLI) | The LLD sections named |
+| **W6 search benchmark folded in** (merged after the restructure). A fixed relevance benchmark with a CI regression check, and FTS5 query escaping | [LLD: Briefs and search](../lld/LLD-briefs-search-v1.md) 11.2, section 14 |
 | **Acceptance criteria traced to tests.** Component PRDs now state acceptance criteria in EARS with IDs, and the test plan maps each one to its tests | [Test plan v1](../test/test-plan-v1.md) |
 
 ## How this spec is organized
@@ -222,6 +223,7 @@ Detail: [Contract: CLI reference](../contracts/cli-reference-v1.md).
 | Sync properties | N in-process nodes, random ops (including claims with write intent), random partitions and heals, random delivery order. Assert identical materialized state hashes (entries, leases, overlap rows), no lost events, `through` cursor correctness under filtering | fast-check |
 | Policy | `home` and `local` scopes never reach roaming nodes; `local-only` scopes never returned to cloud-vendor clients | vitest |
 | Security | Non-loopback bind refused; token file permission checks; secrets rejected | vitest |
+| Search quality | Fixed benchmark: hybrid stays within 0.03 of its recorded MRR, nDCG and recall baseline and beats keyword-only on paraphrase queries (W6) | vitest, `npm run bench:search` |
 | End to end | Two real servers on different ports; Claude Code and Codex smoke scripts (manual, per release) | scripts |
 
 Each component's acceptance criteria, and the tests that verify them, are mapped in the [test plan](../test/test-plan-v1.md).

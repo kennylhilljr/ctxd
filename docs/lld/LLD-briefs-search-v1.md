@@ -64,6 +64,8 @@ Recovery intent stores only the task id, a phase label and a one-line summary of
 - **Proposed skills** are returned only to their author and the human client (4.3).
 - **M5: hybrid with sqlite-vec embeddings via reciprocal rank fusion.** FTS and vector results are each ranked independently, then combined by reciprocal rank fusion (`1 / (k + rank)`, `k = 60`) rather than a weighted blend of raw scores, so the two incomparable score scales (bm25 and cosine distance) never need calibrating against each other. An entry with no vector yet (11.2.1) ranks by FTS alone, exactly as it does with `semantic_search` off; this is normal, not a gap, per [Replication v6](../prd/components/PRD-replication-v6.md) section 4.
 - **Snippets:** about 40 words, built with FTS5 `snippet()`.
+- **Query escaping.** A free-text query is quoted word by word before it reaches FTS5 `MATCH` (`escapeFtsQuery` in `src/search/fts.ts`), so ordinary punctuation such as a hyphen or a quote never raises an FTS5 syntax error (W6).
+- **Quality benchmark.** `npm run bench:search` runs the real search, keyword-only and hybrid, against a fixed fixture set (`test/fixtures/search-bench/`: 200 invented entries, 75 labeled keyword, paraphrase and mixed queries, and precomputed vectors from the pinned model) and reports MRR@10, nDCG@10 and recall@10. A CI test fails if hybrid drops more than 0.03 below the recorded baseline on any of the three, and asserts hybrid beats keyword-only on paraphrase queries, the M5 exit criterion (W6).
 
 ### 11.2.1 Embeddings (M5)
 
