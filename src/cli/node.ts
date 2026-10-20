@@ -1,6 +1,6 @@
 /** `ctxd node add-peer|revoke`: manage sync peers (Spec v8 7.1, 13). */
 import { parseArgs } from "node:util";
-import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type Database from "better-sqlite3";
 import { resolveConfigPath, resolveDataDir, tokensDir } from "./common.js";
@@ -109,6 +109,10 @@ export async function adoptNode(
   newName: string,
   probe: (listen: string) => Promise<boolean> = probeServer,
 ): Promise<number> {
+  if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(newName)) {
+    console.error("ctxd node adopt: name must be a lowercase DNS label using letters, digits and interior hyphens.");
+    return 1;
+  }
   const config = loadConfig(configPath);
   if (await probe(config.mcp.listen)) {
     console.error("ctxd node adopt: the server is running. Stop it before adopting this data directory.");
@@ -127,14 +131,23 @@ export async function adoptNode(
     console.error(`ctxd node adopt: "${newName}" collides with an active peer name.`);
     return 1;
   }
-  const raw = parse(readFileSync(configPath, "utf8")) as Record<string, unknown>;
+  const originalConfig = readFileSync(configPath, "utf8");
+  const raw = parse(originalConfig) as Record<string, unknown>;
   const validated = configSchema.parse({ ...raw, node: { ...(raw.node as Record<string, unknown>), name: newName } });
   const temp = join(dirname(configPath), `.ctxd-adopt-${process.pid}.toml`);
   writeFileSync(temp, stringify(validated), { mode: 0o600 });
-  db.transaction(() => {
-    db.prepare("UPDATE nodes SET name = ? WHERE node_id = ?").run(newName, node[0]!.node_id);
-    renameSync(temp, configPath);
-  })();
+  try {
+    db.transaction(() => {
+      db.prepare("UPDATE nodes SET name = ? WHERE node_id = ?").run(newName, node[0]!.node_id);
+      renameSync(temp, configPath);
+    })();
+  } catch (err) {
+    rmSync(temp, { force: true });
+    const rollback = `${temp}.rollback`;
+    writeFileSync(rollback, originalConfig, { mode: 0o600 });
+    renameSync(rollback, configPath);
+    throw err;
+  }
   console.log(`ctxd node adopted: ${newName}; node id ${node[0]!.node_id} preserved.`);
   return 0;
 }

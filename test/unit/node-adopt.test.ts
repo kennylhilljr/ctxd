@@ -42,4 +42,11 @@ describe("ctxd node adopt", () => {
     expect(await adoptNode(f.db, f.configPath, "node-b", async () => false)).toBe(1);
     expect(f.db.prepare("SELECT name FROM nodes").get()).toEqual({ name: "node-a" });
   });
+
+  it.each(["", "Node B", "node/b", "-node", "node-", "a".repeat(64)])("rejects invalid node name %j", async (name) => {
+    const f = fixture();
+    expect(await adoptNode(f.db, f.configPath, name, async () => false)).toBe(1);
+    expect(f.db.prepare("SELECT name FROM nodes").get()).toEqual({ name: "node-a" });
+    expect(loadConfig(f.configPath).node.name).toBe("node-a");
+  });
 });
