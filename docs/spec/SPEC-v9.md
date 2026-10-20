@@ -499,6 +499,21 @@ CREATE TABLE mirror_files (            -- local only: Markdown mirror state (12.
   written_at   TEXT NOT NULL
 );
 
+CREATE TABLE mirror_conflicts (        -- local only: stale or immutable mirror edits awaiting review
+  path         TEXT PRIMARY KEY,
+  entry_id     TEXT NOT NULL,
+  file_rev     TEXT,
+  current_rev  TEXT NOT NULL,
+  reason       TEXT NOT NULL,
+  created_at   TEXT NOT NULL
+);
+
+CREATE TABLE archive_requests (        -- local only: mirror deletions awaiting a human decision
+  entry_id     TEXT PRIMARY KEY,
+  path         TEXT NOT NULL,
+  created_at   TEXT NOT NULL
+);
+
 CREATE TABLE tool_metrics (            -- local only: response metering (8.5)
   at           TEXT NOT NULL,
   client_id    TEXT NOT NULL,
@@ -1689,8 +1704,8 @@ links: ["[[supersedes::ctxd:ctxd/01JAB...]]"]
 ...
 ```
 
-- **Writing out.** After each applied event, the affected files are rewritten atomically (temporary file, then rename), and `mirror_files` records the revision and file hash.
-- **Reading back.** A file watcher (FSEvents) debounces changes for 2 seconds, then for each changed file:
+- **Writing out.** While the feature is enabled, the server reconciles the mirror every 2 seconds. It rewrites files atomically (temporary file, then rename), and `mirror_files` records the revision and file hash.
+- **Reading back.** Each reconciliation processes changed files:
   - **Unchanged hash:** ignore, so ctxd's own writes do not loop.
   - **Edited file:** compare the frontmatter `rev` with the current content revision. If it matches, apply the edit as a human-client update through the write path (6). If not, write `<name>.conflict.md` beside the file with my version and add a review item; nothing is applied.
   - **Changed frontmatter fields:** only `status` (as a review action) and `review_after` are honored; edits to `ref`, `kind`, `rev`, `by` and `updated` are ignored and restored on the next write.

@@ -44,6 +44,10 @@ import { run as runTidyCommand } from "./tidy.js";
 import { run as runDigestCommand } from "./digest.js";
 import { run as runSkillsCommand } from "./skills.js";
 import { run as runModelCommand } from "./model.js";
+import { run as runExportCommand } from "./export.js";
+import { run as runMirrorCommand } from "./mirror.js";
+import { run as runImportCommand } from "./import.js";
+import { run as runOpenCommand } from "./open.js";
 
 /** Each command's parsed-args entry point, added as its milestone lands. */
 const COMMAND_RUNNERS: Record<string, (argv: string[]) => number | Promise<number>> = {
@@ -90,6 +94,10 @@ const COMMAND_RUNNERS: Record<string, (argv: string[]) => number | Promise<numbe
   digest: runDigestCommand,
   skills: runSkillsCommand,
   model: runModelCommand,
+  export: runExportCommand,
+  mirror: runMirrorCommand,
+  import: runImportCommand,
+  open: runOpenCommand,
 };
 
 const COMMANDS: Record<string, { milestone: string; summary: string }> = {

@@ -13,6 +13,8 @@ import { HlcClock } from "../core/hlc.js";
 import type { WriteContext } from "../store/write.js";
 import { runDueDigests } from "../journal/digest.js";
 import { embedPendingEntries, ensureEmbedClient } from "../embed/compute.js";
+import { syncMirror } from "../mirror/markdown.js";
+import { expandHome } from "../config/config.js";
 
 export async function run(argv: string[]): Promise<number> {
   const { values } = parseArgs({
@@ -141,6 +143,24 @@ export async function run(argv: string[]): Promise<number> {
     embedInterval = setInterval(tick, 30_000);
   }
 
+  let mirrorInterval: NodeJS.Timeout | undefined;
+  if (isFlagOn(flags, "mirror")) {
+    const human = db.prepare("SELECT client_id FROM clients WHERE name = 'human'").get() as { client_id: string } | undefined;
+    if (human) {
+      const mirrorCtx: WriteContext = { db, clock: new HlcClock(node.node_id), nodeId: node.node_id, clientId: human.client_id, flags };
+      let mirroring = false;
+      const tick = (): void => {
+        if (mirroring) return;
+        mirroring = true;
+        try { syncMirror(mirrorCtx, expandHome(config.mirror.dir)); }
+        catch (err) { console.error(`ctxd server: mirror tick failed: ${err instanceof Error ? err.message : String(err)}`); }
+        finally { mirroring = false; }
+      };
+      tick();
+      mirrorInterval = setInterval(tick, 2_000);
+    }
+  }
+
   let stopping = false;
   const stop = (): void => {
     if (stopping) return;
@@ -148,6 +168,7 @@ export async function run(argv: string[]): Promise<number> {
     if (pullInterval) clearInterval(pullInterval);
     if (digestInterval) clearInterval(digestInterval);
     if (embedInterval) clearInterval(embedInterval);
+    if (mirrorInterval) clearInterval(mirrorInterval);
     void Promise.all([server.close(), syncServer?.close()]).then(() => {
       db.close();
       process.exit(0);

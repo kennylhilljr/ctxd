@@ -78,6 +78,24 @@ export interface ReviewReport {
   drift: DriftNotice[];
   takeovers: Takeover[];
   rejections: RejectionSummary[];
+  mirror_conflicts: { path: string; ref: string; reason: string; at: string }[];
+  archive_requests: { path: string; ref: string; at: string }[];
+}
+
+function mirrorConflicts(db: Database.Database): ReviewReport["mirror_conflicts"] {
+  const rows = db.prepare("SELECT path, entry_id, reason, created_at FROM mirror_conflicts ORDER BY created_at DESC").all() as { path: string; entry_id: string; reason: string; created_at: string }[];
+  return rows.map((row) => {
+    const entry = db.prepare("SELECT scope_id FROM entries WHERE entry_id = ?").get(row.entry_id) as { scope_id: string };
+    return { path: row.path, ref: entryRef(db, entry.scope_id, row.entry_id), reason: row.reason, at: row.created_at };
+  });
+}
+
+function archiveRequests(db: Database.Database): ReviewReport["archive_requests"] {
+  const rows = db.prepare("SELECT path, entry_id, created_at FROM archive_requests ORDER BY created_at DESC").all() as { path: string; entry_id: string; created_at: string }[];
+  return rows.map((row) => {
+    const entry = db.prepare("SELECT scope_id FROM entries WHERE entry_id = ?").get(row.entry_id) as { scope_id: string };
+    return { path: row.path, ref: entryRef(db, entry.scope_id, row.entry_id), at: row.created_at };
+  });
 }
 
 function entryRef(db: Database.Database, scopeId: string, entryId: string): string {
@@ -195,6 +213,8 @@ export function buildReviewReport(db: Database.Database, rejectionWindowDays = 7
     drift: driftNotices(db),
     takeovers: takeovers(db),
     rejections: rejectionSummary(db, rejectionWindowDays),
+    mirror_conflicts: mirrorConflicts(db),
+    archive_requests: archiveRequests(db),
   };
 }
 

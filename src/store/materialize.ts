@@ -433,7 +433,11 @@ function applyEventCore(db: Database.Database, e: EventForMaterialize, skipFts: 
   }
 
   if (e.part === "status" && e.op === "status") {
-    const p = e.payload as { status: string };
+    const p = e.payload as { status?: string; review_after?: string | null };
+    if (!("status" in p)) {
+      db.prepare("UPDATE entries SET review_after = ?, status_rev = ?, updated_hlc = ? WHERE entry_id = ?").run(p.review_after ?? null, e.rev, e.hlc, e.entryId);
+      return;
+    }
     const prevStatus = (e.prev as { status?: string } | null)?.status ?? null;
     db.prepare("UPDATE entries SET status = ?, status_before = ?, status_rev = ?, updated_hlc = ? WHERE entry_id = ?").run(
       p.status,

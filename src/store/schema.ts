@@ -29,8 +29,10 @@
  * rather than overwritten.
  * Bumped to 14 for M6 slice 1 (signed events, Spec v9 section 7.7): immutable payload hashes,
  * Ed25519 signatures, and trusted per-origin public keys survive purge and verify on replay.
+ * Bumped to 15 for M6 slice 2: mirror conflicts and deletion archive requests are local review
+ * records. Successful edits and imports still travel through ordinary events.
  */
-export const SCHEMA_VERSION = 14;
+export const SCHEMA_VERSION = 15;
 
 export const SCHEMA_SQL = `
 CREATE TABLE nodes (
@@ -317,6 +319,21 @@ CREATE TABLE mirror_files (            -- local only: Markdown mirror state (12.
   content_rev  TEXT NOT NULL,          -- revision the file was written from
   file_hash    TEXT NOT NULL,
   written_at   TEXT NOT NULL
+);
+
+CREATE TABLE mirror_conflicts (
+  path         TEXT PRIMARY KEY,
+  entry_id     TEXT NOT NULL,
+  file_rev     TEXT,
+  current_rev  TEXT NOT NULL,
+  reason       TEXT NOT NULL,
+  created_at   TEXT NOT NULL
+);
+
+CREATE TABLE archive_requests (
+  entry_id     TEXT PRIMARY KEY,
+  path         TEXT NOT NULL,
+  created_at   TEXT NOT NULL
 );
 
 CREATE TABLE tool_metrics (            -- local only: response metering (8.5)

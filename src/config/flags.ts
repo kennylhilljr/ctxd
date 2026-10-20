@@ -41,6 +41,7 @@ export const FLAG_REGISTRY: readonly FlagDef[] = [
   { name: "digest", default: true, milestone: "M5", description: "Automatic weekly digest on journal.digest_weekday (SPEC 11.5)", offMeans: "No weekly digests from this machine; ctxd digest still works manually" },
   { name: "skills.native_sync", default: false, milestone: "M5", description: "Write approved skills into a client's personal skills folder (SPEC 12.2)", offMeans: "Skills are not written into client skill folders, and nothing already synced is changed; ctxd skills sync itself refuses to run, since unlike sync/digest this flag gates files outside ctxd's own data folder" },
   { name: "signed_events", default: false, milestone: "M6", description: "Sign new events with the node Ed25519 key", offMeans: "New events are unsigned; signatures already present are still verified" },
+  { name: "mirror", default: false, milestone: "M6", description: "Write and read the editable Markdown mirror", offMeans: "The Markdown mirror is neither written nor read" },
 ];
 
 const FLAGS_BY_NAME = new Map(FLAG_REGISTRY.map((def) => [def.name, def]));

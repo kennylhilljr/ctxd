@@ -22,6 +22,8 @@ function printReport(report: ReviewReport): void {
     `${report.name_clashes.length} name clash(es)`,
     `${report.drift.length} drift notice(s)`,
     `${report.takeovers.length} takeover(s)`,
+    `${report.mirror_conflicts.length} mirror conflict(s)`,
+    `${report.archive_requests.length} archive request(s)`,
   ].join(", ");
   console.log(`ctxd review: ${counts}`);
 
@@ -52,6 +54,14 @@ function printReport(report: ReviewReport): void {
   if (report.rejections.length) {
     console.log("\nRejections (last 7 days):");
     for (const r of report.rejections) console.log(`  ${r.client}: ${r.count} ${r.code}${r.scope ? ` on ${r.scope}` : ""}`);
+  }
+  if (report.mirror_conflicts.length) {
+    console.log("\nMirror conflicts:");
+    for (const item of report.mirror_conflicts) console.log(`  ${item.ref}  ${item.path}: ${item.reason}`);
+  }
+  if (report.archive_requests.length) {
+    console.log("\nMirror archive requests:");
+    for (const item of report.archive_requests) console.log(`  ${item.ref}  ${item.path}`);
   }
 }
 

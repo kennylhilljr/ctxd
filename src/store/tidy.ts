@@ -182,7 +182,7 @@ function resolveEntryRow(db: Database.Database, ref: string): ResolvedEntry {
 }
 
 /** A standalone status-change event, outside writeEntry's own transaction (SPEC 7.6.7 applies tidy actions "as ordinary events"). */
-function setEntryStatus(ctx: WriteContext, ref: string, newStatus: string): void {
+export function setEntryStatus(ctx: WriteContext, ref: string, newStatus: string): void {
   const { db } = ctx;
   const row = resolveEntryRow(db, ref);
   const eventId = newId();
