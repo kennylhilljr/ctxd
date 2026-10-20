@@ -31,10 +31,25 @@ function fixture() {
 }
 
 describe("sealed pools (Spec v9 section 10.6)", () => {
-  it("fails closed for remote enrollment until authenticated key transfer exists", () => {
-    const f = fixture();
-    expect(() => f.store.enroll(f.poolId, "node-b")).toThrow(/key transfer is not implemented/);
+  it("refuses to enroll a node for a pool that is not sealed", () => {
+    const f = fixture(); // the fixture's pool defaults to 'shared' storage; store.seal() is never called
+    expect(() => f.store.enroll(f.poolId, "node-b", Buffer.alloc(32, 1))).toThrow(/not sealed/);
     expect(f.db.prepare("SELECT 1 FROM pool_enrollments WHERE pool_id = ? AND node_id = 'node-b'").get(f.poolId)).toBeUndefined();
+  });
+
+  it("enroll (W2) installs the received key and records the enrollment, once the pool is actually sealed", () => {
+    const f = fixture();
+    const sealedFile = f.store.seal(f.poolId, f.nodeId);
+    // store.seal() moves the data but, same as the live CLI's own "seal" case, leaves the
+    // pools.storage/sealed_file columns to the acl event that normally follows; set them
+    // directly here rather than pulling the whole acl-event machinery into this fixture.
+    f.db.prepare("UPDATE pools SET storage = 'sealed', sealed_file = ? WHERE pool_id = ?").run(sealedFile, f.poolId);
+    const receivedKey = Buffer.alloc(32, 2);
+
+    f.store.enroll(f.poolId, "node-b", receivedKey);
+
+    expect(f.keys.get(f.poolId)).toEqual(receivedKey);
+    expect(f.db.prepare("SELECT 1 FROM pool_enrollments WHERE pool_id = ? AND node_id = 'node-b'").get(f.poolId)).toBeDefined();
   });
   it("round trips XChaCha20-Poly1305 envelopes and authenticates event ids", () => {
     const key = Buffer.alloc(32, 7);

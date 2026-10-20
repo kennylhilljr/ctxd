@@ -75,11 +75,13 @@ describe("sealed pool key transfer: happy path", () => {
     const approval = approveKeyTransfer(source.db, transferId, source.encKeys, pool.key);
     const wrapped = fetchWrappedKey(source.db, transferId);
 
-    const requesterKeys = new TestKeyProvider();
-    const completion = completeKeyTransfer(transferId, requester.encKeys, sourcePrekey, wrapped, pool.poolId, requesterKeys);
-
+    const completion = completeKeyTransfer(transferId, requester.encKeys, sourcePrekey, wrapped);
     expect(completion.confirmationCode).toBe(approval.confirmationCode); // both sides saw the same code
-    expect(requesterKeys.get(pool.poolId)).toEqual(pool.key); // the recipient really has the real key now
+    expect(completion.poolKey).toEqual(pool.key); // the recipient really unwrapped the real key
+
+    const requesterKeys = new TestKeyProvider();
+    requesterKeys.store(pool.poolId, completion.poolKey);
+    expect(requesterKeys.get(pool.poolId)).toEqual(pool.key);
   });
 });
 

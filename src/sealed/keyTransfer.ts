@@ -18,8 +18,8 @@
  *      transmitted alongside the wrapped key.
  *   3. fetchWrappedKey (source side): returns the wrapped key only once, only once approved --
  *      the one-time-use rule that is this design's replay protection.
- *   4. completeKeyTransfer (recipient side): unwraps and installs the key via the recipient's own
- *      SealedKeyProvider.store, and returns the same confirmation code to compare against step 2's.
+ *   4. completeKeyTransfer (recipient side): unwraps the key and returns it alongside the same
+ *      confirmation code, for the caller to compare and then install via SealedPoolStore.enroll.
  */
 import { createPublicKey, type KeyObject } from "node:crypto";
 import type Database from "better-sqlite3";
@@ -27,7 +27,6 @@ import { newId } from "../core/ids.js";
 import { nowIso } from "../core/time.js";
 import { CtxdError } from "../core/errors.js";
 import { decryptSealed, encryptSealed, type CiphertextEnvelope } from "./crypto.js";
-import type { SealedKeyProvider } from "./key-provider.js";
 import { type EncryptionKeyPair, deriveConfirmationCode, deriveTransferWrapKey, pinEncryptionPrekey, signEncryptionPrekey, verifyEncryptionPrekey } from "./encryptionKeys.js";
 
 const TRANSFER_TTL_MINUTES = 10;
@@ -125,17 +124,19 @@ export function fetchWrappedKey(db: Database.Database, transferId: string): Ciph
   })();
 }
 
-/** Recipient side: unwraps the fetched key and installs it via the recipient's own SealedKeyProvider, returning the confirmation code to compare against what the owner saw on the source. */
+/**
+ * Recipient side: unwraps the fetched key and returns it alongside the confirmation code, for
+ * the caller to compare against what the owner saw on the source before installing it (via
+ * `SealedPoolStore.enroll`, which is also what records the enrollment) -- kept as two separate
+ * steps rather than storing here directly, so there is exactly one place that writes the key.
+ */
 export function completeKeyTransfer(
   transferId: string,
   requesterEncKeyPair: EncryptionKeyPair,
   sourcePrekey: SignedPrekey,
   wrappedKey: CiphertextEnvelope,
-  poolId: string,
-  keys: SealedKeyProvider,
-): { confirmationCode: string } {
+): { poolKey: Buffer; confirmationCode: string } {
   const wrapKey = deriveTransferWrapKey(requesterEncKeyPair.privateKey, sourcePrekey.publicKey);
   const poolKey = decryptSealed(wrappedKey, wrapKey, transferId);
-  keys.store(poolId, poolKey);
-  return { confirmationCode: deriveConfirmationCode(requesterEncKeyPair.privateKey, sourcePrekey.publicKey) };
+  return { poolKey, confirmationCode: deriveConfirmationCode(requesterEncKeyPair.privateKey, sourcePrekey.publicKey) };
 }
