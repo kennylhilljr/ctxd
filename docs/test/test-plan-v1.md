@@ -9,7 +9,7 @@
 | **Inputs** | Acceptance criteria in the current component PRDs ([PRD v8](../prd/PRD-v8.md) section 6.1 lists them); tests in `test/unit/` and `test/conformance/` |
 | **Strategy** | [Spec v10](../spec/SPEC-v10.md) section 14 (test layers and tooling) |
 
-Every acceptance criterion in the component PRDs has an ID (`<prefix>-AC-n`). This plan maps each ID to the tests that verify it, as of commit `9ffeea9`. Counts: **89 criteria**; Covered: 33, Diverges: 1, Gap: 5, Not built: 12, Partial: 38.
+Every acceptance criterion in the component PRDs has an ID (`<prefix>-AC-n`). This plan maps each ID to the tests that verify it. It was first mapped at commit `9ffeea9` and updated as the W1 to W6 workstreams merged; each link is re-resolved by test title, so line numbers stay current. Counts: **89 criteria**; Covered: 39, Diverges: 1, Gap: 8, Partial: 41.
 
 | Status | Meaning |
 |---|---|
@@ -29,6 +29,9 @@ Every acceptance criterion in the component PRDs has an ID (`<prefix>-AC-n`). Th
 | CL-AC-3 | Gap | When the human client claims with `take_over: true` in a `strict` scope, ctxd shall grant the claim despite the overlap. | No test exercises the human override. |
 | FF-AC-2 | Gap | When `sync` is switched back on after a period off, the node shall converge with its peers with no event lost. | No off-then-on test for the `sync` flag. |
 | FF-AC-4 | Gap | The `tools/list` payload shall be byte-for-byte identical with every flag off and with every flag on. | `toolDefinitions()` takes no flag input by design, but no test compares the two payloads. |
+| MI-AC-4 | Gap | If an inbox entry contains a secret, then ctxd shall redact it before storage. | No inbox test. The pull engine writes through the agent write path, which rejects a secret (`REDACTED_SECRET`) rather than redacting it; the owner should confirm whether MI-5 means reject or redact. |
+| MI-AC-11 | Gap | While `mobile_inbox` is off, every ctxd hook shall still exit 0. | No hook test with the flag off. |
+| MI-AC-12 | Gap | ctxd shall keep inbox API tokens and encryption keys only in the macOS Keychain, never in a repository or configuration file. | No test for `ctxd inbox set-token`. |
 | PA-AC-11 | Gap | When the human runs `ctxd hold adopt`, ctxd shall move the holding scope's approved entries into the project scope and add the agent to the pool in one step. | No test for `ctxd hold adopt`. |
 | TS-AC-7 | Gap | When the human exports a scope that contains a home-directory path, ctxd shall print a categorized warning and ask for confirmation before writing. | Import preflight is tested (`mirror.test.ts:147`); export warnings are not. |
 
@@ -140,18 +143,18 @@ Criteria: [PRD-mobile-inbox-v2](../prd/components/PRD-mobile-inbox-v2.md).
 
 | ID | Status | Verified by | Note |
 |---|---|---|---|
-| MI-AC-1 | Not built | None | M7. |
-| MI-AC-2 | Not built | None | M7. |
-| MI-AC-3 | Not built | None | M7. |
-| MI-AC-4 | Not built | None | M7. |
-| MI-AC-5 | Not built | None | M7. |
-| MI-AC-6 | Not built | None | M7. |
-| MI-AC-7 | Not built | None | M7. |
-| MI-AC-8 | Not built | None | M7. |
-| MI-AC-9 | Not built | None | M7 slice 1 registered the flag; behavior is not built. |
-| MI-AC-10 | Not built | None | M7. |
-| MI-AC-11 | Not built | None | M7. |
-| MI-AC-12 | Not built | None | M7. |
+| MI-AC-1 | Covered | [`inbox-pull.test.ts:140`](../../test/unit/inbox-pull.test.ts#L140) is idempotent: re-pulling the same inboxEntryId after it was applied is a no-op, not a duplicate<br>[`inbox-delivery-property.test.ts:57`](../../test/unit/inbox-delivery-property.test.ts#L57) any sequence of batches, each a shuffled and possibly-repeating subset of a fixed id pool, ends with exactly one entry per distinct id once drained |  |
+| MI-AC-2 | Covered | [`inbox-crash-recovery.test.ts:54`](../../test/unit/inbox-crash-recovery.test.ts#L54) an ack that fails right after a successful apply does not lose the apply, and the retry does not duplicate it |  |
+| MI-AC-3 | Partial | [`inbox-pull.test.ts:120`](../../test/unit/inbox-pull.test.ts#L120) rejects an entry that fails schema validation, and still acks it so it doesn't jam the queue<br>[`inbox-pull.test.ts:130`](../../test/unit/inbox-pull.test.ts#L130) rejects a body over the 16 KB bound (MI-5) | The 32 KB total payload bound is not exercised. |
+| MI-AC-4 | Gap | None | No inbox test. The pull engine writes through the agent write path, which rejects a secret (`REDACTED_SECRET`) rather than redacting it; the owner should confirm whether MI-5 means reject or redact. |
+| MI-AC-5 | Covered | [`inbox-pull.test.ts:78`](../../test/unit/inbox-pull.test.ts#L78) applies an entry for an allowlisted scope as proposed, tagged with its origin |  |
+| MI-AC-6 | Covered | [`inbox-pull.test.ts:97`](../../test/unit/inbox-pull.test.ts#L97) holds an entry for a scope the client has no grant for, rather than applying or silently dropping it |  |
+| MI-AC-7 | Partial | [`inbox-pull.test.ts:78`](../../test/unit/inbox-pull.test.ts#L78) applies an entry for an allowlisted scope as proposed, tagged with its origin | The origin tag is asserted; capture time and reference tags are not. |
+| MI-AC-8 | Partial | [`inbox-pull.test.ts:108`](../../test/unit/inbox-pull.test.ts#L108) rejects a home-replication scope outright, without holding it for review (MI-7)<br>[`inbox-publish-briefs.test.ts:62`](../../test/unit/inbox-publish-briefs.test.ts#L62) skips a local-only scope and a home-replication scope even when allowlisted | Pull tests cover a `home` scope; `local-only` and sealed exclusion are tested only for brief publishing. |
+| MI-AC-9 | Covered | [`inbox-pull.test.ts:63`](../../test/unit/inbox-pull.test.ts#L63) makes zero transport calls when mobile_inbox is off<br>[`cli-inbox.test.ts:44`](../../test/unit/cli-inbox.test.ts#L44) makes no transport calls and returns 0 when mobile_inbox is off |  |
+| MI-AC-10 | Covered | [`cli-inbox.test.ts:44`](../../test/unit/cli-inbox.test.ts#L44) makes no transport calls and returns 0 when mobile_inbox is off<br>[`cli-inbox.test.ts:73`](../../test/unit/cli-inbox.test.ts#L73) reports mobile_inbox off without calling the transport |  |
+| MI-AC-11 | Gap | None | No hook test with the flag off. |
+| MI-AC-12 | Gap | None | No test for `ctxd inbox set-token`. |
 
 ## PA: Persona pools and access
 
