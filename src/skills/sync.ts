@@ -12,11 +12,24 @@ import { createHash } from "node:crypto";
 import type Database from "better-sqlite3";
 import { renderSyncedSkill } from "./skillmd.js";
 import { formatRef } from "../model/refs.js";
-import type { InstallHooksClient } from "../cli/install-hooks.js";
+import { INSTALL_HOOKS_CLIENTS, type InstallHooksClient } from "../cli/install-hooks.js";
+import { loadConfig } from "../config/config.js";
+import { isFlagOn, resolveFlags } from "../config/flags.js";
+import { loadScopeByName } from "../store/snapshot.js";
+import { spawnWorker } from "../hooks/writeMoments.js";
+import { writeStateFileLocked } from "../hooks/stateFile.js";
 
-/** The client's personal skills folder, or null when it is not yet confirmed (SPEC v8 open issue 16: Codex's path is unverified, so it is never guessed). */
+/**
+ * The client's personal skills folder (W5.5 closes SPEC v8 open issue 16). Codex's path is
+ * confirmed directly from the `openai/codex` source at the pinned minimum version
+ * (`rust-v0.145.0`): `codex-rs/core-skills/src/loader.rs` resolves the user-scoped skill root as
+ * `home_dir.join(".agents").join("skills")`. A deprecated `$CODEX_HOME/skills` fallback is also
+ * still scanned by Codex itself for backward compatibility, but ctxd only ever writes to the
+ * current location.
+ */
 export function clientSkillsDir(client: InstallHooksClient, home: string = homedir()): string | null {
   if (client === "claude-code") return join(home, ".claude", "skills");
+  if (client === "codex") return join(home, ".agents", "skills");
   return null;
 }
 
@@ -137,4 +150,58 @@ export function syncSkillsForClient(
   }
 
   return report;
+}
+
+/**
+ * W5.4: automatic native skill sync. A write that touches a skill entry (src/tools/write.ts's
+ * contextWrite) schedules this through the same ticket-plus-detached-worker mechanism SessionEnd
+ * uses (SPEC 9.7), rather than running the actual folder sync inline in the write path or inside
+ * a hook's time budget: writing skill files is disk I/O for every configured client, which has no
+ * place being on the critical path of an unrelated tool call.
+ */
+export interface SkillSyncTicket {
+  kind: "skill-sync";
+  createdAt: string;
+}
+
+/** `sessions/skill-sync.<createdAtMs>.ticket.json`: the same ticket directory and crash-sweep-recoverable naming convention as a SessionEnd ticket, distinguished by `kind`. */
+export function skillSyncTicketPath(dataDir: string, createdAtMs: number): string {
+  return join(dataDir, "sessions", `skill-sync.${createdAtMs}.ticket.json`);
+}
+
+/** Writes the ticket and spawns a detached `ctxd worker` for it. `spawnFn` is overridable only for tests. */
+export async function scheduleSkillSync(dataDir: string, configPath: string, spawnFn: typeof spawnWorker = spawnWorker): Promise<void> {
+  const createdAtMs = Date.now();
+  const ticket: SkillSyncTicket = { kind: "skill-sync", createdAt: new Date(createdAtMs).toISOString() };
+  const path = skillSyncTicketPath(dataDir, createdAtMs);
+  await writeStateFileLocked(path, ticket);
+  spawnFn(path, dataDir, configPath);
+}
+
+/**
+ * The deferred work behind a skill-sync ticket: re-syncs every configured client from current
+ * active skills, exactly what `ctxd skills sync` (no `--client`) does. A no-op if
+ * `skills.native_sync` has since been turned off, since the flag may have changed between
+ * scheduling and the worker actually running.
+ */
+export function runSkillSyncTicket(db: Database.Database, configPath: string, home?: string): void {
+  let config: ReturnType<typeof loadConfig>;
+  try {
+    config = loadConfig(configPath);
+  } catch {
+    return; // no config at this path (e.g. before ctxd init, or an unresolved test default): nothing to sync
+  }
+  if (!isFlagOn(resolveFlags(config), "skills.native_sync")) return;
+
+  const scopes = config.skills.include_scopes.flatMap((name) => {
+    const scope = loadScopeByName(db, name);
+    return scope ? [{ id: scope.id, name }] : [];
+  });
+  const scopeNameById = new Map(scopes.map((s) => [s.id, s.name]));
+  const scopeIds = scopes.map((s) => s.id);
+
+  for (const client of config.skills.sync_clients) {
+    if (!(INSTALL_HOOKS_CLIENTS as readonly string[]).includes(client)) continue; // unknown client name; ctxd skills sync itself still reports this
+    syncSkillsForClient(db, client as InstallHooksClient, scopeIds, scopeNameById, config.skills.keep_allowed_tools, home);
+  }
 }

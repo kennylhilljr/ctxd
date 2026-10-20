@@ -1,0 +1,50 @@
+# Spec v10 draft
+
+Working notes collected while the completion kickoff ([docs/build/completion-kickoff-v1.md](../build/completion-kickoff-v1.md)) runs. M7 slice 8 folds this into the numbered Spec v10; until then each workstream appends its own section here instead of editing Spec v9 directly.
+
+## W5: correctness gaps
+
+### W5.1 Approval timestamps
+
+Closes a gap Spec v9's own schema left open: `entries.approved_by` and `entries.approved_hlc` are now set whenever an entry is actually approved, not left NULL forever.
+
+- Set on the review path: `ctxd review --approve` (the `resolve` status event) records the approving human client and the resolve event's HLC.
+- Set at creation for an auto-accept review rule match (10.4): the creating client and the create event's HLC, since the rule itself is the approval.
+- Left NULL for a write that was never under review at all: the human client writing directly, or a kind whose unreviewed default status is already `active`. There was no approval step to record.
+- The weekly digest's "decisions made" section (11.5) now reads `approved_hlc`, falling back to `created_hlc` for a decision that was active from creation and so never had a separate approval moment.
+
+### W5.2 Crash sweep: mechanical release and journal entry
+
+Closes the gap 9.10 already described but the implementation had not reached: a session that crashes without ever calling SessionEnd leaves no ticket behind, so the crash sweep had no `cwd` to check "is the working tree clean" against.
+
+- `sessions.cwd` (schema v20) is recorded once, at SessionStart, and kept for that session's life; a later event's reported `cwd` never overwrites it.
+- The crash sweep now runs the same mechanical journal entry and claim release a real SessionEnd runs (`performSessionEnd`), for a finalized session that has a recorded `cwd` and scope, gated behind `claims.mechanical_release` (the same flag that already gates live SessionEnd's release).
+- A session with no recorded `cwd` (a row from before this slice) or no scope is only finalized, exactly as before this slice.
+
+### W5.3 List mode ordering
+
+Fixes a bug against Spec v9's own 11.2: "With `query: '*'` and a time filter, results are listed newest first instead of by relevance." The implementation listed by time at the SQL level, but then re-sorted the results by a score that, in list mode, was the entry's importance, whatever the `importance` flag said.
+
+- List mode (`query: "*"`) now lists strictly by time in both `importance` flag states: every list-mode row gets `_score = 0`, so the final stable sort leaves the SQL's own time-descending order alone.
+- The scope fan-out multipliers (0.9/0.8/1.0, 11.2) and the flagged-entry penalty are relevance adjustments; they apply only to scored (non-`"*"`) search, never to list mode.
+
+### W5.4 Automatic skill sync
+
+Implements the deferred half of 12.2: previously, writing or approving a skill never updated the client skill folder until the next manual `ctxd skills sync`.
+
+- A write to a skill entry (`context_write`), and an approval of a proposed skill (`ctxd review --approve`), now schedule a sync when `skills.native_sync` is on, through the same ticket-plus-detached-worker mechanism SessionEnd uses (9.7): a `skill-sync` ticket under `sessions/`, picked up by `ctxd worker` or, if left behind, the next crash sweep.
+- The actual folder write never runs inline in the write path or inside a hook's time budget; disk I/O for every configured client has no place on the critical path of an unrelated tool call.
+- The trigger fires on the entry's kind alone, not on its resulting status: scheduling a sync for a write that leaves the skill `proposed` is harmless, since the sync itself only ever selects `active` skills.
+- A no-op, not an error, if `skills.native_sync` has been turned off by the time the worker actually runs.
+
+### W5.5 Codex's skills folder confirmed
+
+Closes open issue 16 (12.2): Codex's personal skills folder is `~/.agents/skills` (`$HOME/.agents/skills`), confirmed directly from the `openai/codex` source at the pinned minimum version (`rust-v0.145.0`): `codex-rs/core-skills/src/loader.rs` resolves the user-scoped skill root as `home_dir.join(".agents").join("skills")`. SKILL.md there needs just `name` and `description` frontmatter, matching ctxd's own requirement exactly, so no format change was needed.
+
+A deprecated `$CODEX_HOME/skills` fallback is also still scanned by Codex itself for backward compatibility; ctxd writes only to the current location.
+
+`ctxd skills sync --client codex` and `ctxd skills import --from codex` both now work; `clientSkillsDir("codex", ...)` no longer returns null. See [PRD-skills-v2.md](../prd/components/PRD-skills-v2.md).
+
+### W5 accepted limitation: PreCompact's phase and summary
+
+No work, by design: PreCompact still writes only the mechanical checkpoint file (branch, HEAD, changed files). Recording "phase and last request summary from the hook input" (9.2) has no reliable source, since neither Claude Code's nor Codex's documented PreCompact payload carries one, only `session_id`/`cwd`/`trigger`. Revisit only if a client adds such a field.

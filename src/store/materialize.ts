@@ -297,6 +297,7 @@ interface CreatePayload {
   confirmed_by_user?: boolean;
   review_after?: string | null;
   supersedes?: string | null;
+  approved?: boolean; // true only for an auto-accept review rule match (W5.1); never for a kind's unreviewed default status
 }
 
 export interface ApplyEventOptions {
@@ -392,8 +393,8 @@ function applyEventCore(db: Database.Database, e: EventForMaterialize, skipFts: 
       `INSERT INTO entries (
          entry_id, scope_id, kind, slug, significance, skill_name, title, summary, body, tags,
          content_rev, content_version, status, status_rev, relations_rev, review_after,
-         confirmed_by_user, supersedes, created_by, updated_by, created_hlc, updated_hlc
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         confirmed_by_user, supersedes, approved_by, approved_hlc, created_by, updated_by, created_hlc, updated_hlc
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       e.entryId,
       e.scopeId,
@@ -412,6 +413,8 @@ function applyEventCore(db: Database.Database, e: EventForMaterialize, skipFts: 
       p.review_after ?? null,
       p.confirmed_by_user ? 1 : 0,
       p.supersedes ?? null,
+      p.approved ? e.clientId : null,
+      p.approved ? e.hlc : null,
       e.clientId,
       e.clientId,
       e.hlc,
@@ -526,8 +529,12 @@ function applyEventCore(db: Database.Database, e: EventForMaterialize, skipFts: 
   if (e.part === "status" && e.op === "resolve") {
     // `ctxd review --approve` (SPEC 7.4's "a resolve event... clears it", for both a proposed
     // entry awaiting review and, once M3's sync lands, a conflicted one): always lands on
-    // 'active'. Unlike unflag, there is no status_before to restore from.
-    db.prepare("UPDATE entries SET status = 'active', status_before = NULL, status_rev = ?, updated_hlc = ? WHERE entry_id = ?").run(e.rev, e.hlc, e.entryId);
+    // 'active'. Unlike unflag, there is no status_before to restore from. This is the human
+    // approving the entry (review.ts's resolveEntry checks vendor === 'human'), so it also
+    // records approved_by/approved_hlc (W5.1).
+    db.prepare(
+      "UPDATE entries SET status = 'active', status_before = NULL, status_rev = ?, updated_hlc = ?, approved_by = ?, approved_hlc = ? WHERE entry_id = ?",
+    ).run(e.rev, e.hlc, e.clientId, e.hlc, e.entryId);
     return;
   }
 
