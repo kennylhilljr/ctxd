@@ -1,4 +1,9 @@
-import type { InboxBrief, InboxEntry, InboxPullPage, InboxStatus, InboxTransport, BriefPublishTransport } from "./types.js";
+import type { InboxBrief, InboxPullPage, InboxStatus, InboxTransport, BriefPublishTransport } from "./types.js";
+
+interface Seeded {
+  inboxEntryId: string;
+  raw: unknown;
+}
 
 /**
  * In-memory `InboxTransport` for tests (MI-2). `failAckOnce` simulates the hub crashing after a
@@ -6,22 +11,23 @@ import type { InboxBrief, InboxEntry, InboxPullPage, InboxStatus, InboxTransport
  * property): the entries stay in the buffer, so the next `pull` re-delivers them.
  */
 export class FakeInboxTransport implements InboxTransport, BriefPublishTransport {
-  private entries: InboxEntry[];
+  private entries: Seeded[];
   private failAckOnce: boolean;
   readonly publishedBriefs: InboxBrief[] = [];
 
-  constructor(entries: readonly InboxEntry[] = [], opts: { failAckOnce?: boolean } = {}) {
+  constructor(entries: readonly Seeded[] = [], opts: { failAckOnce?: boolean } = {}) {
     this.entries = [...entries];
     this.failAckOnce = opts.failAckOnce ?? false;
   }
 
-  seed(entries: readonly InboxEntry[]): void {
-    this.entries.push(...entries);
+  /** `raw` defaults to `{ inboxEntryId, ...fields }` would be wrong (raw must not carry the id); callers pass the content shape directly. */
+  seed(inboxEntryId: string, raw: unknown): void {
+    this.entries.push({ inboxEntryId, raw });
   }
 
   async pull(limit: number): Promise<InboxPullPage> {
     const page = this.entries.slice(0, limit);
-    return { entries: page, more: this.entries.length > limit };
+    return { entries: page.map((e) => ({ inboxEntryId: e.inboxEntryId, raw: e.raw })), more: this.entries.length > limit };
   }
 
   async ack(inboxEntryIds: readonly string[]): Promise<void> {

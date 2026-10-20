@@ -13,8 +13,6 @@ export const INBOX_MAX_BODY_BYTES = 16 * 1024;
 export const INBOX_MAX_PAYLOAD_BYTES = 32 * 1024;
 
 export const inboxEntrySchema = z.object({
-  /** Client-assigned or content-derived; the key idempotent apply and crash recovery key on (MI-3, MI-4). */
-  inboxEntryId: z.string().min(1).max(200),
   scope: z.string().min(1).max(200),
   kind: z.enum(KINDS),
   title: z.string().min(1).max(200),
@@ -26,8 +24,19 @@ export const inboxEntrySchema = z.object({
 });
 export type InboxEntry = z.infer<typeof inboxEntrySchema>;
 
+/**
+ * One pulled item. `inboxEntryId` is the transport's own key for this entry (never trusted from
+ * `raw`'s content: a malicious or buggy client could omit or spoof an id inside the payload
+ * itself), and is what `ack` deletes by and what the hub's idempotency keys on (MI-3, MI-4).
+ * `raw` is untrusted and validated against `inboxEntrySchema` only once pulled (src/inbox/pull.ts).
+ */
+export interface InboxPullItem {
+  inboxEntryId: string;
+  raw: unknown;
+}
+
 export interface InboxPullPage {
-  entries: InboxEntry[];
+  entries: InboxPullItem[];
   more: boolean;
 }
 
