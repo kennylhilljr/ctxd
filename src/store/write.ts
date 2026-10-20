@@ -251,6 +251,7 @@ function performDirectWrite(
   // SPEC v6 section 6 step 6's table lists "written by the human client (CLI): active" above
   // the per-kind defaults it otherwise governs).
   let status: Status;
+  let autoApproved = false; // an auto-accept review rule decided status, as opposed to a kind's unreviewed default (W5.1: approved_by/approved_hlc mark only a real approval)
   if (existing) {
     status = existing.status; // a content update never changes status.
   } else if (client.vendor === "human") {
@@ -261,7 +262,9 @@ function performDirectWrite(
     // review.remembered_rules off (PRD-feature-flags-v1 section 4): every rule is ignored, so
     // everything proposed waits for review instead of auto-accepting.
     const rememberedRules = isFlagOn(ctx.flags, "review.remembered_rules");
-    status = (rememberedRules ? reviewedStatus(db, scope.id, input, loadClientName(db, client.id)) : null) ?? defaultAgentStatus(input.kind, input.significance);
+    const ruleStatus = rememberedRules ? reviewedStatus(db, scope.id, input, loadClientName(db, client.id)) : null;
+    autoApproved = ruleStatus !== null;
+    status = ruleStatus ?? defaultAgentStatus(input.kind, input.significance);
   }
 
   const result = db.transaction(() => {
@@ -333,6 +336,7 @@ function performDirectWrite(
         summary: summarySan ?? title,
         tags: tagsSan ?? [],
         status,
+        approved: autoApproved,
         significance: input.significance ?? null,
         confirmed_by_user: input.confirmed_by_user ?? false,
         supersedes: supersedesTarget ? formatRef(supersedesTarget.scopeName, supersedesTarget.id) : null,

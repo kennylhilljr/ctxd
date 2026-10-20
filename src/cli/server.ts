@@ -105,7 +105,7 @@ export async function run(argv: string[]): Promise<number> {
 
   const [server, syncServer] = await Promise.all([
     startServer({ db, nodeId: node.node_id, listen: config.mcp.listen, configPath, sealedStore }),
-    syncServeOn ? startSyncServer({ db, nodeId: node.node_id, listen: config.sync.listen, sealedKeys, sealedStore }) : undefined,
+    syncServeOn ? startSyncServer({ db, nodeId: node.node_id, listen: config.sync.listen, sealedKeys, sealedStore, flags }) : undefined,
   ]);
   console.log(`ctxd server listening on ${config.mcp.listen}`);
   if (syncServeOn) console.log(`ctxd server: sync listener on ${config.sync.listen}`);

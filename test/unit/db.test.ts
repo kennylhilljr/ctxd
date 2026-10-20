@@ -52,6 +52,50 @@ describe("openDatabase (SPEC v6 section 4)", () => {
     expect(() => openDatabase(path)).toThrow(/schema version/);
   });
 
+  it("migrates a version-19 database by adding sessions.cwd (W5.2)", () => {
+    const path = tmpDbPath();
+    const fresh = openDatabase(path, { create: true });
+    fresh.prepare("INSERT INTO nodes (node_id, name, role, created_at) VALUES ('n1','air','home','t')").run();
+    fresh.prepare(
+      "INSERT INTO clients (client_id, name, vendor, node_id, token_hash, created_at) VALUES ('c1','human','human','n1','h','t')",
+    ).run();
+    fresh.prepare(
+      "INSERT INTO sessions (session_ref, client_id, scope_id, state, started_at, last_seen_hlc, head, cwd, recovery) VALUES ('c1:s1','c1',NULL,'active','t','h',NULL,'/old/cwd',NULL)",
+    ).run();
+    // Simulate a pre-W5.2 database: drop the column this slice adds, and roll user_version back.
+    // Also drop tables later migrations (W2) add, so the migration chain that follows the
+    // rollback does not collide with tables the fresh schema already created.
+    fresh.exec("ALTER TABLE sessions DROP COLUMN cwd");
+    fresh.exec("DROP TABLE node_encryption_keys");
+    fresh.exec("DROP TABLE sealed_key_transfers");
+    fresh.pragma("user_version = 19");
+    fresh.close();
+
+    const migrated = openDatabase(path);
+    expect(migrated.pragma("user_version", { simple: true })).toBe(SCHEMA_VERSION);
+    const row = migrated.prepare("SELECT cwd FROM sessions WHERE session_ref = 'c1:s1'").get() as { cwd: string | null };
+    expect(row.cwd).toBeNull();
+    migrated.close();
+  });
+
+  it("migrates a version-20 database by adding node_encryption_keys and sealed_key_transfers (W2)", () => {
+    const path = tmpDbPath();
+    const fresh = openDatabase(path, { create: true });
+    fresh.exec("DROP TABLE node_encryption_keys");
+    fresh.exec("DROP TABLE sealed_key_transfers");
+    fresh.pragma("user_version = 20");
+    fresh.close();
+
+    const migrated = openDatabase(path);
+    expect(migrated.pragma("user_version", { simple: true })).toBe(SCHEMA_VERSION);
+    migrated.prepare("INSERT INTO node_encryption_keys (node_id, public_key, signature, created_at) VALUES ('n1', 'pub', 'sig', 't')").run();
+    migrated.prepare(
+      "INSERT INTO sealed_key_transfers (transfer_id, pool_id, requester_node_id, source_node_id, status, created_at, expires_at) VALUES ('t1', 'p1', 'n1', 'n2', 'pending', 't', 't')",
+    ).run();
+    expect((migrated.prepare("SELECT public_key FROM node_encryption_keys WHERE node_id = 'n1'").get() as { public_key: string }).public_key).toBe("pub");
+    migrated.close();
+  });
+
   it("enforces foreign keys", () => {
     const path = tmpDbPath();
     const db = openDatabase(path, { create: true });

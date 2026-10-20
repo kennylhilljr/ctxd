@@ -1,6 +1,7 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { stringify } from "smol-toml";
 import type Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 import { buildCatalog, catalogLine, parseSkill, renderSyncedSkill, skillSummary } from "../../src/skills/skillmd.js";
@@ -9,8 +10,9 @@ import { newId } from "../../src/core/ids.js";
 import { ME_SCOPE_ID } from "../../src/core/kinds.js";
 import { openDatabase } from "../../src/store/db.js";
 import { writeEntry, type WriteContext } from "../../src/store/write.js";
-import { clientSkillsDir, syncSkillsForClient } from "../../src/skills/sync.js";
+import { clientSkillsDir, runSkillSyncTicket, scheduleSkillSync, syncSkillsForClient } from "../../src/skills/sync.js";
 import { ensureImportClient, importSkillsFrom } from "../../src/skills/importSkills.js";
+import { configSchema } from "../../src/config/config.js";
 
 const BODY = `---
 name: release-checklist
@@ -157,9 +159,9 @@ function writeSkill(f: Fixture, name: string, body: string = SKILL_BODY(name)): 
 }
 
 describe("clientSkillsDir", () => {
-  it("knows claude-code's folder but not codex's (SPEC v8 open issue 16: unverified)", () => {
+  it("knows both claude-code's and codex's personal skills folder (W5.5: confirmed from openai/codex source at rust-v0.145.0)", () => {
     expect(clientSkillsDir("claude-code", "/home/x")).toBe("/home/x/.claude/skills");
-    expect(clientSkillsDir("codex", "/home/x")).toBeNull();
+    expect(clientSkillsDir("codex", "/home/x")).toBe("/home/x/.agents/skills");
   });
 });
 
@@ -176,6 +178,17 @@ describe("syncSkillsForClient", () => {
 
     const row = f.db.prepare("SELECT path FROM skill_syncs WHERE client = 'claude-code' AND skill_entry = ?").get(skill.id) as { path: string };
     expect(row.path).toBe(target);
+  });
+
+  it("writes into codex's folder too (W5.5: ~/.agents/skills, confirmed from source)", () => {
+    const f = setup();
+    const skill = writeSkill(f, "deploy-runbook");
+
+    const report = syncSkillsForClient(f.db, "codex", [ME_SCOPE_ID], new Map([[ME_SCOPE_ID, "_me"]]), false, f.home);
+    expect(report.written).toEqual(["deploy-runbook"]);
+    const target = join(f.home, ".agents", "skills", "deploy-runbook", "SKILL.md");
+    expect(existsSync(target)).toBe(true);
+    expect(readFileSync(target, "utf8")).toContain(skill.ref);
   });
 
   it("strips allowed-tools unless keep_allowed_tools is set", () => {
@@ -247,12 +260,57 @@ describe("syncSkillsForClient", () => {
     expect(row.skill_entry).toBe(first.id);
   });
 
-  it("reports codex as unsupported rather than guessing its folder", () => {
+});
+
+/** A config.toml with [skills] and the skills.native_sync flag set, for runSkillSyncTicket. */
+function writeConfig(dir: string, nativeSync: boolean, syncClients: string[] = ["claude-code"]): string {
+  const path = join(dir, "ctxd.toml");
+  const config = configSchema.parse({
+    node: { name: "air", role: "home" },
+    skills: { sync_clients: syncClients, include_scopes: ["_me"] },
+    features: { "skills.native_sync": nativeSync },
+  });
+  writeFileSync(path, stringify(config));
+  return path;
+}
+
+describe("scheduleSkillSync and runSkillSyncTicket (W5.4: automatic skill sync)", () => {
+  it("scheduleSkillSync writes a skill-sync ticket and spawns the detached worker", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "ctxd-skill-sync-data-"));
+    const spawned: { ticketPath: string; dataDir: string; configPath: string }[] = [];
+    await scheduleSkillSync(dataDir, "/some/config.toml", (ticketPath, d, c) => spawned.push({ ticketPath, dataDir: d, configPath: c }));
+
+    expect(spawned).toHaveLength(1);
+    expect(spawned[0]!.dataDir).toBe(dataDir);
+    expect(spawned[0]!.configPath).toBe("/some/config.toml");
+    const files = readdirSync(join(dataDir, "sessions"));
+    expect(files.some((f) => f.startsWith("skill-sync.") && f.endsWith(".ticket.json"))).toBe(true);
+    expect(JSON.parse(readFileSync(spawned[0]!.ticketPath, "utf8"))).toMatchObject({ kind: "skill-sync" });
+  });
+
+  it("runSkillSyncTicket writes the configured client's skill folder when skills.native_sync is on", () => {
+    const f = setup();
+    const skill = writeSkill(f, "deploy-runbook");
+    const configDir = mkdtempSync(join(tmpdir(), "ctxd-skill-sync-config-"));
+    const configPath = writeConfig(configDir, true);
+
+    runSkillSyncTicket(f.db, configPath, f.home);
+
+    const target = join(f.home, ".claude", "skills", "deploy-runbook", "SKILL.md");
+    expect(existsSync(target)).toBe(true);
+    const row = f.db.prepare("SELECT 1 FROM skill_syncs WHERE skill_entry = ?").get(skill.id);
+    expect(row).toBeDefined();
+  });
+
+  it("runSkillSyncTicket does nothing when skills.native_sync is off", () => {
     const f = setup();
     writeSkill(f, "deploy-runbook");
-    const report = syncSkillsForClient(f.db, "codex", [ME_SCOPE_ID], new Map([[ME_SCOPE_ID, "_me"]]), false, f.home);
-    expect(report.written).toEqual([]);
-    expect(report.skipped[0]?.reason).toContain("not yet confirmed");
+    const configDir = mkdtempSync(join(tmpdir(), "ctxd-skill-sync-config-"));
+    const configPath = writeConfig(configDir, false);
+
+    runSkillSyncTicket(f.db, configPath, f.home);
+
+    expect(existsSync(join(f.home, ".claude", "skills", "deploy-runbook", "SKILL.md"))).toBe(false);
   });
 });
 
@@ -316,5 +374,16 @@ describe("importSkillsFrom", () => {
     expect(result.imported.map((i) => i.name)).toEqual(["other-skill"]);
     expect(result.skipped[0]).toEqual({ name: "deploy-runbook", reason: expect.stringContaining("already managed by ctxd") });
     expect(f.db.prepare("SELECT COUNT(*) AS n FROM entries WHERE kind = 'skill' AND skill_name = 'deploy-runbook'").get()).toEqual({ n: 1 });
+  });
+
+  it("imports from codex's folder too (W5.5: ~/.agents/skills)", () => {
+    const f = setup();
+    const dir = join(f.home, ".agents", "skills", "deploy-runbook");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "SKILL.md"), SKILL_BODY("deploy-runbook"), "utf8");
+    const ctx = { db: f.db, clock: f.clock, nodeId: f.nodeId, clientId: ensureImportClient(f.db, f.nodeId) };
+
+    const result = importSkillsFrom(ctx, "codex", "_me", false, f.home);
+    expect(result.imported.map((i) => i.name)).toEqual(["deploy-runbook"]);
   });
 });
