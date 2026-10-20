@@ -68,6 +68,7 @@ describe("openDatabase (SPEC v6 section 4)", () => {
     fresh.exec("ALTER TABLE sessions DROP COLUMN cwd");
     fresh.exec("DROP TABLE node_encryption_keys");
     fresh.exec("DROP TABLE sealed_key_transfers");
+    fresh.exec("DROP TABLE peer_watermarks");
     fresh.pragma("user_version = 19");
     fresh.close();
 
@@ -83,6 +84,7 @@ describe("openDatabase (SPEC v6 section 4)", () => {
     const fresh = openDatabase(path, { create: true });
     fresh.exec("DROP TABLE node_encryption_keys");
     fresh.exec("DROP TABLE sealed_key_transfers");
+    fresh.exec("DROP TABLE peer_watermarks");
     fresh.pragma("user_version = 20");
     fresh.close();
 
@@ -93,6 +95,21 @@ describe("openDatabase (SPEC v6 section 4)", () => {
       "INSERT INTO sealed_key_transfers (transfer_id, pool_id, requester_node_id, source_node_id, status, created_at, expires_at) VALUES ('t1', 'p1', 'n1', 'n2', 'pending', 't', 't')",
     ).run();
     expect((migrated.prepare("SELECT public_key FROM node_encryption_keys WHERE node_id = 'n1'").get() as { public_key: string }).public_key).toBe("pub");
+    migrated.close();
+  });
+
+  it("migrates a version-21 database by adding peer_watermarks (W3)", () => {
+    const path = tmpDbPath();
+    const fresh = openDatabase(path, { create: true });
+    fresh.exec("DROP TABLE peer_watermarks");
+    fresh.pragma("user_version = 21");
+    fresh.close();
+
+    const migrated = openDatabase(path);
+    expect(migrated.pragma("user_version", { simple: true })).toBe(SCHEMA_VERSION);
+    migrated.prepare("INSERT INTO peer_watermarks (peer_id, origin_node, through_seq, updated_at) VALUES ('p1', 'o1', 5, 't')").run();
+    const row = migrated.prepare("SELECT through_seq FROM peer_watermarks WHERE peer_id = 'p1'").get() as { through_seq: number };
+    expect(row.through_seq).toBe(5);
     migrated.close();
   });
 

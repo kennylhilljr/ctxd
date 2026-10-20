@@ -1,0 +1,1202 @@
+[
+  {
+    "id": "blue-green-keyword",
+    "topic": "blue-green",
+    "type": "keyword",
+    "query": "blue-green deployment rollback",
+    "relevant": [
+      "blue-green-sample-app",
+      "blue-green-notes",
+      "blue-green-project-b",
+      "blue-green-shared-tools",
+      "blue-green-pool-dev",
+      "blue-green-pool-notes",
+      "blue-green-pool-ops",
+      "blue-green-pool-private"
+    ]
+  },
+  {
+    "id": "blue-green-paraphrase",
+    "topic": "blue-green",
+    "type": "paraphrase",
+    "query": "how to switch traffic back to the old version safely",
+    "relevant": [
+      "blue-green-sample-app",
+      "blue-green-notes",
+      "blue-green-project-b",
+      "blue-green-shared-tools",
+      "blue-green-pool-dev",
+      "blue-green-pool-notes",
+      "blue-green-pool-ops",
+      "blue-green-pool-private"
+    ]
+  },
+  {
+    "id": "blue-green-mixed",
+    "topic": "blue-green",
+    "type": "mixed",
+    "query": "rollback to the old version after a deployment",
+    "relevant": [
+      "blue-green-sample-app",
+      "blue-green-notes",
+      "blue-green-project-b",
+      "blue-green-shared-tools",
+      "blue-green-pool-dev",
+      "blue-green-pool-notes",
+      "blue-green-pool-ops",
+      "blue-green-pool-private"
+    ]
+  },
+  {
+    "id": "conn-pool-keyword",
+    "topic": "conn-pool",
+    "type": "keyword",
+    "query": "connection pool exhaustion",
+    "relevant": [
+      "conn-pool-sample-app",
+      "conn-pool-notes",
+      "conn-pool-project-b",
+      "conn-pool-shared-tools",
+      "conn-pool-pool-dev",
+      "conn-pool-pool-notes",
+      "conn-pool-pool-ops",
+      "conn-pool-pool-private"
+    ]
+  },
+  {
+    "id": "conn-pool-paraphrase",
+    "topic": "conn-pool",
+    "type": "paraphrase",
+    "query": "running out of available database links under load",
+    "relevant": [
+      "conn-pool-sample-app",
+      "conn-pool-notes",
+      "conn-pool-project-b",
+      "conn-pool-shared-tools",
+      "conn-pool-pool-dev",
+      "conn-pool-pool-notes",
+      "conn-pool-pool-ops",
+      "conn-pool-pool-private"
+    ]
+  },
+  {
+    "id": "conn-pool-mixed",
+    "topic": "conn-pool",
+    "type": "mixed",
+    "query": "database running out of pooled connections",
+    "relevant": [
+      "conn-pool-sample-app",
+      "conn-pool-notes",
+      "conn-pool-project-b",
+      "conn-pool-shared-tools",
+      "conn-pool-pool-dev",
+      "conn-pool-pool-notes",
+      "conn-pool-pool-ops",
+      "conn-pool-pool-private"
+    ]
+  },
+  {
+    "id": "rate-limit-keyword",
+    "topic": "rate-limit",
+    "type": "keyword",
+    "query": "rate limit 429 responses",
+    "relevant": [
+      "rate-limit-sample-app",
+      "rate-limit-notes",
+      "rate-limit-project-b",
+      "rate-limit-shared-tools",
+      "rate-limit-pool-dev",
+      "rate-limit-pool-notes",
+      "rate-limit-pool-ops",
+      "rate-limit-pool-private"
+    ]
+  },
+  {
+    "id": "rate-limit-paraphrase",
+    "topic": "rate-limit",
+    "type": "paraphrase",
+    "query": "throttling how often clients can call an endpoint",
+    "relevant": [
+      "rate-limit-sample-app",
+      "rate-limit-notes",
+      "rate-limit-project-b",
+      "rate-limit-shared-tools",
+      "rate-limit-pool-dev",
+      "rate-limit-pool-notes",
+      "rate-limit-pool-ops",
+      "rate-limit-pool-private"
+    ]
+  },
+  {
+    "id": "rate-limit-mixed",
+    "topic": "rate-limit",
+    "type": "mixed",
+    "query": "limiting how many requests a client can send",
+    "relevant": [
+      "rate-limit-sample-app",
+      "rate-limit-notes",
+      "rate-limit-project-b",
+      "rate-limit-shared-tools",
+      "rate-limit-pool-dev",
+      "rate-limit-pool-notes",
+      "rate-limit-pool-ops",
+      "rate-limit-pool-private"
+    ]
+  },
+  {
+    "id": "secret-rotate-keyword",
+    "topic": "secret-rotate",
+    "type": "keyword",
+    "query": "rotate API keys quarterly",
+    "relevant": [
+      "secret-rotate-sample-app",
+      "secret-rotate-notes",
+      "secret-rotate-project-b",
+      "secret-rotate-shared-tools",
+      "secret-rotate-pool-dev",
+      "secret-rotate-pool-notes",
+      "secret-rotate-pool-ops",
+      "secret-rotate-pool-private"
+    ]
+  },
+  {
+    "id": "secret-rotate-paraphrase",
+    "topic": "secret-rotate",
+    "type": "paraphrase",
+    "query": "replacing credentials on a regular schedule",
+    "relevant": [
+      "secret-rotate-sample-app",
+      "secret-rotate-notes",
+      "secret-rotate-project-b",
+      "secret-rotate-shared-tools",
+      "secret-rotate-pool-dev",
+      "secret-rotate-pool-notes",
+      "secret-rotate-pool-ops",
+      "secret-rotate-pool-private"
+    ]
+  },
+  {
+    "id": "secret-rotate-mixed",
+    "topic": "secret-rotate",
+    "type": "mixed",
+    "query": "rotating API keys regularly",
+    "relevant": [
+      "secret-rotate-sample-app",
+      "secret-rotate-notes",
+      "secret-rotate-project-b",
+      "secret-rotate-shared-tools",
+      "secret-rotate-pool-dev",
+      "secret-rotate-pool-notes",
+      "secret-rotate-pool-ops",
+      "secret-rotate-pool-private"
+    ]
+  },
+  {
+    "id": "flag-rollout-keyword",
+    "topic": "flag-rollout",
+    "type": "keyword",
+    "query": "gradual feature flag rollout",
+    "relevant": [
+      "flag-rollout-sample-app",
+      "flag-rollout-notes",
+      "flag-rollout-project-b",
+      "flag-rollout-shared-tools",
+      "flag-rollout-pool-dev",
+      "flag-rollout-pool-notes",
+      "flag-rollout-pool-ops",
+      "flag-rollout-pool-private"
+    ]
+  },
+  {
+    "id": "flag-rollout-paraphrase",
+    "topic": "flag-rollout",
+    "type": "paraphrase",
+    "query": "slowly turning on a new capability for more users over time",
+    "relevant": [
+      "flag-rollout-sample-app",
+      "flag-rollout-notes",
+      "flag-rollout-project-b",
+      "flag-rollout-shared-tools",
+      "flag-rollout-pool-dev",
+      "flag-rollout-pool-notes",
+      "flag-rollout-pool-ops",
+      "flag-rollout-pool-private"
+    ]
+  },
+  {
+    "id": "flag-rollout-mixed",
+    "topic": "flag-rollout",
+    "type": "mixed",
+    "query": "gradually turning on a feature flag for more traffic",
+    "relevant": [
+      "flag-rollout-sample-app",
+      "flag-rollout-notes",
+      "flag-rollout-project-b",
+      "flag-rollout-shared-tools",
+      "flag-rollout-pool-dev",
+      "flag-rollout-pool-notes",
+      "flag-rollout-pool-ops",
+      "flag-rollout-pool-private"
+    ]
+  },
+  {
+    "id": "cache-invalidate-keyword",
+    "topic": "cache-invalidate",
+    "type": "keyword",
+    "query": "cache invalidation stale data",
+    "relevant": [
+      "cache-invalidate-sample-app",
+      "cache-invalidate-notes",
+      "cache-invalidate-project-b",
+      "cache-invalidate-shared-tools",
+      "cache-invalidate-pool-dev",
+      "cache-invalidate-pool-notes",
+      "cache-invalidate-pool-ops",
+      "cache-invalidate-pool-private"
+    ]
+  },
+  {
+    "id": "cache-invalidate-paraphrase",
+    "topic": "cache-invalidate",
+    "type": "paraphrase",
+    "query": "making sure old cached results don't get served after a change",
+    "relevant": [
+      "cache-invalidate-sample-app",
+      "cache-invalidate-notes",
+      "cache-invalidate-project-b",
+      "cache-invalidate-shared-tools",
+      "cache-invalidate-pool-dev",
+      "cache-invalidate-pool-notes",
+      "cache-invalidate-pool-ops",
+      "cache-invalidate-pool-private"
+    ]
+  },
+  {
+    "id": "cache-invalidate-mixed",
+    "topic": "cache-invalidate",
+    "type": "mixed",
+    "query": "invalidating the cache after a change to avoid stale data",
+    "relevant": [
+      "cache-invalidate-sample-app",
+      "cache-invalidate-notes",
+      "cache-invalidate-project-b",
+      "cache-invalidate-shared-tools",
+      "cache-invalidate-pool-dev",
+      "cache-invalidate-pool-notes",
+      "cache-invalidate-pool-ops",
+      "cache-invalidate-pool-private"
+    ]
+  },
+  {
+    "id": "structured-log-keyword",
+    "topic": "structured-log",
+    "type": "keyword",
+    "query": "structured JSON logging",
+    "relevant": [
+      "structured-log-sample-app",
+      "structured-log-notes",
+      "structured-log-project-b",
+      "structured-log-shared-tools",
+      "structured-log-pool-dev",
+      "structured-log-pool-notes",
+      "structured-log-pool-ops",
+      "structured-log-pool-private"
+    ]
+  },
+  {
+    "id": "structured-log-paraphrase",
+    "topic": "structured-log",
+    "type": "paraphrase",
+    "query": "writing log lines in a machine-parseable format",
+    "relevant": [
+      "structured-log-sample-app",
+      "structured-log-notes",
+      "structured-log-project-b",
+      "structured-log-shared-tools",
+      "structured-log-pool-dev",
+      "structured-log-pool-notes",
+      "structured-log-pool-ops",
+      "structured-log-pool-private"
+    ]
+  },
+  {
+    "id": "structured-log-mixed",
+    "topic": "structured-log",
+    "type": "mixed",
+    "query": "logging in a structured JSON format",
+    "relevant": [
+      "structured-log-sample-app",
+      "structured-log-notes",
+      "structured-log-project-b",
+      "structured-log-shared-tools",
+      "structured-log-pool-dev",
+      "structured-log-pool-notes",
+      "structured-log-pool-ops",
+      "structured-log-pool-private"
+    ]
+  },
+  {
+    "id": "flaky-test-keyword",
+    "topic": "flaky-test",
+    "type": "keyword",
+    "query": "flaky test retries CI",
+    "relevant": [
+      "flaky-test-sample-app",
+      "flaky-test-notes",
+      "flaky-test-project-b",
+      "flaky-test-shared-tools",
+      "flaky-test-pool-dev",
+      "flaky-test-pool-notes",
+      "flaky-test-pool-ops",
+      "flaky-test-pool-private"
+    ]
+  },
+  {
+    "id": "flaky-test-paraphrase",
+    "topic": "flaky-test",
+    "type": "paraphrase",
+    "query": "tests that sometimes fail for no clear reason",
+    "relevant": [
+      "flaky-test-sample-app",
+      "flaky-test-notes",
+      "flaky-test-project-b",
+      "flaky-test-shared-tools",
+      "flaky-test-pool-dev",
+      "flaky-test-pool-notes",
+      "flaky-test-pool-ops",
+      "flaky-test-pool-private"
+    ]
+  },
+  {
+    "id": "flaky-test-mixed",
+    "topic": "flaky-test",
+    "type": "mixed",
+    "query": "flaky tests that sometimes fail in CI",
+    "relevant": [
+      "flaky-test-sample-app",
+      "flaky-test-notes",
+      "flaky-test-project-b",
+      "flaky-test-shared-tools",
+      "flaky-test-pool-dev",
+      "flaky-test-pool-notes",
+      "flaky-test-pool-ops",
+      "flaky-test-pool-private"
+    ]
+  },
+  {
+    "id": "pr-checklist-keyword",
+    "topic": "pr-checklist",
+    "type": "keyword",
+    "query": "pull request review checklist",
+    "relevant": [
+      "pr-checklist-sample-app",
+      "pr-checklist-notes",
+      "pr-checklist-project-b",
+      "pr-checklist-shared-tools",
+      "pr-checklist-pool-dev",
+      "pr-checklist-pool-notes",
+      "pr-checklist-pool-ops",
+      "pr-checklist-pool-private"
+    ]
+  },
+  {
+    "id": "pr-checklist-paraphrase",
+    "topic": "pr-checklist",
+    "type": "paraphrase",
+    "query": "what to look for before approving someone's changes",
+    "relevant": [
+      "pr-checklist-sample-app",
+      "pr-checklist-notes",
+      "pr-checklist-project-b",
+      "pr-checklist-shared-tools",
+      "pr-checklist-pool-dev",
+      "pr-checklist-pool-notes",
+      "pr-checklist-pool-ops",
+      "pr-checklist-pool-private"
+    ]
+  },
+  {
+    "id": "pr-checklist-mixed",
+    "topic": "pr-checklist",
+    "type": "mixed",
+    "query": "checklist for reviewing a pull request before approving",
+    "relevant": [
+      "pr-checklist-sample-app",
+      "pr-checklist-notes",
+      "pr-checklist-project-b",
+      "pr-checklist-shared-tools",
+      "pr-checklist-pool-dev",
+      "pr-checklist-pool-notes",
+      "pr-checklist-pool-ops",
+      "pr-checklist-pool-private"
+    ]
+  },
+  {
+    "id": "postmortem-keyword",
+    "topic": "postmortem",
+    "type": "keyword",
+    "query": "incident postmortem blameless",
+    "relevant": [
+      "postmortem-sample-app",
+      "postmortem-notes",
+      "postmortem-project-b",
+      "postmortem-shared-tools",
+      "postmortem-pool-dev",
+      "postmortem-pool-notes",
+      "postmortem-pool-ops",
+      "postmortem-pool-private"
+    ]
+  },
+  {
+    "id": "postmortem-paraphrase",
+    "topic": "postmortem",
+    "type": "paraphrase",
+    "query": "writing up what went wrong after an outage without assigning blame",
+    "relevant": [
+      "postmortem-sample-app",
+      "postmortem-notes",
+      "postmortem-project-b",
+      "postmortem-shared-tools",
+      "postmortem-pool-dev",
+      "postmortem-pool-notes",
+      "postmortem-pool-ops",
+      "postmortem-pool-private"
+    ]
+  },
+  {
+    "id": "postmortem-mixed",
+    "topic": "postmortem",
+    "type": "mixed",
+    "query": "writing a blameless postmortem after an incident",
+    "relevant": [
+      "postmortem-sample-app",
+      "postmortem-notes",
+      "postmortem-project-b",
+      "postmortem-shared-tools",
+      "postmortem-pool-dev",
+      "postmortem-pool-notes",
+      "postmortem-pool-ops",
+      "postmortem-pool-private"
+    ]
+  },
+  {
+    "id": "zero-downtime-migration-keyword",
+    "topic": "zero-downtime-migration",
+    "type": "keyword",
+    "query": "zero downtime schema migration",
+    "relevant": [
+      "zero-downtime-migration-sample-app",
+      "zero-downtime-migration-notes",
+      "zero-downtime-migration-project-b",
+      "zero-downtime-migration-shared-tools",
+      "zero-downtime-migration-pool-dev",
+      "zero-downtime-migration-pool-notes",
+      "zero-downtime-migration-pool-ops",
+      "zero-downtime-migration-pool-private"
+    ]
+  },
+  {
+    "id": "zero-downtime-migration-paraphrase",
+    "topic": "zero-downtime-migration",
+    "type": "paraphrase",
+    "query": "changing the database structure without taking the service offline",
+    "relevant": [
+      "zero-downtime-migration-sample-app",
+      "zero-downtime-migration-notes",
+      "zero-downtime-migration-project-b",
+      "zero-downtime-migration-shared-tools",
+      "zero-downtime-migration-pool-dev",
+      "zero-downtime-migration-pool-notes",
+      "zero-downtime-migration-pool-ops",
+      "zero-downtime-migration-pool-private"
+    ]
+  },
+  {
+    "id": "zero-downtime-migration-mixed",
+    "topic": "zero-downtime-migration",
+    "type": "mixed",
+    "query": "migrating the schema without any downtime",
+    "relevant": [
+      "zero-downtime-migration-sample-app",
+      "zero-downtime-migration-notes",
+      "zero-downtime-migration-project-b",
+      "zero-downtime-migration-shared-tools",
+      "zero-downtime-migration-pool-dev",
+      "zero-downtime-migration-pool-notes",
+      "zero-downtime-migration-pool-ops",
+      "zero-downtime-migration-pool-private"
+    ]
+  },
+  {
+    "id": "dep-upgrade-keyword",
+    "topic": "dep-upgrade",
+    "type": "keyword",
+    "query": "upgrade major dependency version",
+    "relevant": [
+      "dep-upgrade-sample-app",
+      "dep-upgrade-notes",
+      "dep-upgrade-project-b",
+      "dep-upgrade-shared-tools",
+      "dep-upgrade-pool-dev",
+      "dep-upgrade-pool-notes",
+      "dep-upgrade-pool-ops",
+      "dep-upgrade-pool-private"
+    ]
+  },
+  {
+    "id": "dep-upgrade-paraphrase",
+    "topic": "dep-upgrade",
+    "type": "paraphrase",
+    "query": "moving to a newer release of a library that breaks compatibility",
+    "relevant": [
+      "dep-upgrade-sample-app",
+      "dep-upgrade-notes",
+      "dep-upgrade-project-b",
+      "dep-upgrade-shared-tools",
+      "dep-upgrade-pool-dev",
+      "dep-upgrade-pool-notes",
+      "dep-upgrade-pool-ops",
+      "dep-upgrade-pool-private"
+    ]
+  },
+  {
+    "id": "dep-upgrade-mixed",
+    "topic": "dep-upgrade",
+    "type": "mixed",
+    "query": "upgrading to a new major version of a dependency",
+    "relevant": [
+      "dep-upgrade-sample-app",
+      "dep-upgrade-notes",
+      "dep-upgrade-project-b",
+      "dep-upgrade-shared-tools",
+      "dep-upgrade-pool-dev",
+      "dep-upgrade-pool-notes",
+      "dep-upgrade-pool-ops",
+      "dep-upgrade-pool-private"
+    ]
+  },
+  {
+    "id": "alert-fatigue-keyword",
+    "topic": "alert-fatigue",
+    "type": "keyword",
+    "query": "alert fatigue noisy pages",
+    "relevant": [
+      "alert-fatigue-sample-app",
+      "alert-fatigue-notes",
+      "alert-fatigue-project-b",
+      "alert-fatigue-shared-tools",
+      "alert-fatigue-pool-dev",
+      "alert-fatigue-pool-notes",
+      "alert-fatigue-pool-ops",
+      "alert-fatigue-pool-private"
+    ]
+  },
+  {
+    "id": "alert-fatigue-paraphrase",
+    "topic": "alert-fatigue",
+    "type": "paraphrase",
+    "query": "getting paged too often for things that don't matter",
+    "relevant": [
+      "alert-fatigue-sample-app",
+      "alert-fatigue-notes",
+      "alert-fatigue-project-b",
+      "alert-fatigue-shared-tools",
+      "alert-fatigue-pool-dev",
+      "alert-fatigue-pool-notes",
+      "alert-fatigue-pool-ops",
+      "alert-fatigue-pool-private"
+    ]
+  },
+  {
+    "id": "alert-fatigue-mixed",
+    "topic": "alert-fatigue",
+    "type": "mixed",
+    "query": "too many noisy pages causing alert fatigue",
+    "relevant": [
+      "alert-fatigue-sample-app",
+      "alert-fatigue-notes",
+      "alert-fatigue-project-b",
+      "alert-fatigue-shared-tools",
+      "alert-fatigue-pool-dev",
+      "alert-fatigue-pool-notes",
+      "alert-fatigue-pool-ops",
+      "alert-fatigue-pool-private"
+    ]
+  },
+  {
+    "id": "load-test-keyword",
+    "topic": "load-test",
+    "type": "keyword",
+    "query": "load test throughput latency",
+    "relevant": [
+      "load-test-sample-app",
+      "load-test-notes",
+      "load-test-project-b",
+      "load-test-shared-tools",
+      "load-test-pool-dev",
+      "load-test-pool-notes",
+      "load-test-pool-ops",
+      "load-test-pool-private"
+    ]
+  },
+  {
+    "id": "load-test-paraphrase",
+    "topic": "load-test",
+    "type": "paraphrase",
+    "query": "measuring how the system behaves under heavy simulated traffic",
+    "relevant": [
+      "load-test-sample-app",
+      "load-test-notes",
+      "load-test-project-b",
+      "load-test-shared-tools",
+      "load-test-pool-dev",
+      "load-test-pool-notes",
+      "load-test-pool-ops",
+      "load-test-pool-private"
+    ]
+  },
+  {
+    "id": "load-test-mixed",
+    "topic": "load-test",
+    "type": "mixed",
+    "query": "testing throughput under heavy load",
+    "relevant": [
+      "load-test-sample-app",
+      "load-test-notes",
+      "load-test-project-b",
+      "load-test-shared-tools",
+      "load-test-pool-dev",
+      "load-test-pool-notes",
+      "load-test-pool-ops",
+      "load-test-pool-private"
+    ]
+  },
+  {
+    "id": "backup-restore-keyword",
+    "topic": "backup-restore",
+    "type": "keyword",
+    "query": "encrypted backup restore",
+    "relevant": [
+      "backup-restore-sample-app",
+      "backup-restore-notes",
+      "backup-restore-project-b",
+      "backup-restore-shared-tools",
+      "backup-restore-pool-dev",
+      "backup-restore-pool-notes",
+      "backup-restore-pool-ops",
+      "backup-restore-pool-private"
+    ]
+  },
+  {
+    "id": "backup-restore-paraphrase",
+    "topic": "backup-restore",
+    "type": "paraphrase",
+    "query": "making sure you can recover data after it's encrypted and stored safely",
+    "relevant": [
+      "backup-restore-sample-app",
+      "backup-restore-notes",
+      "backup-restore-project-b",
+      "backup-restore-shared-tools",
+      "backup-restore-pool-dev",
+      "backup-restore-pool-notes",
+      "backup-restore-pool-ops",
+      "backup-restore-pool-private"
+    ]
+  },
+  {
+    "id": "backup-restore-mixed",
+    "topic": "backup-restore",
+    "type": "mixed",
+    "query": "restoring from an encrypted backup",
+    "relevant": [
+      "backup-restore-sample-app",
+      "backup-restore-notes",
+      "backup-restore-project-b",
+      "backup-restore-shared-tools",
+      "backup-restore-pool-dev",
+      "backup-restore-pool-notes",
+      "backup-restore-pool-ops",
+      "backup-restore-pool-private"
+    ]
+  },
+  {
+    "id": "short-lived-token-keyword",
+    "topic": "short-lived-token",
+    "type": "keyword",
+    "query": "short lived access tokens",
+    "relevant": [
+      "short-lived-token-sample-app",
+      "short-lived-token-notes",
+      "short-lived-token-project-b",
+      "short-lived-token-shared-tools",
+      "short-lived-token-pool-dev",
+      "short-lived-token-pool-notes",
+      "short-lived-token-pool-ops",
+      "short-lived-token-pool-private"
+    ]
+  },
+  {
+    "id": "short-lived-token-paraphrase",
+    "topic": "short-lived-token",
+    "type": "paraphrase",
+    "query": "credentials that expire quickly to limit exposure if stolen",
+    "relevant": [
+      "short-lived-token-sample-app",
+      "short-lived-token-notes",
+      "short-lived-token-project-b",
+      "short-lived-token-shared-tools",
+      "short-lived-token-pool-dev",
+      "short-lived-token-pool-notes",
+      "short-lived-token-pool-ops",
+      "short-lived-token-pool-private"
+    ]
+  },
+  {
+    "id": "short-lived-token-mixed",
+    "topic": "short-lived-token",
+    "type": "mixed",
+    "query": "access tokens that expire quickly",
+    "relevant": [
+      "short-lived-token-sample-app",
+      "short-lived-token-notes",
+      "short-lived-token-project-b",
+      "short-lived-token-shared-tools",
+      "short-lived-token-pool-dev",
+      "short-lived-token-pool-notes",
+      "short-lived-token-pool-ops",
+      "short-lived-token-pool-private"
+    ]
+  },
+  {
+    "id": "onboarding-keyword",
+    "topic": "onboarding",
+    "type": "keyword",
+    "query": "new hire onboarding checklist",
+    "relevant": [
+      "onboarding-sample-app",
+      "onboarding-notes",
+      "onboarding-project-b",
+      "onboarding-shared-tools",
+      "onboarding-pool-dev",
+      "onboarding-pool-notes",
+      "onboarding-pool-ops",
+      "onboarding-pool-private"
+    ]
+  },
+  {
+    "id": "onboarding-paraphrase",
+    "topic": "onboarding",
+    "type": "paraphrase",
+    "query": "getting an engineer set up and productive in their first week",
+    "relevant": [
+      "onboarding-sample-app",
+      "onboarding-notes",
+      "onboarding-project-b",
+      "onboarding-shared-tools",
+      "onboarding-pool-dev",
+      "onboarding-pool-notes",
+      "onboarding-pool-ops",
+      "onboarding-pool-private"
+    ]
+  },
+  {
+    "id": "onboarding-mixed",
+    "topic": "onboarding",
+    "type": "mixed",
+    "query": "onboarding checklist for a new engineer's first week",
+    "relevant": [
+      "onboarding-sample-app",
+      "onboarding-notes",
+      "onboarding-project-b",
+      "onboarding-shared-tools",
+      "onboarding-pool-dev",
+      "onboarding-pool-notes",
+      "onboarding-pool-ops",
+      "onboarding-pool-private"
+    ]
+  },
+  {
+    "id": "api-versioning-keyword",
+    "topic": "api-versioning",
+    "type": "keyword",
+    "query": "breaking change API version",
+    "relevant": [
+      "api-versioning-sample-app",
+      "api-versioning-notes",
+      "api-versioning-project-b",
+      "api-versioning-shared-tools",
+      "api-versioning-pool-dev",
+      "api-versioning-pool-notes",
+      "api-versioning-pool-ops",
+      "api-versioning-pool-private"
+    ]
+  },
+  {
+    "id": "api-versioning-paraphrase",
+    "topic": "api-versioning",
+    "type": "paraphrase",
+    "query": "introducing incompatible changes to an interface without disrupting existing callers",
+    "relevant": [
+      "api-versioning-sample-app",
+      "api-versioning-notes",
+      "api-versioning-project-b",
+      "api-versioning-shared-tools",
+      "api-versioning-pool-dev",
+      "api-versioning-pool-notes",
+      "api-versioning-pool-ops",
+      "api-versioning-pool-private"
+    ]
+  },
+  {
+    "id": "api-versioning-mixed",
+    "topic": "api-versioning",
+    "type": "mixed",
+    "query": "introducing a breaking change to the API version",
+    "relevant": [
+      "api-versioning-sample-app",
+      "api-versioning-notes",
+      "api-versioning-project-b",
+      "api-versioning-shared-tools",
+      "api-versioning-pool-dev",
+      "api-versioning-pool-notes",
+      "api-versioning-pool-ops",
+      "api-versioning-pool-private"
+    ]
+  },
+  {
+    "id": "backoff-retry-keyword",
+    "topic": "backoff-retry",
+    "type": "keyword",
+    "query": "exponential backoff retry",
+    "relevant": [
+      "backoff-retry-sample-app",
+      "backoff-retry-notes",
+      "backoff-retry-project-b",
+      "backoff-retry-shared-tools",
+      "backoff-retry-pool-dev",
+      "backoff-retry-pool-notes",
+      "backoff-retry-pool-ops",
+      "backoff-retry-pool-private"
+    ]
+  },
+  {
+    "id": "backoff-retry-paraphrase",
+    "topic": "backoff-retry",
+    "type": "paraphrase",
+    "query": "waiting progressively longer between repeated attempts after a failure",
+    "relevant": [
+      "backoff-retry-sample-app",
+      "backoff-retry-notes",
+      "backoff-retry-project-b",
+      "backoff-retry-shared-tools",
+      "backoff-retry-pool-dev",
+      "backoff-retry-pool-notes",
+      "backoff-retry-pool-ops",
+      "backoff-retry-pool-private"
+    ]
+  },
+  {
+    "id": "backoff-retry-mixed",
+    "topic": "backoff-retry",
+    "type": "mixed",
+    "query": "retrying with exponential backoff after a failure",
+    "relevant": [
+      "backoff-retry-sample-app",
+      "backoff-retry-notes",
+      "backoff-retry-project-b",
+      "backoff-retry-shared-tools",
+      "backoff-retry-pool-dev",
+      "backoff-retry-pool-notes",
+      "backoff-retry-pool-ops",
+      "backoff-retry-pool-private"
+    ]
+  },
+  {
+    "id": "search-ranking-keyword",
+    "topic": "search-ranking",
+    "type": "keyword",
+    "query": "search relevance ranking tuning",
+    "relevant": [
+      "search-ranking-sample-app",
+      "search-ranking-notes",
+      "search-ranking-project-b",
+      "search-ranking-shared-tools",
+      "search-ranking-pool-dev",
+      "search-ranking-pool-notes",
+      "search-ranking-pool-ops",
+      "search-ranking-pool-private"
+    ]
+  },
+  {
+    "id": "search-ranking-paraphrase",
+    "topic": "search-ranking",
+    "type": "paraphrase",
+    "query": "making the most useful results show up first",
+    "relevant": [
+      "search-ranking-sample-app",
+      "search-ranking-notes",
+      "search-ranking-project-b",
+      "search-ranking-shared-tools",
+      "search-ranking-pool-dev",
+      "search-ranking-pool-notes",
+      "search-ranking-pool-ops",
+      "search-ranking-pool-private"
+    ]
+  },
+  {
+    "id": "search-ranking-mixed",
+    "topic": "search-ranking",
+    "type": "mixed",
+    "query": "tuning the ranking so the best results show up first",
+    "relevant": [
+      "search-ranking-sample-app",
+      "search-ranking-notes",
+      "search-ranking-project-b",
+      "search-ranking-shared-tools",
+      "search-ranking-pool-dev",
+      "search-ranking-pool-notes",
+      "search-ranking-pool-ops",
+      "search-ranking-pool-private"
+    ]
+  },
+  {
+    "id": "missing-index-keyword",
+    "topic": "missing-index",
+    "type": "keyword",
+    "query": "slow query missing index",
+    "relevant": [
+      "missing-index-sample-app",
+      "missing-index-notes",
+      "missing-index-project-b",
+      "missing-index-shared-tools",
+      "missing-index-pool-dev",
+      "missing-index-pool-notes",
+      "missing-index-pool-ops",
+      "missing-index-pool-private"
+    ]
+  },
+  {
+    "id": "missing-index-paraphrase",
+    "topic": "missing-index",
+    "type": "paraphrase",
+    "query": "a lookup taking too long because the database has nothing to speed it up",
+    "relevant": [
+      "missing-index-sample-app",
+      "missing-index-notes",
+      "missing-index-project-b",
+      "missing-index-shared-tools",
+      "missing-index-pool-dev",
+      "missing-index-pool-notes",
+      "missing-index-pool-ops",
+      "missing-index-pool-private"
+    ]
+  },
+  {
+    "id": "missing-index-mixed",
+    "topic": "missing-index",
+    "type": "mixed",
+    "query": "a slow query that needs an index",
+    "relevant": [
+      "missing-index-sample-app",
+      "missing-index-notes",
+      "missing-index-project-b",
+      "missing-index-shared-tools",
+      "missing-index-pool-dev",
+      "missing-index-pool-notes",
+      "missing-index-pool-ops",
+      "missing-index-pool-private"
+    ]
+  },
+  {
+    "id": "crash-loop-keyword",
+    "topic": "crash-loop",
+    "type": "keyword",
+    "query": "container restart crash loop",
+    "relevant": [
+      "crash-loop-sample-app",
+      "crash-loop-notes",
+      "crash-loop-project-b",
+      "crash-loop-shared-tools",
+      "crash-loop-pool-dev",
+      "crash-loop-pool-notes",
+      "crash-loop-pool-ops",
+      "crash-loop-pool-private"
+    ]
+  },
+  {
+    "id": "crash-loop-paraphrase",
+    "topic": "crash-loop",
+    "type": "paraphrase",
+    "query": "a process that keeps failing and starting over endlessly",
+    "relevant": [
+      "crash-loop-sample-app",
+      "crash-loop-notes",
+      "crash-loop-project-b",
+      "crash-loop-shared-tools",
+      "crash-loop-pool-dev",
+      "crash-loop-pool-notes",
+      "crash-loop-pool-ops",
+      "crash-loop-pool-private"
+    ]
+  },
+  {
+    "id": "crash-loop-mixed",
+    "topic": "crash-loop",
+    "type": "mixed",
+    "query": "a container that keeps crashing and restarting",
+    "relevant": [
+      "crash-loop-sample-app",
+      "crash-loop-notes",
+      "crash-loop-project-b",
+      "crash-loop-shared-tools",
+      "crash-loop-pool-dev",
+      "crash-loop-pool-notes",
+      "crash-loop-pool-ops",
+      "crash-loop-pool-private"
+    ]
+  },
+  {
+    "id": "secret-leak-keyword",
+    "topic": "secret-leak",
+    "type": "keyword",
+    "query": "secret leaked in logs",
+    "relevant": [
+      "secret-leak-sample-app",
+      "secret-leak-notes",
+      "secret-leak-project-b",
+      "secret-leak-shared-tools",
+      "secret-leak-pool-dev",
+      "secret-leak-pool-notes",
+      "secret-leak-pool-ops",
+      "secret-leak-pool-private"
+    ]
+  },
+  {
+    "id": "secret-leak-paraphrase",
+    "topic": "secret-leak",
+    "type": "paraphrase",
+    "query": "sensitive credentials accidentally ending up somewhere they shouldn't",
+    "relevant": [
+      "secret-leak-sample-app",
+      "secret-leak-notes",
+      "secret-leak-project-b",
+      "secret-leak-shared-tools",
+      "secret-leak-pool-dev",
+      "secret-leak-pool-notes",
+      "secret-leak-pool-ops",
+      "secret-leak-pool-private"
+    ]
+  },
+  {
+    "id": "secret-leak-mixed",
+    "topic": "secret-leak",
+    "type": "mixed",
+    "query": "a secret that leaked into the logs",
+    "relevant": [
+      "secret-leak-sample-app",
+      "secret-leak-notes",
+      "secret-leak-project-b",
+      "secret-leak-shared-tools",
+      "secret-leak-pool-dev",
+      "secret-leak-pool-notes",
+      "secret-leak-pool-ops",
+      "secret-leak-pool-private"
+    ]
+  },
+  {
+    "id": "stale-docs-keyword",
+    "topic": "stale-docs",
+    "type": "keyword",
+    "query": "stale outdated documentation",
+    "relevant": [
+      "stale-docs-sample-app",
+      "stale-docs-notes",
+      "stale-docs-project-b",
+      "stale-docs-shared-tools",
+      "stale-docs-pool-dev",
+      "stale-docs-pool-notes",
+      "stale-docs-pool-ops",
+      "stale-docs-pool-private"
+    ]
+  },
+  {
+    "id": "stale-docs-paraphrase",
+    "topic": "stale-docs",
+    "type": "paraphrase",
+    "query": "docs that no longer match how the system actually behaves",
+    "relevant": [
+      "stale-docs-sample-app",
+      "stale-docs-notes",
+      "stale-docs-project-b",
+      "stale-docs-shared-tools",
+      "stale-docs-pool-dev",
+      "stale-docs-pool-notes",
+      "stale-docs-pool-ops",
+      "stale-docs-pool-private"
+    ]
+  },
+  {
+    "id": "stale-docs-mixed",
+    "topic": "stale-docs",
+    "type": "mixed",
+    "query": "documentation that is now outdated",
+    "relevant": [
+      "stale-docs-sample-app",
+      "stale-docs-notes",
+      "stale-docs-project-b",
+      "stale-docs-shared-tools",
+      "stale-docs-pool-dev",
+      "stale-docs-pool-notes",
+      "stale-docs-pool-ops",
+      "stale-docs-pool-private"
+    ]
+  },
+  {
+    "id": "cpu-profile-keyword",
+    "topic": "cpu-profile",
+    "type": "keyword",
+    "query": "CPU profiling hot path",
+    "relevant": [
+      "cpu-profile-sample-app",
+      "cpu-profile-notes",
+      "cpu-profile-project-b",
+      "cpu-profile-shared-tools",
+      "cpu-profile-pool-dev",
+      "cpu-profile-pool-notes",
+      "cpu-profile-pool-ops",
+      "cpu-profile-pool-private"
+    ]
+  },
+  {
+    "id": "cpu-profile-paraphrase",
+    "topic": "cpu-profile",
+    "type": "paraphrase",
+    "query": "finding which part of the code is using the most processing time",
+    "relevant": [
+      "cpu-profile-sample-app",
+      "cpu-profile-notes",
+      "cpu-profile-project-b",
+      "cpu-profile-shared-tools",
+      "cpu-profile-pool-dev",
+      "cpu-profile-pool-notes",
+      "cpu-profile-pool-ops",
+      "cpu-profile-pool-private"
+    ]
+  },
+  {
+    "id": "cpu-profile-mixed",
+    "topic": "cpu-profile",
+    "type": "mixed",
+    "query": "profiling the CPU to find the hot path",
+    "relevant": [
+      "cpu-profile-sample-app",
+      "cpu-profile-notes",
+      "cpu-profile-project-b",
+      "cpu-profile-shared-tools",
+      "cpu-profile-pool-dev",
+      "cpu-profile-pool-notes",
+      "cpu-profile-pool-ops",
+      "cpu-profile-pool-private"
+    ]
+  }
+]

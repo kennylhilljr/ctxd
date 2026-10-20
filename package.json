@@ -15,7 +15,8 @@
     "dev": "tsx src/cli/index.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "bench:search": "tsx scripts/bench-search.ts"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.3.1",

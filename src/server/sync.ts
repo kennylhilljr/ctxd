@@ -3,7 +3,7 @@ import type Database from "better-sqlite3";
 import { assertLoopback } from "../security/policy.js";
 import { resolvePeerAuth } from "./auth.js";
 import { extractBearerToken, parseListen, readJsonBody } from "./http.js";
-import { servePull, pullFromPeer, type PullRequest } from "../sync/pull.js";
+import { servePull, pullFromPeer, recordServedThrough, type PullRequest } from "../sync/pull.js";
 import type { SealedKeyProvider } from "../sealed/key-provider.js";
 import type { SealedPoolStore } from "../sealed/store.js";
 import { isFlagOn } from "../config/flags.js";
@@ -101,6 +101,7 @@ async function handleRequest(
     }
     const authenticatedNode = auth.remoteNodeId ?? "";
     const response = servePull(db, auth.peerRole, { node: authenticatedNode, vector: body.vector, limit: body.limit }, sealedKeys, sealedStore);
+    recordServedThrough(db, auth.peerId, response.through);
     res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(response));
     return;
   }

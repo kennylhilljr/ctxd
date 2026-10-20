@@ -124,6 +124,13 @@ export function openDatabase(path: string, { create = false }: OpenDatabaseOptio
       db.pragma("user_version = 21");
     })();
   }
+  const peerWatermarkVersion = db.pragma("user_version", { simple: true }) as number;
+  if (peerWatermarkVersion === 21 && SCHEMA_VERSION >= 22) {
+    db.transaction(() => {
+      db.exec("CREATE TABLE peer_watermarks (peer_id TEXT NOT NULL, origin_node TEXT NOT NULL, through_seq INTEGER NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY (peer_id, origin_node))");
+      db.pragma("user_version = 22");
+    })();
+  }
   const sequenceVersion = db.pragma("user_version", { simple: true }) as number;
   if (sequenceVersion !== SCHEMA_VERSION) {
     db.close();

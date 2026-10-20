@@ -17,7 +17,7 @@ Section numbers are the Spec's own (for example 9.1), unchanged from Spec v9, so
 
 The **event log is the source of truth**. Entry state, FTS and vectors are materialized from it and can be rebuilt with `ctxd rebuild`.
 
-The schema below is the executable one, copied from `src/store/schema.ts` at schema version 21. If this block and that file ever disagree, the file is what runs; raise the difference rather than silently diverging (AGENTS.md).
+The schema below is the executable one, copied from `src/store/schema.ts` at schema version 22. If this block and that file ever disagree, the file is what runs; raise the difference rather than silently diverging (AGENTS.md).
 
 ```sql
 CREATE TABLE nodes (
@@ -443,6 +443,14 @@ CREATE TABLE sync_state (
   PRIMARY KEY (peer_node, origin_node)
 );
 
+CREATE TABLE peer_watermarks (          -- the served-side mirror of sync_state (W3): how far we've served each peer, per origin
+  peer_id      TEXT NOT NULL,
+  origin_node  TEXT NOT NULL,
+  through_seq  INTEGER NOT NULL,
+  updated_at   TEXT NOT NULL,
+  PRIMARY KEY (peer_id, origin_node)
+);
+
 CREATE VIRTUAL TABLE entries_fts USING fts5(
   title, body, tags, content='entries', content_rowid='rowid'
 );
@@ -486,6 +494,7 @@ CREATE TABLE commits (                 -- local facts recorded by the PostToolUs
 - **Genesis exception.** `ctxd init` writes the first node row, the human client and the global `_me` scope with direct inserts, not through `acl` events, because there is no prior node, client or scope yet to author an event from. This is the one, deliberately narrow exception to "every change is an event" (ADR 0002); every write after it goes through the normal event path.
 - **Approval timestamps.** `approved_by` and `approved_hlc` are set whenever an entry is actually approved: on the review path (`ctxd review --approve`, the `resolve` status event) to the approving human client and that event's HLC, and at creation for an auto-accept review rule match (10.4) to the creating client and the create event's HLC, since the rule itself is the approval. They stay NULL for a write that was never under review: the human client writing directly, or a kind whose unreviewed default status is already `active`. (Spec v10 draft W5.1.)
 - **`sessions.cwd`** is recorded once, at SessionStart, and kept for the session's life; a later event's reported `cwd` never overwrites it. The crash sweep (9.10) reads it. (Spec v10 draft W5.2.)
+- **`peer_watermarks`** is the served-side mirror of `sync_state`: per `(peer_id, origin_node)`, the highest `origin_seq` this node has served that peer. The pull handler writes it right after serving a page, taking the max against any existing value so a retried or out-of-order page never regresses it (7.1). It backs real sync age and unsynced counts in `ctxd doctor` and `ctxd status` (12, 9.11). (W3, schema version 22.)
 - **Key transfer tables.** `node_encryption_keys` and `sealed_key_transfers` back the sealed pool key transfer in [LLD: Security and access](LLD-security-access-v1.md) section 10.6.1. (Spec v10 draft W2.)
 
 ### 4.1 References and relations
