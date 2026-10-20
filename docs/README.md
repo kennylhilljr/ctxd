@@ -47,7 +47,7 @@ Beside the stack:
 |---|---|---|---|
 | Research and prior art | `research/<topic>-vN.md` | [Prior art v4](research/prior-art-v4.md) | A (`analyst`) |
 | Decisions | `adr/NNNN-<decision>.md`, numbered once, superseded never versioned | [0001](adr/0001-local-first-replicated-store.md), [0002](adr/0002-event-log-sync.md), [0003](adr/0003-no-public-endpoint.md), [0004](adr/0004-embeddings-replicate.md) | C (`architect` drafts, the owner decides) |
-| Runbooks | `runbooks/<task>-vN.md` | [Hub migration v1](runbooks/hub-migration-v1.md) | A (`sre`) |
+| Runbooks | `runbooks/<task>-vN.md` | [Hub migration v1](runbooks/hub-migration-v1.md), [Mobile inbox deployment v1](runbooks/mobile-inbox-deploy-v1.md) | A (`sre`) |
 | Templates | `templates/<artifact>-template.md`, one per artifact, each section tagged H, C or A with its persona | [templates/](templates/) | H (the owner approves the sections) |
 | Standards | `standards/<topic>-vN.md` | [Spec-driven development v1](standards/spec-driven-development-v1.md), [Agent personas v1](standards/agent-personas-v1.md) | H |
 | Glossary | [glossary.md](glossary.md) | current | A (`product-writer`, `doc-steward`) |
@@ -69,7 +69,7 @@ Beside the stack:
 | Skills | [v3](prd/components/PRD-skills-v3.md) | SK-1 to SK-8 | SK-AC-n | [Operations v1](lld/LLD-operations-v1.md) 12.2 |
 | Memory and journal | [v2](prd/components/PRD-memory-journal-v2.md) | MJ-1 to MJ-10 | MJ-AC-n | [Briefs and search v1](lld/LLD-briefs-search-v1.md) |
 | Feature flags | [v2](prd/components/PRD-feature-flags-v2.md) | FF-1 to FF-8 | FF-AC-n | [Configuration v1](lld/LLD-configuration-v1.md) |
-| Mobile inbox (M7) | [v2](prd/components/PRD-mobile-inbox-v2.md) | MI-1 to MI-12 | MI-AC-n | none yet |
+| Mobile inbox (M7) | [v2](prd/components/PRD-mobile-inbox-v2.md) | MI-1 to MI-12 | MI-AC-n | [Mobile inbox v1](lld/LLD-mobile-inbox-v1.md) |
 | Operations (cross-cutting) | Parent PRD NFRs | NFR-n | | [Operations v1](lld/LLD-operations-v1.md) |
 
 ## Conventions
@@ -93,4 +93,4 @@ Beside the stack:
 
 ## History
 
-Superseded versions remain for traceability: PRD v1 to v7, Spec v2 to v9, and earlier component PRD versions. `build/` holds dated plans and handoffs; some name files by the paths they had at the time (for example the hub migration runbook, now in `runbooks/`, and the Spec v10 draft, now folded into [Spec v10](spec/SPEC-v10.md) and the LLDs). M7's remaining slices add their design to the next Spec and an `LLD-mobile-inbox`, rather than writing Spec v10 as the [completion kickoff](build/completion-kickoff-v1.md) planned.
+Superseded versions remain for traceability: PRD v1 to v7, Spec v2 to v9, and earlier component PRD versions. `build/` holds dated plans and handoffs; some name files by the paths they had at the time (for example the hub migration runbook, now in `runbooks/`, and the Spec v10 draft, now folded into [Spec v10](spec/SPEC-v10.md) and the LLDs). M7's design (W1) wrote its own Spec v10 before the split; its section 17 became [LLD: Mobile inbox](lld/LLD-mobile-inbox-v1.md), and its deployment runbook moved to `runbooks/`.

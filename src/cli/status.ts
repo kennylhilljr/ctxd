@@ -23,6 +23,8 @@ import { type CtxdConfig, loadConfig } from "../config/config.js";
 import { resolveFlags, isFlagOn } from "../config/flags.js";
 import { openDatabase } from "../store/db.js";
 import { resolveScope } from "../hooks/scope.js";
+import { expandHome } from "../config/config.js";
+import { LocalDirInboxTransport } from "../inbox/localDirTransport.js";
 import { countUnsynced } from "../sync/freshness.js";
 
 export interface StatusInfo {
@@ -33,6 +35,8 @@ export interface StatusInfo {
   openClaims: number;
   unsynced: number;
   peerCount: number;
+  /** null: mobile_inbox is on but the configured transport (cloudflare) needs a network call to answer, which statusline's budget forbids (MI-11). 0 when the flag is off. */
+  inboxPending: number | null;
 }
 
 function healthzUrl(listen: string): string {
@@ -83,7 +87,20 @@ export async function gatherStatus(db: Database.Database, config: CtxdConfig, op
   const syncOn = isFlagOn(flags, "sync");
   const unsynced = !syncOn || peerCount === 0 ? 0 : countUnsynced(db);
 
-  return { healthOk, scope, scopeNotice, briefAvailable, openClaims, unsynced, peerCount };
+  let inboxPending: number | null = 0;
+  if (isFlagOn(flags, "mobile_inbox")) {
+    if (config.inbox.transport === "local") {
+      try {
+        inboxPending = (await new LocalDirInboxTransport(expandHome(config.inbox.dir)).status()).pending;
+      } catch {
+        inboxPending = null;
+      }
+    } else {
+      inboxPending = null; // cloudflare: would need a network call, which statusline's budget forbids
+    }
+  }
+
+  return { healthOk, scope, scopeNotice, briefAvailable, openClaims, unsynced, peerCount, inboxPending };
 }
 
 export function formatStatusLine(info: StatusInfo): string {
@@ -92,7 +109,8 @@ export function formatStatusLine(info: StatusInfo): string {
   const briefPart = `brief ${info.briefAvailable ? "✓" : "✗"}`;
   const claimsPart = `${info.openClaims} claim${info.openClaims === 1 ? "" : "s"}`;
   const syncPart = `${info.unsynced} unsynced`;
-  return `ctxd ${health} ${scopePart} · ${briefPart} · ${claimsPart} · ${syncPart}`;
+  const inboxPart = info.inboxPending === null ? "" : info.inboxPending > 0 ? ` · ${info.inboxPending} inbox` : "";
+  return `ctxd ${health} ${scopePart} · ${briefPart} · ${claimsPart} · ${syncPart}${inboxPart}`;
 }
 
 export function formatStatusDetail(info: StatusInfo): string {
@@ -102,6 +120,7 @@ export function formatStatusDetail(info: StatusInfo): string {
     `brief: ${info.briefAvailable ? "available" : "not available (no scope, or hooks/hooks.session_start is off)"}`,
     `claims: ${info.openClaims} open`,
     `sync: ${info.peerCount} peer(s); ${info.unsynced} unsynced`,
+    info.inboxPending === null ? "mobile inbox: pending count not tracked locally (cloudflare transport; run ctxd inbox status)" : `mobile inbox: ${info.inboxPending} pending`,
   ];
   return lines.join("\n");
 }

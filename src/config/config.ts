@@ -90,6 +90,16 @@ export const configSchema = z.object({
     .default({ sync_clients: [], include_scopes: ["_me"], keep_allowed_tools: false }),
   /** Feature flags (PRD-feature-flags-v1 section 2): per machine, never synced. */
   features: z.record(z.string(), z.boolean()).default({}),
+  /** Mobile inbox (M7; PRD-mobile-inbox-v1): which transport `ctxd inbox pull` uses when `mobile_inbox` is on. `publish_scopes` is D2's allowlist for `mobile_inbox.publish_briefs`, empty (no scopes) until the owner decides otherwise. */
+  inbox: z
+    .object({
+      transport: z.enum(["local", "cloudflare"]).default("local"),
+      dir: z.string().default("~/Library/Application Support/ctxd/inbox"),
+      endpoint: z.string().default(""),
+      pull_limit: z.number().int().min(1).max(500).default(50),
+      publish_scopes: z.array(z.string()).default([]),
+    })
+    .default({ transport: "local", dir: "~/Library/Application Support/ctxd/inbox", endpoint: "", pull_limit: 50, publish_scopes: [] }),
 });
 
 export type CtxdConfig = z.infer<typeof configSchema>;

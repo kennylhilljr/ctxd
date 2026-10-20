@@ -279,6 +279,6 @@ Implements [PRD-hooks-v6](../prd/components/PRD-hooks-v6.md) section 7.1. Runs a
 
 ### 9.11 Status line and sources-used card
 
-- **`ctxd statusline`** prints one line for Claude Code's status line setting, for example `ctxd ● ctxd · brief ✓ · 2 claims · 3 unsynced`. It reads only local state and finishes within 50 ms. Its `unsynced` count is, for each origin, the slowest active peer's served watermark (`peer_watermarks`) against the highest `origin_seq` this node holds, summed across origins (W3).
+- **`ctxd statusline`** prints one line for Claude Code's status line setting, for example `ctxd ● ctxd · brief ✓ · 2 claims · 3 unsynced`. It reads only local state and finishes within 50 ms. Its `unsynced` count is, for each origin, the slowest active peer's served watermark (`peer_watermarks`) against the highest `origin_seq` this node holds, summed across origins (W3). With the mobile inbox on, it also reports the inbox pending count: a real number for the local transport and `null` (untracked) for the Cloudflare transport, which would need a network call (17.6).
 - **`ctxd status`** prints the same information with detail.
 - **Sources-used card (optional).** Where Claude Code supports plugin display modules, a module renders a collapsed line under each answer listing the ctxd references injected or read during that turn, for example `ctxd · 6 entries · 2 decisions · 1 handoff · 1 claim`. The hook layer records references per turn in the session state file. It is off when unsupported (verify the module API at implementation time).

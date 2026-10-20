@@ -94,6 +94,8 @@ after validating the name against the registry.
 
 ### 3.2 Additional configuration keys
 
+The mobile inbox's `[inbox]` keys (`transport`, `dir`, `endpoint`, `pull_limit`, `publish_scopes`) are in [LLD: Mobile inbox](LLD-mobile-inbox-v1.md) 17.6.
+
 Scope resolution and bypass, which read `scope_map` and `hooks.bypass_patterns`, are specified in [LLD: Hooks](LLD-hooks-v1.md) section 3.3.
 
 ```toml

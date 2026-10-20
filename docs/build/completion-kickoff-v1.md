@@ -150,10 +150,10 @@ Keep this table current in each workstream's PR description; the owner copies it
 
 | Workstream | Branch | Status | PR | Handoff |
 |---|---|---|---|---|
-| W1 M7 inbox | done/w1-mobile-inbox | ready for merge | #60 | docs/build/W1-handoff-v1.md |
+| W1 M7 inbox | (merged) | merged | #60 | docs/build/W1-handoff-v1.md |
 | W2 Sealed key transfer | (merged) | merged | #59 | docs/build/W2-handoff-v1.md |
-| W3 Sync observability | done/w3-sync-observability | ready for merge | #56 | docs/build/W3-handoff-v1.md |
-| W4 Scheduled backups | done/w4-scheduled-backups | ready for merge | #57 | docs/build/W4-handoff-v1.md |
+| W3 Sync observability | (merged) | merged | #56 | docs/build/W3-handoff-v1.md |
+| W4 Scheduled backups | (merged) | merged | #57 | docs/build/W4-handoff-v1.md |
 | W5 Correctness gaps | (merged) | merged | #55 | docs/build/W5-handoff-v1.md |
-| W6 Search benchmark | done/w6-search-benchmark | ready for merge | #58 | docs/build/W6-handoff-v1.md |
-| W7 New features | done/w7-new-features-plan | plan only, awaiting owner approval | (this PR) | docs/build/W7-plan-v1.md |
+| W6 Search benchmark | (merged) | merged | #58 | docs/build/W6-handoff-v1.md |
+| W7 New features | (merged) | plan merged, awaiting owner approval | #61 | docs/build/W7-plan-v1.md |

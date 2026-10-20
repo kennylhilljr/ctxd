@@ -60,7 +60,8 @@ export function nextOriginSeq(db: Database.Database, nodeId: string): number {
   return allocateOriginSeq(db, nodeId);
 }
 
-function recordRejection(
+/** Exported so other write-adjacent paths (src/inbox/pull.ts) that reject untrusted input before ever calling writeEntry can log through the same audit trail. */
+export function recordRejection(
   db: Database.Database,
   args: { clientId: string; scopeId?: string; entryId?: string; tool: string; code: string; detail?: string },
 ): void {

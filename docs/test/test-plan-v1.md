@@ -9,7 +9,7 @@
 | **Inputs** | Acceptance criteria in the current component PRDs ([PRD v8](../prd/PRD-v8.md) section 6.1 lists them); tests in `test/unit/` and `test/conformance/` |
 | **Strategy** | [Spec v10](../spec/SPEC-v10.md) section 14 (test layers and tooling) |
 
-Every acceptance criterion in the component PRDs has an ID (`<prefix>-AC-n`). This plan maps each ID to the tests that verify it, as of commit `9ffeea9`. Counts: **89 criteria**; Covered: 33, Diverges: 1, Gap: 5, Not built: 12, Partial: 38.
+Every acceptance criterion in the component PRDs has an ID (`<prefix>-AC-n`). This plan maps each ID to the tests that verify it. It was first mapped at commit `9ffeea9` and updated as the W1 to W6 workstreams merged; each link is re-resolved by test title, so line numbers stay current. Counts: **89 criteria**; Covered: 39, Diverges: 1, Gap: 8, Partial: 41.
 
 | Status | Meaning |
 |---|---|
@@ -29,6 +29,9 @@ Every acceptance criterion in the component PRDs has an ID (`<prefix>-AC-n`). Th
 | CL-AC-3 | Gap | When the human client claims with `take_over: true` in a `strict` scope, ctxd shall grant the claim despite the overlap. | No test exercises the human override. |
 | FF-AC-2 | Gap | When `sync` is switched back on after a period off, the node shall converge with its peers with no event lost. | No off-then-on test for the `sync` flag. |
 | FF-AC-4 | Gap | The `tools/list` payload shall be byte-for-byte identical with every flag off and with every flag on. | `toolDefinitions()` takes no flag input by design, but no test compares the two payloads. |
+| MI-AC-4 | Gap | If an inbox entry contains a secret, then ctxd shall redact it before storage. | No inbox test. The pull engine writes through the agent write path, which rejects a secret (`REDACTED_SECRET`) rather than redacting it; the owner should confirm whether MI-5 means reject or redact. |
+| MI-AC-11 | Gap | While `mobile_inbox` is off, every ctxd hook shall still exit 0. | No hook test with the flag off. |
+| MI-AC-12 | Gap | ctxd shall keep inbox API tokens and encryption keys only in the macOS Keychain, never in a repository or configuration file. | No test for `ctxd inbox set-token`. |
 | PA-AC-11 | Gap | When the human runs `ctxd hold adopt`, ctxd shall move the holding scope's approved entries into the project scope and add the agent to the pool in one step. | No test for `ctxd hold adopt`. |
 | TS-AC-7 | Gap | When the human exports a scope that contains a home-directory path, ctxd shall print a categorized warning and ask for confirmation before writing. | Import preflight is tested (`mirror.test.ts:147`); export warnings are not. |
 
@@ -39,7 +42,7 @@ Criteria: [PRD-briefs-search-v5](../prd/components/PRD-briefs-search-v5.md).
 | ID | Status | Verified by | Note |
 |---|---|---|---|
 | BS-AC-1 | Partial | [`brief.test.ts:62`](../../test/unit/brief.test.ts#L62) includes the latest status entry and the pinned brief body, but not in micro size<br>[`read-moments.test.ts:98`](../../test/unit/read-moments.test.ts#L98) builds a normal-size brief for a bound scope on startup, containing real content | No test asserts the handoff and claim sections together within budget. |
-| BS-AC-2 | Partial | [`tools-read.test.ts:78`](../../test/unit/tools-read.test.ts#L78) finds a matching entry by full-text query, scoped to a readable scope<br>[`hybrid-search.test.ts:162`](../../test/unit/hybrid-search.test.ts#L162) ranks an entry matching on both FTS and vector above one matching on only the vector side | Top-3 rank is not asserted against a corpus. |
+| BS-AC-2 | Partial | [`tools-read.test.ts:78`](../../test/unit/tools-read.test.ts#L78) finds a matching entry by full-text query, scoped to a readable scope<br>[`hybrid-search.test.ts:193`](../../test/unit/hybrid-search.test.ts#L193) ranks an entry matching on both FTS and vector above one matching on only the vector side | Top-3 rank is not asserted against a corpus. |
 | BS-AC-3 | Covered | [`tool-footprint.test.ts:8`](../../test/unit/tool-footprint.test.ts#L8) keeps the tools/list payload under about 1,500 tokens |  |
 | BS-AC-4 | Partial | [`brief.test.ts:122`](../../test/unit/brief.test.ts#L122) surfaces an open signal from a blocker journal entry (store/write.ts syncs signals on every write) | Only one size is exercised. |
 | BS-AC-5 | Diverges | None | Code contradicts Spec 11.1: `src/hooks/readMoments.ts` cuts the text at the limit and appends a marker (up to 2 characters over, and it can cut open signals) instead of dropping sections lowest priority first. Raised for the owner; then fix the code and add the test. |
@@ -140,18 +143,18 @@ Criteria: [PRD-mobile-inbox-v2](../prd/components/PRD-mobile-inbox-v2.md).
 
 | ID | Status | Verified by | Note |
 |---|---|---|---|
-| MI-AC-1 | Not built | None | M7. |
-| MI-AC-2 | Not built | None | M7. |
-| MI-AC-3 | Not built | None | M7. |
-| MI-AC-4 | Not built | None | M7. |
-| MI-AC-5 | Not built | None | M7. |
-| MI-AC-6 | Not built | None | M7. |
-| MI-AC-7 | Not built | None | M7. |
-| MI-AC-8 | Not built | None | M7. |
-| MI-AC-9 | Not built | None | M7 slice 1 registered the flag; behavior is not built. |
-| MI-AC-10 | Not built | None | M7. |
-| MI-AC-11 | Not built | None | M7. |
-| MI-AC-12 | Not built | None | M7. |
+| MI-AC-1 | Covered | [`inbox-pull.test.ts:140`](../../test/unit/inbox-pull.test.ts#L140) is idempotent: re-pulling the same inboxEntryId after it was applied is a no-op, not a duplicate<br>[`inbox-delivery-property.test.ts:57`](../../test/unit/inbox-delivery-property.test.ts#L57) any sequence of batches, each a shuffled and possibly-repeating subset of a fixed id pool, ends with exactly one entry per distinct id once drained |  |
+| MI-AC-2 | Covered | [`inbox-crash-recovery.test.ts:54`](../../test/unit/inbox-crash-recovery.test.ts#L54) an ack that fails right after a successful apply does not lose the apply, and the retry does not duplicate it |  |
+| MI-AC-3 | Partial | [`inbox-pull.test.ts:120`](../../test/unit/inbox-pull.test.ts#L120) rejects an entry that fails schema validation, and still acks it so it doesn't jam the queue<br>[`inbox-pull.test.ts:130`](../../test/unit/inbox-pull.test.ts#L130) rejects a body over the 16 KB bound (MI-5) | The 32 KB total payload bound is not exercised. |
+| MI-AC-4 | Gap | None | No inbox test. The pull engine writes through the agent write path, which rejects a secret (`REDACTED_SECRET`) rather than redacting it; the owner should confirm whether MI-5 means reject or redact. |
+| MI-AC-5 | Covered | [`inbox-pull.test.ts:78`](../../test/unit/inbox-pull.test.ts#L78) applies an entry for an allowlisted scope as proposed, tagged with its origin |  |
+| MI-AC-6 | Covered | [`inbox-pull.test.ts:97`](../../test/unit/inbox-pull.test.ts#L97) holds an entry for a scope the client has no grant for, rather than applying or silently dropping it |  |
+| MI-AC-7 | Partial | [`inbox-pull.test.ts:78`](../../test/unit/inbox-pull.test.ts#L78) applies an entry for an allowlisted scope as proposed, tagged with its origin | The origin tag is asserted; capture time and reference tags are not. |
+| MI-AC-8 | Partial | [`inbox-pull.test.ts:108`](../../test/unit/inbox-pull.test.ts#L108) rejects a home-replication scope outright, without holding it for review (MI-7)<br>[`inbox-publish-briefs.test.ts:62`](../../test/unit/inbox-publish-briefs.test.ts#L62) skips a local-only scope and a home-replication scope even when allowlisted | Pull tests cover a `home` scope; `local-only` and sealed exclusion are tested only for brief publishing. |
+| MI-AC-9 | Covered | [`inbox-pull.test.ts:63`](../../test/unit/inbox-pull.test.ts#L63) makes zero transport calls when mobile_inbox is off<br>[`cli-inbox.test.ts:44`](../../test/unit/cli-inbox.test.ts#L44) makes no transport calls and returns 0 when mobile_inbox is off |  |
+| MI-AC-10 | Covered | [`cli-inbox.test.ts:44`](../../test/unit/cli-inbox.test.ts#L44) makes no transport calls and returns 0 when mobile_inbox is off<br>[`cli-inbox.test.ts:73`](../../test/unit/cli-inbox.test.ts#L73) reports mobile_inbox off without calling the transport |  |
+| MI-AC-11 | Gap | None | No hook test with the flag off. |
+| MI-AC-12 | Gap | None | No test for `ctxd inbox set-token`. |
 
 ## PA: Persona pools and access
 
@@ -181,9 +184,9 @@ Criteria: [PRD-replication-v6](../prd/components/PRD-replication-v6.md).
 | RP-AC-1 | Covered | [`sync-conflicts.test.ts:100`](../../test/unit/sync-conflicts.test.ts#L100) the later-HLC side wins as head, the earlier side is kept as a conflict sibling, and ctxd review lists it<br>[`sync-conflicts.test.ts:127`](../../test/unit/sync-conflicts.test.ts#L127) converges to the same outcome regardless of which concurrent event is applied first |  |
 | RP-AC-2 | Partial | [`sync-partition-property.test.ts:371`](../../test/unit/sync-partition-property.test.ts#L371) is deterministic across random sequences of operations, random partitions, heals and delivery order | Same gap as KM-AC-1. |
 | RP-AC-3 | Covered | [`policy.test.ts:5`](../../test/unit/policy.test.ts#L5) filters replication by scope policy and node role |  |
-| RP-AC-4 | Partial | [`sync.test.ts:135`](../../test/conformance/sync.test.ts#L135) a second sync with nothing new applies zero events<br>[`sync-purge.test.ts:116`](../../test/unit/sync-purge.test.ts#L116) is idempotent: the same purge event applied twice is already-known the second time | No test interrupts a transfer. |
+| RP-AC-4 | Partial | [`sync.test.ts:150`](../../test/conformance/sync.test.ts#L150) a second sync with nothing new applies zero events<br>[`sync-purge.test.ts:116`](../../test/unit/sync-purge.test.ts#L116) is idempotent: the same purge event applied twice is already-known the second time | No test interrupts a transfer. |
 | RP-AC-5 | Covered | [`sync-partition-property.test.ts:371`](../../test/unit/sync-partition-property.test.ts#L371) is deterministic across random sequences of operations, random partitions, heals and delivery order |  |
-| RP-AC-6 | Partial | [`hybrid-search.test.ts:179`](../../test/unit/hybrid-search.test.ts#L179) degrades a single entry to FTS-only ranking when it has no vector yet, without affecting others | No test syncs vectors into a non-computing node. |
+| RP-AC-6 | Partial | [`hybrid-search.test.ts:210`](../../test/unit/hybrid-search.test.ts#L210) degrades a single entry to FTS-only ranking when it has no vector yet, without affecting others | No test syncs vectors into a non-computing node. |
 
 ## SK: Skills
 
@@ -207,7 +210,7 @@ Criteria: [PRD-trust-safety-v5](../prd/components/PRD-trust-safety-v5.md).
 | TS-AC-3 | Covered | [`redact.test.ts:23`](../../test/unit/redact.test.ts#L23) catches a secret split by a zero-width character |  |
 | TS-AC-4 | Covered | [`write.test.ts:220`](../../test/unit/write.test.ts#L220) holds a write to a scope outside the client's pools and opens an access request<br>[`claim.test.ts:244`](../../test/unit/claim.test.ts#L244) rejects claim/release below propose access, but allows list at read |  |
 | TS-AC-5 | Covered | [`access.test.ts:80`](../../test/unit/access.test.ts#L80) applies pool vendor defaults: local-only beats any grant for cloud agents<br>[`policy.test.ts:12`](../../test/unit/policy.test.ts#L12) hides local-only scopes from cloud vendors |  |
-| TS-AC-6 | Covered | [`policy.test.ts:19`](../../test/unit/policy.test.ts#L19) refuses non-loopback listeners<br>[`doctor.test.ts:38`](../../test/unit/doctor.test.ts#L38) fails when a listener binds to a non-loopback address |  |
+| TS-AC-6 | Covered | [`policy.test.ts:19`](../../test/unit/policy.test.ts#L19) refuses non-loopback listeners<br>[`doctor.test.ts:39`](../../test/unit/doctor.test.ts#L39) fails when a listener binds to a non-loopback address |  |
 | TS-AC-7 | Gap | None | Import preflight is tested (`mirror.test.ts:147`); export warnings are not. |
 | TS-AC-8 | Covered | [`path-guard.test.ts:16`](../../test/unit/path-guard.test.ts#L16) denies a Read/Edit/Write whose file_path is under the guarded directory<br>[`path-guard.test.ts:83`](../../test/unit/path-guard.test.ts#L83) blocks a PreToolUse call targeting the resolved data directory |  |
 | TS-AC-9 | Partial | [`scope.test.ts:89`](../../test/unit/scope.test.ts#L89) honors the environment flag | Same gap as HK-AC-7. |

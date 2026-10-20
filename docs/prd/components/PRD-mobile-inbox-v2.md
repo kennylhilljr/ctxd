@@ -7,7 +7,7 @@
 | **Supersedes** | [v1](PRD-mobile-inbox-v1.md) |
 | **Parent** | [ctxd PRD v8](../PRD-v8.md) |
 | **Siblings** | [Feature flags](PRD-feature-flags-v2.md), [Persona pools and access](PRD-pools-access-v3.md), [Trust and safety](PRD-trust-safety-v5.md), [Replication](PRD-replication-v6.md), [Context hygiene](PRD-context-hygiene-v2.md), [Knowledge model](PRD-knowledge-model-v4.md) |
-| **Spec** | [Spec v10](../../spec/SPEC-v10.md) (HLD) sections none yet; M7 adds them |
+| **Spec** | [Spec v10](../../spec/SPEC-v10.md) (HLD) section 17; detail in [LLD: Mobile inbox](../../lld/LLD-mobile-inbox-v1.md) |
 | **Acceptance tests** | [Test plan v1](../../test/test-plan-v1.md), MI section |
 | **Parent requirements elaborated** | FR-22; NFR-1; NFR-2; NFR-11 |
 

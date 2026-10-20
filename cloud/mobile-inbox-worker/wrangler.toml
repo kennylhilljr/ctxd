@@ -1,0 +1,21 @@
+# ctxd mobile inbox Worker (M7 slice 5). Deploying this is an owner step (M7 kickoff section 3,
+# completion-kickoff-v1.md section 3): "choosing or creating a cloud account, DNS name,
+# deployment or real token" is never done by the agent that wrote this file.
+#
+# Owner steps before `wrangler deploy` (also in docs/build/M7-deploy-runbook-v1.md, slice 8):
+#   1. `wrangler login`
+#   2. `wrangler d1 create ctxd-mobile-inbox`, then paste its database_id below.
+#   3. `wrangler d1 migrations apply ctxd-mobile-inbox --remote`
+#   4. Mint tokens by inserting rows into the `tokens` table (role 'client' for each phone app,
+#      role 'hub' for this machine) with `wrangler d1 execute`; the raw token is only ever shown
+#      once, at mint time, then stored as its SHA-256 hex (never the raw value).
+#   5. `wrangler deploy`
+
+name = "ctxd-mobile-inbox"
+main = "src/worker.ts"
+compatibility_date = "2026-10-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "ctxd-mobile-inbox"
+database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"

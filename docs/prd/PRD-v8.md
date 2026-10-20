@@ -135,7 +135,7 @@ This parent PRD sets the product's goals, scope and cross-cutting requirements. 
 | [Skills](components/PRD-skills-v3.md) | Shared, versioned, approved procedures; the skill catalog; native sync into Claude Code and Codex | FR-46 to FR-49 | SK- | 4.3, 6, 10.4, 11.1, 12.2, 13 | [Operations](../lld/LLD-operations-v1.md) 12.2, [Data model](../lld/LLD-data-model-v1.md) 4.3 |
 | [Memory and journal](components/PRD-memory-journal-v2.md) | Preferences and the `_me` layout; the journal, digests and time queries; open signals; importance; causal links | FR-50 to FR-55 | MJ- | 4.1, 4.3, 9.2, 11.1 to 11.5, 13 | [Briefs and search](../lld/LLD-briefs-search-v1.md), [Data model](../lld/LLD-data-model-v1.md) 4.3 |
 | [Feature flags](components/PRD-feature-flags-v2.md) | Switching optional behavior off per machine: the registry, layers (default, config, environment), live reload, safety rules, the flag list | FR-57; NFR-11 | FF- | 3.1, 13 | [Configuration](../lld/LLD-configuration-v1.md) 3.1 |
-| [Mobile inbox](components/PRD-mobile-inbox-v2.md) | Optional M7: capture from phone assistants through an outbound-only cloud inbox (section 12) | FR-22 | MI- | none yet | none yet (M7) |
+| [Mobile inbox](components/PRD-mobile-inbox-v2.md) | Optional M7: capture from phone assistants through an outbound-only cloud inbox (section 12) | FR-22 | MI- | 17 | [Mobile inbox](../lld/LLD-mobile-inbox-v1.md) |
 
 Each component PRD lists its parent, its siblings and the spec sections that implement it. When a component changes, it gets a new numbered version, and this table is updated in the next parent version.
 

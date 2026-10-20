@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { openDatabase } from "../../src/store/db.js";
 import { configSchema } from "../../src/config/config.js";
 import { gatherStatus, formatStatusLine, formatStatusDetail } from "../../src/cli/status.js";
+import { LocalDirInboxTransport } from "../../src/inbox/localDirTransport.js";
 
 /** `ctxd status` / `ctxd statusline` (SPEC v8 9.11, M4 slice 5): one scratch database per test,
  * an injected `fetch` so no test depends on a real server actually listening. */
@@ -99,16 +100,41 @@ describe("gatherStatus", () => {
     expect(info.peerCount).toBe(1);
     db.close();
   });
+
+  it("reports inboxPending as 0 when mobile_inbox is off", async () => {
+    const db = freshDb();
+    const info = await gatherStatus(db, baseConfig(), { cwd: "/tmp/x", fetchImpl: okFetch() });
+    expect(info.inboxPending).toBe(0);
+    db.close();
+  });
+
+  it("reports a real inboxPending count for the local transport when mobile_inbox is on", async () => {
+    const db = freshDb();
+    const dir = mkdtempSync(join(tmpdir(), "ctxd-status-inbox-"));
+    new LocalDirInboxTransport(dir).capture("a", { scope: "sample-app", kind: "note", title: "t", body: "b", capturedAt: "2026-10-20T00:00:00.000Z" });
+    const config = baseConfig({ features: { mobile_inbox: true }, inbox: { transport: "local", dir, endpoint: "", pull_limit: 50, publish_scopes: [] } });
+    const info = await gatherStatus(db, config, { cwd: "/tmp/x", fetchImpl: okFetch() });
+    expect(info.inboxPending).toBe(1);
+    db.close();
+  });
+
+  it("reports inboxPending as null for the cloudflare transport (a network call would violate statusline's budget)", async () => {
+    const db = freshDb();
+    const config = baseConfig({ features: { mobile_inbox: true }, inbox: { transport: "cloudflare", dir: "/tmp/unused", endpoint: "https://inbox.example.workers.dev", pull_limit: 50, publish_scopes: [] } });
+    const info = await gatherStatus(db, config, { cwd: "/tmp/x", fetchImpl: okFetch() });
+    expect(info.inboxPending).toBeNull();
+    db.close();
+  });
 });
 
 describe("formatStatusLine", () => {
   it("matches the spec's own example shape", () => {
-    const line = formatStatusLine({ healthOk: true, scope: "ctxd", scopeNotice: null, briefAvailable: true, openClaims: 2, unsynced: 3, peerCount: 1 });
+    const line = formatStatusLine({ healthOk: true, scope: "ctxd", scopeNotice: null, briefAvailable: true, openClaims: 2, unsynced: 3, peerCount: 1, inboxPending: 0 });
     expect(line).toBe("ctxd ● ctxd · brief ✓ · 2 claims · 3 unsynced");
   });
 
   it("shows the down indicator and a crossed-out brief when unhealthy and unavailable", () => {
-    const line = formatStatusLine({ healthOk: false, scope: null, scopeNotice: "not bound", briefAvailable: false, openClaims: 0, unsynced: 0, peerCount: 0 });
+    const line = formatStatusLine({ healthOk: false, scope: null, scopeNotice: "not bound", briefAvailable: false, openClaims: 0, unsynced: 0, peerCount: 0, inboxPending: 0 });
     expect(line).toContain("○");
     expect(line).toContain("brief ✗");
     expect(line).toContain("no scope");
@@ -117,7 +143,7 @@ describe("formatStatusLine", () => {
 
 describe("formatStatusDetail", () => {
   it("shows the real peer count and unsynced count", () => {
-    const detail = formatStatusDetail({ healthOk: true, scope: "ctxd", scopeNotice: null, briefAvailable: true, openClaims: 0, unsynced: 4, peerCount: 2 });
+    const detail = formatStatusDetail({ healthOk: true, scope: "ctxd", scopeNotice: null, briefAvailable: true, openClaims: 0, unsynced: 4, peerCount: 2, inboxPending: 0 });
     expect(detail).toContain("2 peer(s)");
     expect(detail).toContain("4 unsynced");
   });

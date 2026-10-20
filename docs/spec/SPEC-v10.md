@@ -23,6 +23,7 @@ Earlier changes are listed in [Spec v9](SPEC-v9.md), [v8](SPEC-v8.md) and before
 | **W3 sync observability folded in** (merged after the restructure). Served-side `peer_watermarks` (schema version 22), real sync age in `ctxd doctor` with `sync.stale_hours`, and a real `unsynced` count in `ctxd status` | [LLD: Replication](../lld/LLD-replication-v1.md) 7.1, [LLD: Operations](../lld/LLD-operations-v1.md) 12, [LLD: Hooks](../lld/LLD-hooks-v1.md) 9.11, [LLD: Data model](../lld/LLD-data-model-v1.md) 4 |
 | **W4 scheduled backups folded in** (merged after the restructure). A launchd schedule for `ctxd backup` and a backup-age check in `ctxd doctor` | [LLD: Operations](../lld/LLD-operations-v1.md) 12, [Contract: CLI reference](../contracts/cli-reference-v1.md) |
 | **W6 search benchmark folded in** (merged after the restructure). A fixed relevance benchmark with a CI regression check, and FTS5 query escaping | [LLD: Briefs and search](../lld/LLD-briefs-search-v1.md) 11.2, section 14 |
+| **Mobile inbox (M7, W1) folded in** (merged after the restructure). W1 had written a full Spec v10 adding section 17; its section 17 is now [LLD: Mobile inbox](../lld/LLD-mobile-inbox-v1.md) and summarized below, its CLI row is in the CLI contract, and its other changes (W2, W5) were already in the LLDs | Section 17 below |
 | **Acceptance criteria traced to tests.** Component PRDs now state acceptance criteria in EARS with IDs, and the test plan maps each one to its tests | [Test plan v1](../test/test-plan-v1.md) |
 
 ## How this spec is organized
@@ -48,6 +49,7 @@ The Spec's section numbers are one namespace shared by this HLD and the LLDs. A 
 | 13 | CLI reference | [Contract: CLI reference](../contracts/cli-reference-v1.md) |
 | 14 | Testing strategy | This document; per-criterion coverage in the [test plan](../test/test-plan-v1.md) |
 | 15, 16 | Repository layout, open issues | This document |
+| 17 | Mobile inbox: transport, pull engine, provenance, cloud adapter, brief publishing, CLI | [LLD: Mobile inbox](../lld/LLD-mobile-inbox-v1.md); deployment in [runbooks](../runbooks/mobile-inbox-deploy-v1.md) |
 
 **Rule for changes.** A change that alters system shape (a new listener, a new store, a new trust boundary, a new component) changes this HLD and usually needs an ADR. A change inside one component changes only its LLD or contract: create the next numbered version of that file and update its row above in the next HLD version. Never edit a past version.
 
@@ -67,7 +69,7 @@ The Spec's section numbers are one namespace shared by this HLD and the LLDs. A 
 | [Filesystem view](../prd/components/PRD-filesystem-view-v2.md) | 4 (`slug`, `mirror_files`), 4.2, 8.2 (`path`), 12.1, 13 (`ls`, `tree`, `read`, `grep`, `open`, `mirror`, `import`) | [LLD: Data model](../lld/LLD-data-model-v1.md), [LLD: Operations](../lld/LLD-operations-v1.md) |
 | [Skills](../prd/components/PRD-skills-v3.md) | 4 (`skill_name`, `skill_syncs`), 4.3, 6, 10.4, 11.1, 12.2, 13 (`skills`) | [LLD: Data model](../lld/LLD-data-model-v1.md), [LLD: Operations](../lld/LLD-operations-v1.md) |
 | [Memory and journal](../prd/components/PRD-memory-journal-v2.md) | 4 (`significance`, `signals`), 4.1, 4.3, 6, 9.2, 9.3, 11.1 to 11.5, 13 (`remember`, `log`, `journal`, `digest`, `show --why`) | [LLD: Briefs and search](../lld/LLD-briefs-search-v1.md), [LLD: Data model](../lld/LLD-data-model-v1.md) |
-| [Mobile inbox](../prd/components/PRD-mobile-inbox-v2.md) | Not yet specified; M7 adds its design to the next HLD version and an `LLD-mobile-inbox` | None yet |
+| [Mobile inbox](../prd/components/PRD-mobile-inbox-v2.md) | 17, 13 (`inbox`) | [LLD: Mobile inbox](../lld/LLD-mobile-inbox-v1.md), [Contract: CLI reference](../contracts/cli-reference-v1.md) |
 
 Acceptance criteria for every component, and the tests that verify each one, are in the [test plan](../test/test-plan-v1.md).
 
@@ -256,8 +258,10 @@ ctxd/
     fsview/      paths, slugs, folder summaries, mirror, import
     skills/      SKILL.md validation, lookup, native sync
     journal/     journal rules, time filters, weekly digest
+    inbox/       mobile inbox: transport abstraction, pull engine, brief publishing (17)
   test/          unit, contract, conformance/ (hook fixtures per client), sync properties
   deploy/        launchd plist, client config examples, tailscale notes
+  cloud/         mobile-inbox-worker/ (Cloudflare Worker, D1 migration, wrangler config, OpenAPI spec; a sibling project, not part of ctxd's own build)
 ```
 
 ## 16. Open issues
@@ -281,6 +285,10 @@ ctxd/
 17. Whether the mirror should run in the server or a separate process, given FSEvents permissions under launchd (12.1).
 18. Whether journal day files should use a fixed time zone from config instead of each node's local zone (4.2).
 19. Tune the importance weights and the tidy threshold after a month of real use (11.3).
+
+## 17. Mobile inbox
+
+A write-only cloud buffer that phone chat apps capture into, emptied by the hub over an outbound-only connection; nothing reaches into the home network (ADR 0003). Every captured entry goes through the single write path (6) as the restricted `mobile-inbox` client, so it lands `proposed` or held, with sealed, `home` and `local-only` scopes refused outright. Optional publishing sends allowlisted `micro` briefs back out. Both behaviors are off by default (`mobile_inbox`, `mobile_inbox.publish_briefs`). Detail: [LLD: Mobile inbox](../lld/LLD-mobile-inbox-v1.md) sections 17.1 to 17.6.
 
 ## Appendix: M1 findings (condensed)
 
