@@ -35,9 +35,12 @@
  * Bumped to 17 for M6 hardening: signatures cover the immutable envelope and separate retained
  * payload hashes; peer records bind authenticated tokens to remote node identities and keys.
  * Bumped to 18: payload_stripped is trusted stored state for verified purge erasure.
- * Bumped to 19: one durable origin sequence allocator coordinates shared and sealed stores.
+ * Bumped to 20 for W3: `peer_watermarks` records, per peer and origin, the highest origin_seq
+ * this node has served that peer (POST /v1/pull is otherwise stateless on the serving side), so
+ * `ctxd doctor` and `ctxd status`/`statusline` can report real sync age and unsynced counts
+ * instead of "not tracked yet."
  */
-export const SCHEMA_VERSION = 19;
+export const SCHEMA_VERSION = 20;
 
 export const SCHEMA_SQL = `
 CREATE TABLE nodes (
@@ -440,6 +443,14 @@ CREATE TABLE sync_state (
   origin_node  TEXT NOT NULL,
   through_seq  INTEGER NOT NULL,
   PRIMARY KEY (peer_node, origin_node)
+);
+
+CREATE TABLE peer_watermarks (          -- the served-side mirror of sync_state (W3): how far we've served each peer, per origin
+  peer_id      TEXT NOT NULL,
+  origin_node  TEXT NOT NULL,
+  through_seq  INTEGER NOT NULL,
+  updated_at   TEXT NOT NULL,
+  PRIMARY KEY (peer_id, origin_node)
 );
 
 CREATE VIRTUAL TABLE entries_fts USING fts5(

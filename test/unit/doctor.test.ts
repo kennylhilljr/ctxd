@@ -140,6 +140,36 @@ describe("checkPeers", () => {
     expect(result.detail).toContain("down: unreachable");
     db.close();
   });
+
+  it("reports a real last-sync age per peer, from peers.last_synced_at (W3)", async () => {
+    const db = freshDb(tmpDataDir());
+    const syncedAt = new Date(Date.now() - 2 * 3_600_000).toISOString();
+    db.prepare(
+      "INSERT INTO peers (peer_id, name, url, role, incoming_token_hash, created_at, last_synced_at) VALUES (?, 'air', 'https://air.example/sync', 'home', 'h', datetime('now'), ?)",
+    ).run(randomUUID(), syncedAt);
+
+    const result = await checkPeers(db, (async () => new Response("ok")) as typeof fetch, 24);
+    expect(result.ok).toBe(true);
+    expect(result.detail).toMatch(/air: reachable \(last sync 2\.0h ago\)/);
+    db.close();
+  });
+
+  it("warns past the stale threshold, and for a peer that has never synced", async () => {
+    const db = freshDb(tmpDataDir());
+    const longAgo = new Date(Date.now() - 48 * 3_600_000).toISOString();
+    db.prepare(
+      "INSERT INTO peers (peer_id, name, url, role, incoming_token_hash, created_at, last_synced_at) VALUES (?, 'stale-peer', 'https://stale.example/sync', 'home', 'h', ?, ?)",
+    ).run(randomUUID(), longAgo, longAgo);
+    db.prepare(
+      "INSERT INTO peers (peer_id, name, url, role, incoming_token_hash, created_at) VALUES (?, 'never-synced', 'https://never.example/sync', 'home', 'h', ?)",
+    ).run(randomUUID(), longAgo);
+
+    const result = await checkPeers(db, (async () => new Response("ok")) as typeof fetch, 24);
+    expect(result.ok).toBe(false);
+    expect(result.detail).toContain("STALE");
+    expect(result.detail).toContain("never-synced: reachable (never synced, STALE)");
+    db.close();
+  });
 });
 
 describe("checkFileVault", () => {

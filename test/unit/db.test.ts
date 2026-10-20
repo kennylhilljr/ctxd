@@ -52,6 +52,21 @@ describe("openDatabase (SPEC v6 section 4)", () => {
     expect(() => openDatabase(path)).toThrow(/schema version/);
   });
 
+  it("migrates a version-19 database by adding peer_watermarks (W3)", () => {
+    const path = tmpDbPath();
+    const fresh = openDatabase(path, { create: true });
+    fresh.exec("DROP TABLE peer_watermarks");
+    fresh.pragma("user_version = 19");
+    fresh.close();
+
+    const migrated = openDatabase(path);
+    expect(migrated.pragma("user_version", { simple: true })).toBe(SCHEMA_VERSION);
+    migrated.prepare("INSERT INTO peer_watermarks (peer_id, origin_node, through_seq, updated_at) VALUES ('p1', 'o1', 5, 't')").run();
+    const row = migrated.prepare("SELECT through_seq FROM peer_watermarks WHERE peer_id = 'p1'").get() as { through_seq: number };
+    expect(row.through_seq).toBe(5);
+    migrated.close();
+  });
+
   it("enforces foreign keys", () => {
     const path = tmpDbPath();
     const db = openDatabase(path, { create: true });

@@ -77,14 +77,25 @@ describe("gatherStatus", () => {
     db.close();
   });
 
-  it("reports unsynced as untracked when sync is on and peers exist", async () => {
+  it("reports a real unsynced count (W3): events beyond a peer's served watermark", async () => {
     const db = freshDb();
+    const peerId = randomUUID();
     db.prepare(
       "INSERT INTO peers (peer_id, name, url, role, incoming_token_hash, created_at) VALUES (?, 'laptop', 'https://laptop.example/sync', 'home', 'h', datetime('now'))",
-    ).run(randomUUID());
+    ).run(peerId);
+    const scopeId = randomUUID();
+    db.prepare("INSERT INTO scopes (scope_id, name, created_at) VALUES (?, 'notes', datetime('now'))").run(scopeId);
+    for (let seq = 1; seq <= 3; seq++) {
+      db.prepare(
+        `INSERT INTO events (event_id, origin_node, origin_seq, hlc, scope_id, entry_id, op, part, rev, client_id, payload, received_at)
+         VALUES (?, 'node-a', ?, ?, ?, ?, 'create', 'content', '1-a', 'c', '{}', datetime('now'))`,
+      ).run(randomUUID(), seq, `h${seq}`, scopeId, randomUUID());
+    }
+    db.prepare("INSERT INTO peer_watermarks (peer_id, origin_node, through_seq, updated_at) VALUES (?, 'node-a', 1, datetime('now'))").run(peerId);
+
     const config = baseConfig({ features: { sync: true } });
     const info = await gatherStatus(db, config, { cwd: "/tmp/x", fetchImpl: okFetch() });
-    expect(info.unsynced).toBeNull();
+    expect(info.unsynced).toBe(2); // seqs 2 and 3 haven't reached this peer yet
     expect(info.peerCount).toBe(1);
     db.close();
   });
@@ -105,9 +116,9 @@ describe("formatStatusLine", () => {
 });
 
 describe("formatStatusDetail", () => {
-  it("includes the untracked-sync note when unsynced is null", () => {
-    const detail = formatStatusDetail({ healthOk: true, scope: "ctxd", scopeNotice: null, briefAvailable: true, openClaims: 0, unsynced: null, peerCount: 2 });
-    expect(detail).toContain("not tracked yet");
+  it("shows the real peer count and unsynced count", () => {
+    const detail = formatStatusDetail({ healthOk: true, scope: "ctxd", scopeNotice: null, briefAvailable: true, openClaims: 0, unsynced: 4, peerCount: 2 });
     expect(detail).toContain("2 peer(s)");
+    expect(detail).toContain("4 unsynced");
   });
 });
