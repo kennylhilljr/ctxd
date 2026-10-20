@@ -8,6 +8,17 @@ import { fieldsFromRow, verifyEventSignature } from "../security/event-signature
  * source of truth (ADR 0002). Used by `ctxd rebuild` and to recover from a corrupted replica.
  */
 export function rebuild(db: Database.Database): void {
+  const verificationRows = db.prepare("SELECT * FROM events ORDER BY hlc, event_id").all() as Record<string, unknown>[];
+  for (const row of verificationRows) {
+    const fields = fieldsFromRow(row);
+    verifyEventSignature(db, {
+      ...fields,
+      payloadHash: row.payload_hash as string | null,
+      prevHash: row.prev_hash as string | null,
+      signature: row.signature as string | null,
+      publicKey: row.public_key as string | null,
+    }, Number(row.payload_stripped) !== 1);
+  }
   db.transaction(() => {
     // `scopes` is not wiped: `_me`/`_system` are genesis rows with no backing event (SPEC 4's
     // one deliberate exception to "every change is an event"), and a lazily-created `_hold.*`
@@ -40,13 +51,12 @@ export function rebuild(db: Database.Database): void {
       prev_hash: string | null;
       signature: string | null;
       public_key: string | null;
+      payload_stripped: number;
     } & Record<string, unknown>)[];
 
     const touchedScopes = new Set<string>();
     for (const e of events) {
       const fields = fieldsFromRow(e);
-      const wasPurged = fields.payload.purged === true;
-      verifyEventSignature(db, { ...fields, payloadHash: e.payload_hash, prevHash: e.prev_hash, signature: e.signature, publicKey: e.public_key }, !wasPurged);
       if (e.part !== "content" && e.part !== "status" && e.part !== "relations" && e.part !== "claim" && e.part !== "meta") continue;
       applyReplicatedEvent(db, {
         eventId: e.event_id,

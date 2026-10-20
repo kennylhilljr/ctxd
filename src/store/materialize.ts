@@ -674,7 +674,7 @@ function applyEventCore(db: Database.Database, e: EventForMaterialize, skipFts: 
       // "Erase history": every stored event for this entry is rewritten in place (the only
       // operation that rewrites events, ADR-0002's own carve-out) -- but not this purge event
       // itself, whose own payload is exactly what records the fingerprint that blocks reinsertion.
-      db.prepare("UPDATE events SET payload = '{\"purged\":true}', prev = NULL WHERE entry_id = ? AND event_id != ?").run(e.entryId, e.eventId);
+      db.prepare("UPDATE events SET payload = '{\"purged\":true}', prev = NULL, payload_stripped = 1 WHERE entry_id = ? AND event_id != ?").run(e.entryId, e.eventId);
       // Embeddings (SPEC 11.2.1): deleted on every node, same as the entry's other content. A
       // plain DELETE on an already-empty set is a harmless no-op, unlike the FTS 'delete' command
       // above, but grouped here anyway as part of the same one-time erasure.

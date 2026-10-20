@@ -92,9 +92,17 @@ export function openDatabase(path: string, { create = false }: OpenDatabaseOptio
     })();
   }
   const finalVersion = db.pragma("user_version", { simple: true }) as number;
-  if (finalVersion !== SCHEMA_VERSION) {
+  if (finalVersion === 17 && SCHEMA_VERSION >= 18) {
+    db.transaction(() => {
+      db.exec("ALTER TABLE events ADD COLUMN payload_stripped INTEGER NOT NULL DEFAULT 0");
+      db.exec("UPDATE events SET payload_stripped = 1 WHERE payload = '{\"purged\":true}' AND op != 'purge'");
+      db.pragma("user_version = 18");
+    })();
+  }
+  const purgeMetadataVersion = db.pragma("user_version", { simple: true }) as number;
+  if (purgeMetadataVersion !== SCHEMA_VERSION) {
     db.close();
-    throw new Error(`Database schema version ${finalVersion} does not match ${SCHEMA_VERSION}; no migration is defined yet.`);
+    throw new Error(`Database schema version ${purgeMetadataVersion} does not match ${SCHEMA_VERSION}; no migration is defined yet.`);
   }
   return db;
 }

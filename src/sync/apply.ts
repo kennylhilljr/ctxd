@@ -35,6 +35,7 @@ export interface WireEvent {
   prevHash?: string | null;
   signature?: string | null;
   publicKey?: string | null;
+  payloadStripped?: boolean;
 }
 
 export interface ApplyResult {
@@ -209,6 +210,7 @@ export interface EventRow {
   prev_hash: string | null;
   signature: string | null;
   public_key: string | null;
+  payload_stripped: number;
 }
 
 export function toWireEvent(row: EventRow): WireEvent {
@@ -234,6 +236,7 @@ export function toWireEvent(row: EventRow): WireEvent {
     prevHash: row.prev_hash,
     signature: row.signature,
     publicKey: row.public_key,
+    payloadStripped: row.payload_stripped === 1,
   };
 }
 
@@ -254,7 +257,7 @@ function retryPendingFor(db: Database.Database, entryId: string): void {
     const rows = db
       .prepare(
         `SELECT event_id, schema_version, origin_node, origin_seq, hlc, scope_id, entry_id, op, part, parent_revs, rev,
-                client_id, session_ref, request_id, request_hash, payload, prev, payload_hash, prev_hash, signature, public_key
+                client_id, session_ref, request_id, request_hash, payload, prev, payload_hash, prev_hash, signature, public_key, payload_stripped
          FROM events WHERE entry_id = ? AND materialized = 0 ORDER BY hlc`,
       )
       .all(entryId) as EventRow[];
@@ -267,7 +270,7 @@ function retryPendingFor(db: Database.Database, entryId: string): void {
         if (decision === "purged") {
           // Same rewrite `applyEvent` would have done on first arrival (7.6.6 step 3), deferred
           // until now because the entry's purge itself hadn't landed yet either.
-          db.prepare("UPDATE events SET payload = ?, prev = NULL, materialized = 1 WHERE event_id = ?").run(JSON.stringify({ purged: true }), row.event_id);
+          db.prepare("UPDATE events SET payload = ?, prev = NULL, payload_stripped = 1, materialized = 1 WHERE event_id = ?").run(JSON.stringify({ purged: true }), row.event_id);
           return;
         }
         materializeByDecision(db, event, decision);
@@ -283,10 +286,10 @@ export function applyEvent(db: Database.Database, event: WireEvent): ApplyResult
   if (db.prepare("SELECT 1 FROM events WHERE event_id = ?").get(event.eventId)) {
     return { outcome: "already-known" };
   }
-  const schemaVersion = event.schemaVersion ?? 1;
-  verifyEventSignature(db, { ...event, schemaVersion }, true);
-
   const decision = decide(db, event);
+  const schemaVersion = event.schemaVersion ?? 1;
+  if (event.payloadStripped && event.signature != null && decision !== "purged") throw new Error(`Untrusted purge stripping on event ${event.eventId}`);
+  verifyEventSignature(db, { ...event, schemaVersion }, event.payloadStripped !== true);
   // 7.6.6 step 3: an event for an already-purged entry is stored with its content already gone,
   // the same shape a local purge rewrites every other stored event to (materialize.ts's purge
   // handler); never the raw payload this event arrived with.
@@ -296,8 +299,8 @@ export function applyEvent(db: Database.Database, event: WireEvent): ApplyResult
 
   const result = db.transaction((): ApplyResult => {
     db.prepare(
-      `INSERT INTO events (event_id, schema_version, origin_node, origin_seq, hlc, scope_id, entry_id, op, part, parent_revs, rev, client_id, session_ref, request_id, request_hash, payload, prev, payload_hash, prev_hash, signature, public_key, received_at, materialized)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO events (event_id, schema_version, origin_node, origin_seq, hlc, scope_id, entry_id, op, part, parent_revs, rev, client_id, session_ref, request_id, request_hash, payload, prev, payload_hash, prev_hash, signature, public_key, payload_stripped, received_at, materialized)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       event.eventId,
       schemaVersion,
@@ -320,6 +323,7 @@ export function applyEvent(db: Database.Database, event: WireEvent): ApplyResult
       event.prevHash,
       event.signature,
       event.publicKey,
+      decision === "purged" ? 1 : 0,
       new Date().toISOString(),
       materialized ? 1 : 0,
     );

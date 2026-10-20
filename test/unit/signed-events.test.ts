@@ -132,4 +132,25 @@ describe("signed events (Spec v9 section 7.7)", () => {
     expect(applyEvent(target.db, { ...wire, signature: null, publicKey: null, payloadHash: null, prevHash: null }).outcome).toBe("already-known");
     expect(() => applyEvent(target.db, { ...wire, eventId: newId(), originSeq: wire.originSeq + 1, signature: null, publicKey: null, payloadHash: null, prevHash: null })).toThrow(/signature cutoff/);
   });
+
+  it("preflights every signature before rebuild removes materialized state", () => {
+    const f = fixture();
+    const created = writeEntry(ctx(f, true), { scope: "sample-app", kind: "note", title: "Keep", body: "Still materialized", request_id: newId() });
+    if ("held" in created) throw new Error("unexpected held write");
+    f.db.prepare("UPDATE events SET rev = ? WHERE entry_id = ?").run(newId(), created.id);
+    expect(() => rebuild(f.db)).toThrow(/Invalid signature/);
+    expect(f.db.prepare("SELECT title, body FROM entries WHERE entry_id = ?").get(created.id)).toEqual({ title: "Keep", body: "Still materialized" });
+  });
+
+  it("does not trust a caller-supplied purged payload without stored stripping proof", () => {
+    const source = fixture();
+    writeEntry(ctx(source, true), { scope: "sample-app", kind: "note", title: "Raw", body: "Body", request_id: newId() });
+    const wire = firstWire(source);
+    const target = fixture();
+    target.db.prepare("DELETE FROM scopes").run();
+    target.db.prepare("INSERT INTO scopes (scope_id, name, created_at) VALUES (?, 'sample-app', ?)").run(source.scopeId, new Date().toISOString());
+    trustWire(target.db, wire);
+    expect(() => applyEvent(target.db, { ...wire, payload: { purged: true } })).toThrow(/Payload hash mismatch/);
+    expect(() => applyEvent(target.db, { ...wire, payload: { purged: true }, payloadStripped: true })).toThrow(/Untrusted purge stripping/);
+  });
 });

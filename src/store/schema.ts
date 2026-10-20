@@ -34,8 +34,9 @@
  * Bumped to 16 for M6 slice 3: sealed purge work may wait for its pool key.
  * Bumped to 17 for M6 hardening: signatures cover the immutable envelope and separate retained
  * payload hashes; peer records bind authenticated tokens to remote node identities and keys.
+ * Bumped to 18: payload_stripped is trusted stored state for verified purge erasure.
  */
-export const SCHEMA_VERSION = 17;
+export const SCHEMA_VERSION = 18;
 
 export const SCHEMA_SQL = `
 CREATE TABLE nodes (
@@ -113,6 +114,7 @@ CREATE TABLE events (
   prev_hash    TEXT,                   -- SHA-256 of canonical prior values; retained by purge
   signature    TEXT,                   -- base64 Ed25519 signature over payload_hash; NULL for unsigned legacy events
   public_key   TEXT,                   -- base64 SPKI key, pinned in node_keys on first verified event
+  payload_stripped INTEGER NOT NULL DEFAULT 0,
   received_at  TEXT NOT NULL,
   materialized INTEGER NOT NULL DEFAULT 1, -- 0: stored but deferred, sync/apply.ts's "missing-parent"
                                             -- row (its own create, or an earlier rev, hasn't arrived
