@@ -91,6 +91,17 @@ export async function run(argv: string[]): Promise<number> {
   const sealedStore = sealedKeys && human
     ? new SealedPoolStore(db, dataDir, sealedKeys, new SqlCipherDatabaseProvider(), config.sealed.unlock_minutes, createSealedPurgeReplay(node.node_id, human.client_id, flags))
     : undefined;
+  let localModel: LoopbackTextModel | undefined;
+  if (isFlagOn(flags, "local_model")) {
+    try {
+      localModel = new LoopbackTextModel(config.local_model.endpoint, config.local_model.model, config.local_model.timeout_ms);
+    } catch (err) {
+      sealedStore?.close();
+      db.close();
+      console.error(`ctxd server: invalid local model configuration: ${err instanceof Error ? err.message : String(err)}`);
+      return 1;
+    }
+  }
 
   const [server, syncServer] = await Promise.all([
     startServer({ db, nodeId: node.node_id, listen: config.mcp.listen, configPath, sealedStore }),
@@ -175,7 +186,7 @@ export async function run(argv: string[]): Promise<number> {
     const human = db.prepare("SELECT client_id FROM clients WHERE name = 'human'").get() as { client_id: string } | undefined;
     if (human) {
       const modelCtx: WriteContext = { db, clock: new HlcClock(node.node_id), nodeId: node.node_id, clientId: human.client_id, flags };
-      const model = new LoopbackTextModel(config.local_model.endpoint, config.local_model.model, config.local_model.timeout_ms);
+      const model = localModel!;
       let generating = false;
       const tick = (): void => {
         if (generating) return;

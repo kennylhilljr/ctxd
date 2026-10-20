@@ -22,6 +22,11 @@ function fixture() {
   const ctx: WriteContext = { db, clock: new HlcClock(nodeId), nodeId, clientId: humanId, flags: new Map([["local_model", true]]) };
   const source = writeEntry(ctx, { scope: "sample-app", kind: "note", title: "A source note", body: "A detailed source body.", request_id: newId() } as never);
   if ("held" in source) throw new Error("unexpected held write");
+  const modelClientId = newId();
+  db.prepare("INSERT INTO clients (client_id, name, vendor, node_id, token_hash, created_at) VALUES (?, 'local-model', 'local', ?, ?, ?)")
+    .run(modelClientId, nodeId, `internal:${newId()}`, new Date().toISOString());
+  db.prepare("INSERT INTO client_grants (client_id, scope_id, level, expires_at, granted_by) VALUES (?, ?, 'propose', ?, ?)")
+    .run(modelClientId, scopeId, "9999-12-31T23:59:59.999Z", humanId);
   return { db, ctx, source };
 }
 
@@ -46,6 +51,17 @@ describe("local model proposals", () => {
     const result = await runLocalModelSuggestions(f.ctx, { modelId: "fake-model", complete: async () => { throw new Error("offline"); } });
     expect(result).toEqual({ proposed: 0, failed: 1 });
     expect(f.db.prepare("SELECT summary FROM entries WHERE entry_id = ?").get(f.source.id)).toEqual(before);
+  });
+
+  it("retries a missing sibling proposal without duplicating the successful one", async () => {
+    const f = fixture();
+    let attempt = 0;
+    const model: TextModel = { modelId: "fake-model", complete: async () => JSON.stringify(++attempt === 1 ? { summary: "Summary only." } : { summary: "Duplicate summary.", lesson: "Recovered lesson." }) };
+    expect(await runLocalModelSuggestions(f.ctx, model)).toEqual({ proposed: 1, failed: 0 });
+    expect(await runLocalModelSuggestions(f.ctx, model)).toEqual({ proposed: 1, failed: 0 });
+    expect(f.db.prepare("SELECT kind, COUNT(*) AS n FROM entries WHERE entry_id != ? GROUP BY kind ORDER BY kind").all(f.source.id)).toEqual([
+      { kind: "brief", n: 1 }, { kind: "lesson", n: 1 },
+    ]);
   });
 
   it("rejects non-loopback model endpoints before making a request", () => {
