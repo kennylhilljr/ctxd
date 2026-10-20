@@ -29,10 +29,10 @@ A persona file is valid only if it has every item below. `doc-steward` checks ne
 |---|---|---|
 | 1 | **Identity** | Frontmatter `name` (kebab case, matches the file name) and `description` (one sentence: when to use it). The body states the persona's version. |
 | 2 | **Purpose** | One short paragraph: the job, in the owner's terms. |
-| 3 | **Owned sections** | The template sections it writes, each tagged A or C. A persona never owns an H section. |
+| 3 | **Owned sections** | The template sections it writes, each tagged A or C, generated from the template owner lines (which are authoritative), plus any work outside templates. A persona never owns an H section. |
 | 4 | **Inputs** | What it must read first, in order: AGENTS.md (the constitution), then the layer above its output, then the sections it derives from. |
 | 5 | **Outputs** | The exact files it writes and their format. It always creates the next numbered version; it never edits a past version. |
-| 6 | **Tools** | A least-privilege `tools` list in the frontmatter. Reviewers (`security-reviewer`, `verifier`) are read-only plus the commands that run checks. |
+| 6 | **Tools** | A least-privilege `tools` list in the frontmatter. `verifier` is read-only plus the commands that run checks; `security-reviewer` may write only its own sections and never edits work it is reviewing. |
 | 7 | **Boundaries** | What it must never do. Every persona inherits the common boundaries in section 3. |
 | 8 | **Gate** | Which human gate reviews its output (Gate 1 spec, Gate 2 HLD, Gate 3 LLD and contracts) and whom it hands off to. |
 | 9 | **Definition of done** | Checks it runs before handing off: IDs present and traced, links resolve, style rules pass, open questions listed rather than guessed. |
@@ -53,14 +53,14 @@ Optional: model and effort guidance, examples of good output, and known failure 
 
 | Persona | Writes (A) | Drafts for a decision (C) | Gate | Definition |
 |---|---|---|---|---|
-| `analyst` | Research and prior-art documents; the intake record of the owner's answers | None; may interview the owner for H sections | Before Gate 1 | [analyst.md](../../.claude/agents/analyst.md) |
-| `product-writer` | PRD acceptance criteria (EARS), edge cases, assumptions and open questions, glossary entries, requirement IDs and traceability | User stories (the owner names them; the persona writes them out) | Gate 1 | [product-writer.md](../../.claude/agents/product-writer.md) |
-| `architect` | HLD component breakdown, data flow and sequence diagrams, capacity estimates, risks | ADR options and tradeoffs, system context, integrations | Gate 2 | [architect.md](../../.claude/agents/architect.md) |
+| `analyst` | Research and prior-art documents; the intake record of the owner's answers | Research recommendations; may interview the owner for H sections | Before Gate 1 | [analyst.md](../../.claude/agents/analyst.md) |
+| `product-writer` | PRD acceptance criteria (EARS), edge cases, assumptions and open questions, change notes, glossary entries, the HLD traceability table | User stories and requirement wording (the owner states each requirement), core concepts | Gate 1 | [product-writer.md](../../.claude/agents/product-writer.md) |
+| `architect` | HLD component breakdown, data flow and sequence diagrams, capacity estimates, risks, ADR options and consequences | ADR context, key decisions, the PRD component index, contract compatibility | Gate 2 | [architect.md](../../.claude/agents/architect.md) |
 | `security-reviewer` | Security sections of LLDs (enforcement points, detectors, key handling), always for human review | Trust boundaries and threat model | Gates 2 and 3 | [security-reviewer.md](../../.claude/agents/security-reviewer.md) |
 | `component-designer` | LLD module structure, algorithms, error handling, configuration and flags; contracts and persisted schema (for human review) | None | Gate 3 | [component-designer.md](../../.claude/agents/component-designer.md) |
-| `test-architect` | Test plan, criteria-to-test map, coverage gaps | None | Gate 3 | [test-architect.md](../../.claude/agents/test-architect.md) |
+| `test-architect` | Test plan, criteria-to-test map, coverage gaps, the HLD testing strategy, LLD test notes | None | Gate 3 | [test-architect.md](../../.claude/agents/test-architect.md) |
 | `sre` | Observability, runbooks, operations LLD sections | Rollout and migration strategy (the owner sets risk tolerance) | Gates 2 and 3 | [sre.md](../../.claude/agents/sre.md) |
-| `planner` | Milestone plans, slices and dependency-ordered task lists | None | Gate 3 (skimmed) | [planner.md](../../.claude/agents/planner.md) |
+| `planner` | Milestone plans, slices and dependency-ordered task lists | Vision horizon, PRD milestones, decisions needed before a milestone, exit criteria | Gate 3 (skimmed) | [planner.md](../../.claude/agents/planner.md) |
 | `implementer` | Code and tests for one task at a time; the handoff | None | Code review | [implementer.md](../../.claude/agents/implementer.md) |
 | `verifier` | Traceability and drift findings, review reports | None | Every gate (independent check) | [verifier.md](../../.claude/agents/verifier.md) |
-| `doc-steward` | Doc map, glossary upkeep, version and link hygiene, persona file checks | None | None (mechanical) | [doc-steward.md](../../.claude/agents/doc-steward.md) |
+| `doc-steward` | Doc map, the HLD's organization table and repository layout, glossary upkeep, version and link hygiene, persona file checks | None | None (mechanical) | [doc-steward.md](../../.claude/agents/doc-steward.md) |

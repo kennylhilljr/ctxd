@@ -52,7 +52,7 @@ The server exposes `/internal/*` routes on the MCP listener, authenticated by cl
 
 ### 8.4 The `ctxd mcp` launcher
 
-Implements [PRD-pools-access-v3](../prd/components/PRD-pools-access-v3.md)) section 6.2. `ctxd mcp --client <id>` is a stdio MCP server that each client starts from its single, user-level MCP entry.
+Implements [PRD-pools-access-v3](../prd/components/PRD-pools-access-v3.md) section 6.2. `ctxd mcp --client <id>` is a stdio MCP server that each client starts from its single, user-level MCP entry.
 
 1. **Working directory.** Take `CLAUDE_PROJECT_DIR` if set (Claude Code sets it in a server's environment), otherwise the process working directory (verify for each client at its pinned version).
 2. **Bypass.** If the directory is bypassed (3), serve no tools and exit cleanly.

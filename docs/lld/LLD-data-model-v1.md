@@ -370,7 +370,7 @@ CREATE TABLE tool_metrics (            -- local only: response metering (8.5)
 CREATE INDEX tool_metrics_at ON tool_metrics(at);
 
 CREATE TABLE scope_repos (
-  repo         TEXT PRIMARY KEY,       -- normalized origin, e.g. github.com/kennylhilljr/ctxd
+  repo         TEXT PRIMARY KEY,       -- normalized origin, e.g. github.com/example/sample-app
   scope_id     TEXT NOT NULL REFERENCES scopes(scope_id)
 );
 
@@ -490,7 +490,7 @@ CREATE TABLE commits (                 -- local facts recorded by the PostToolUs
 
 ### 4.1 References and relations
 
-Implements [Knowledge model v4](../prd/components/PRD-knowledge-model-v4.md)) sections 5 and 6.
+Implements [Knowledge model v4](../prd/components/PRD-knowledge-model-v4.md) sections 5 and 6.
 
 - **References.** `ctxd:<scope name>/<entry ULID>`. The ULID alone identifies the entry; the scope name is for readability and is not trusted for lookup. Wherever a reference is accepted, a `ctxd://` path (4.2) and `skill:<name>` (4.3) are accepted too. Resolving a reference whose entry is `superseded` returns the entry plus `superseded_by` (following the chain to its end, at most 20 hops).
 - **Relations.** Rows in `relations`, changed through `relate` and `unrelate` events on the `relations` part:

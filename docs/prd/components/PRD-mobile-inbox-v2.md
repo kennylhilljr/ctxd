@@ -15,7 +15,7 @@
 
 Earlier changes are listed in [v1](PRD-mobile-inbox-v1.md).
 
-- **Acceptance criteria added.** v1 had none. They are derived from the P0 and P1 requirements in section 4, written in EARS with IDs (`MI-AC-n`), and listed as not built in the [test plan](../../test/test-plan-v1.md) until M7 implements them.
+- **Acceptance criteria added.** v1 had none. They are derived from the behavioral requirements in section 4 (MI-1 and MI-2 define the transport interface and adapters, a design matter verified in the LLD M7 will add), written in EARS with IDs (`MI-AC-n`), and listed as not built in the [test plan](../../test/test-plan-v1.md) until M7 implements them.
 - **Links.** The header points to PRD v8 and Spec v10; sibling links point to current versions.
 
 ## 1. Purpose
@@ -74,7 +74,7 @@ Two feature flags in `src/config/flags.ts` govern mobile inbox functionality:
 
 ## 7. Acceptance criteria
 
-> Owner: A (agent-generated) by persona `product-writer`, derived from the requirements above; approved by the owner at Gate 1. Verification status per criterion: [test plan](../../test/test-plan-v1.md).
+> Owner: A (agent-generated) by persona `product-writer`, derived from the requirements above; pending the owner's approval at Gate 1. Verification status per criterion: [test plan](../../test/test-plan-v1.md).
 
 | ID | EARS pattern | Acceptance criterion | Traces to |
 |---|---|---|---|
@@ -82,7 +82,11 @@ Two feature flags in `src/config/flags.ts` govern mobile inbox functionality:
 | MI-AC-2 | Unwanted behavior | If the hub stops after applying an entry but before acknowledging it, then the next pull shall acknowledge that entry without creating a duplicate. | MI-4 |
 | MI-AC-3 | Unwanted behavior | If an inbox entry exceeds 32 KB of payload or 16 KB of body, or fails schema validation, then ctxd shall reject it without storing it. | MI-5 |
 | MI-AC-4 | Unwanted behavior | If an inbox entry contains a secret, then ctxd shall redact it before storage. | MI-5 |
-| MI-AC-5 | Ubiquitous | ctxd shall store every inbox entry as `proposed`, attributed to the client `mobile-inbox`, and hold entries aimed at scopes that client may not write. | MI-6, MI-8 |
-| MI-AC-6 | Unwanted behavior | If an inbox entry targets a sealed pool, a `local-only` scope or a `home` scope, then ctxd shall reject it as invalid. | MI-7 |
-| MI-AC-7 | State-driven | While `mobile_inbox` is off, ctxd shall make no inbox network requests. | MI-12 |
-| MI-AC-8 | State-driven | While `mobile_inbox` is off, every `ctxd inbox` command shall exit cleanly and report that the feature is disabled. | MI-11, MI-12 |
+| MI-AC-5 | Ubiquitous | ctxd shall store every inbox entry as `proposed`, attributed to the client `mobile-inbox`. | MI-6 |
+| MI-AC-6 | Unwanted behavior | If an inbox entry targets a scope the `mobile-inbox` client may not write, then ctxd shall place it in that client's holding scope. | MI-6 |
+| MI-AC-7 | Ubiquitous | ctxd shall record each inbox entry's origin: the mobile client identifier, the capture time and any external message reference. | MI-8 |
+| MI-AC-8 | Unwanted behavior | If an inbox entry targets a sealed pool, a `local-only` scope or a `home` scope, then ctxd shall reject it as invalid. | MI-7 |
+| MI-AC-9 | State-driven | While `mobile_inbox` is off, ctxd shall make no inbox network requests. | MI-12 |
+| MI-AC-10 | State-driven | While `mobile_inbox` is off, every `ctxd inbox` command shall exit cleanly and report that the feature is disabled. | MI-11, MI-12 |
+| MI-AC-11 | State-driven | While `mobile_inbox` is off, every ctxd hook shall still exit 0. | MI-12 |
+| MI-AC-12 | Ubiquitous | ctxd shall keep inbox API tokens and encryption keys only in the macOS Keychain, never in a repository or configuration file. | MI-10 |

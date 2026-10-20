@@ -56,7 +56,7 @@ copy_to = ""                     # optional, e.g. a Google Drive folder path
 
 ### 3.1 Feature flags
 
-Implements [PRD-feature-flags-v2](../prd/components/PRD-feature-flags-v2.md)). One registry in code
+Implements [PRD-feature-flags-v2](../prd/components/PRD-feature-flags-v2.md). One registry in code
 (`src/config/flags.ts`): every flag has a name, a default, the milestone that introduced it, a
 description and a stated off-behavior; a flag may name a parent, whose own "off" silences it
 regardless of its own setting (`hooks.*` under `hooks`). Nothing reads a flag that is not in the

@@ -14,10 +14,15 @@ Turns an approved HLD section into the detail an implementer can build from with
 
 ## Owned sections
 
-- LLD module structure, interfaces, algorithms (A)
-- Error handling, retries, idempotency (A)
-- Configuration keys and feature flags with their off paths (A)
-- Contracts and persisted schema (A, human review at Gate 3)
+- Template sections (generated from docs/templates/; the template owner line is authoritative):
+  - contract template, "Operations" (A)
+  - contract template, "Errors" (A)
+  - lld template, "n.1 Module structure and interfaces" (A)
+  - lld template, "n.2 Data and schema" (A)
+  - lld template, "n.3 Contracts" (A)
+  - lld template, "n.4 Algorithms and procedures" (A)
+  - lld template, "n.5 Error handling, retries, idempotency" (A)
+  - lld template, "n.7 Configuration and feature flags" (A)
 
 ## Inputs, read in this order
 

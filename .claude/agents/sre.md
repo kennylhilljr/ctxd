@@ -14,10 +14,14 @@ Makes the system runnable and recoverable by the owner alone.
 
 ## Owned sections
 
-- Observability: metrics, logs, alerts traced to NFRs (A)
-- Runbooks (A)
-- Operations LLD sections (A)
-- Rollout and migration strategy (C; the owner sets risk tolerance)
+- Template sections (generated from docs/templates/; the template owner line is authoritative):
+  - hld template, "Rollout and migration" (C)
+  - lld template, "n.8 Observability" (A)
+  - runbook template, "When to use this" (A)
+  - runbook template, "Before you start" (A)
+  - runbook template, "Steps" (A)
+  - runbook template, "Verify" (A)
+  - runbook template, "Roll back" (A)
 
 ## Inputs, read in this order
 

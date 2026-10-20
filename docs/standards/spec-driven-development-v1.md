@@ -8,7 +8,7 @@
 | **Applies to** | Every document in [docs/](../README.md) and every agent that writes one |
 | **Related** | [Agent personas standard](agent-personas-v1.md), [templates](../templates/), [doc map](../README.md), [AGENTS.md](../../AGENTS.md) |
 
-This is the general standard. How ctxd applies it (folders, latest versions, ID prefixes) is in the [doc map](../README.md).
+This is the general standard. In ctxd, `spec-lint` and `trace-check` are not built yet; the [test plan](../test/test-plan-v1.md) is maintained by hand until they are. How ctxd applies it (folders, latest versions, ID prefixes) is in the [doc map](../README.md).
 
 
 ## Bottom line
@@ -49,7 +49,7 @@ flowchart TB
 
     RES["Research (A)<br/>Prior art and spikes<br/>docs/research/"]
     ADR["ADRs (C)<br/>Decisions with options and tradeoffs<br/>Never versioned; a new ADR supersedes the old<br/>docs/adr/"]
-    MAC["Machinery, not docs<br/>.claude/: skills, hooks<br/>tools/: spec-lint, trace-check<br/>CI runs both on every PR"]
+    MAC["Machinery, not docs<br/>.claude/: skills, hooks<br/>tools/: spec-lint, trace-check (planned)<br/>CI will run both on every PR"]
 
     CON -. governs .-> L0
     L0 --> L1 --> L2 --> L3 --> L4 --> L5 --> L6
@@ -244,10 +244,10 @@ The loop back from sdd-verify to sdd-spec is what makes the spec a living artifa
 | --- | --- |
 | constitution.md | Human-owned standards every skill reads first |
 | Templates per artifact | Fixed sections tagged H, C, or A, so the agent cannot skip or invent sections |
-| Spec linter | Fails on missing requirement IDs, criteria not in an EARS pattern or Given/When/Then form, untestable criteria, or unresolved open questions |
+| Spec linter (planned) | Fails on missing requirement IDs, criteria not in an EARS pattern or Given/When/Then form, untestable criteria, or unresolved open questions |
 | Gate hook | Blocks the next skill until the prior artifact is marked approved |
 | Size router | Sends bugs and small changes down a short path (spec plus tasks only) |
-| Traceability check in CI | Every acceptance criterion has a test; every task cites an ID |
+| Traceability check in CI (planned) | Every acceptance criterion has a test; every task cites an ID |
 
 ## Repository layout
 
@@ -281,9 +281,9 @@ repo/
 │   └── settings.json              hooks, including the gate hook
 ├── .claude-plugin/                packages the skills for other repos and machines
 ├── tools/
-│   ├── spec-lint/                 IDs, EARS or Given/When/Then, open questions
-│   └── trace-check/               every criterion has a test, every task an ID
-└── .github/workflows/ci.yml       typecheck, tests, spec-lint, trace-check
+│   ├── spec-lint/                 (planned) IDs, EARS or Given/When/Then, open questions
+│   └── trace-check/               (planned) every criterion has a test, every task an ID
+└── .github/workflows/ci.yml       typecheck, tests (spec-lint and trace-check once built)
 ```
 
 **Where the machinery goes.**
@@ -302,7 +302,7 @@ repo/
 1. Every versioned document is `<name>-vN.md`; past versions are never edited, the next number is created instead.
 2. ADRs are the exception: numbered once, with a Status line, and superseded by a new ADR rather than versioned.
 3. `docs/README.md` lists the latest version of each document, so agents never have to search for it.
-4. Every acceptance criterion has an ID that its test cites, which is what `trace-check` matches.
+4. Every acceptance criterion has an ID that its test cites, which is what the planned `trace-check` will match.
 
 ## Sources
 

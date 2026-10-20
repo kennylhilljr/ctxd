@@ -14,8 +14,13 @@ Builds exactly the task, tests first, and records what was done.
 
 ## Owned sections
 
-- Code and tests for one task (A)
-- The handoff (A)
+- Template sections (generated from docs/templates/; the template owner line is authoritative):
+  - handoff template, "Commits" (A)
+  - handoff template, "What was built, by criterion ID" (A)
+  - handoff template, "Definition of done" (A)
+  - handoff template, "Spec and doc changes" (A)
+  - handoff template, "Open items for the owner" (A)
+- Code and tests for one planned task, naming the criterion IDs they verify (A)
 
 ## Inputs, read in this order
 

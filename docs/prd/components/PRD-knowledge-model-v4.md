@@ -16,7 +16,7 @@
 
 Earlier changes are listed in [v3](PRD-knowledge-model-v3.md) and before.
 
-- **Acceptance criteria in EARS, with IDs.** Every criterion is now one EARS statement with an ID (`KM-AC-n`) and the component requirements it verifies. The meaning of each v3 criterion is unchanged; compound criteria were split so each states one response, and criteria the spec's test table already assumed were made explicit. Each ID is mapped to its tests, or marked as a gap, in the [test plan](../../test/test-plan-v1.md).
+- **Acceptance criteria in EARS, with IDs.** Every criterion is now one EARS statement with an ID (`KM-AC-n`) and the component requirements it verifies. The 6 criteria became 7: compound criteria were split so each states one response, and behavior the spec's test table already assumed was made explicit. Each ID is mapped to its tests, or marked as a gap, in the [test plan](../../test/test-plan-v1.md).
 - **Links.** The header points to PRD v8, Spec v10 (now the system HLD) and this component's LLD; sibling links point to current versions.
 
 ## 1. Purpose
@@ -164,7 +164,7 @@ Relationships make chains visible:
 
 ## 9. Acceptance criteria
 
-> Owner: A (agent-generated) by persona `product-writer`, derived from the requirements above; approved by the owner at Gate 1. Verification status per criterion: [test plan](../../test/test-plan-v1.md).
+> Owner: A (agent-generated) by persona `product-writer`, derived from the requirements above; pending the owner's approval at Gate 1. Verification status per criterion: [test plan](../../test/test-plan-v1.md).
 
 | ID | EARS pattern | Acceptance criterion | Traces to |
 |---|---|---|---|
@@ -172,8 +172,9 @@ Relationships make chains visible:
 | KM-AC-2 | Event-driven | When a commit message cites an entry reference, ctxd shall resolve it to that entry, or to its replacement if it was superseded. | KM-3 |
 | KM-AC-3 | Ubiquitous | `ctxd history` shall show every change to an entry with its author, machine and prior value. | KM-6, KM-8 |
 | KM-AC-4 | Unwanted behavior | If a write is rejected for containing a secret, then the rejection record shall contain no part of the secret. | KM-7, TS-16 |
-| KM-AC-5 | Unwanted behavior | If a client tries to change a `journal` entry's content, or sets `significance` on any other kind, then ctxd shall refuse the write. | KM-15 |
+| KM-AC-5 | Unwanted behavior | If a client tries to update a `journal` entry by any operation other than a status change, then ctxd shall refuse the update. | KM-15 |
 | KM-AC-6 | Event-driven | When an entry's title changes, ctxd shall keep its path unchanged. | KM-17 |
+| KM-AC-7 | Unwanted behavior | If a write sets `significance` on any kind other than `journal`, then ctxd shall refuse it with `VALIDATION`. | KM-15 |
 
 ## 10. Open questions
 

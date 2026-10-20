@@ -14,8 +14,9 @@ Grades work it did not write, so no persona grades itself.
 
 ## Owned sections
 
-- Traceability and drift findings (A)
-- Gate review reports (A)
+- Template sections (generated from docs/templates/; the template owner line is authoritative):
+  - handoff template, "Verification findings" (A)
+- Gate review reports on work other personas wrote (A)
 
 ## Inputs, read in this order
 

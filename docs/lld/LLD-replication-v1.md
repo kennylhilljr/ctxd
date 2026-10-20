@@ -60,7 +60,7 @@ Events for different parts of the same entry never interact: a status change and
 
 ### 7.4 Conflict policies
 
-Implements [PRD-replication-v6](../prd/components/PRD-replication-v6.md)) section 5. Policies apply only when two events change the **same part** concurrently.
+Implements [PRD-replication-v6](../prd/components/PRD-replication-v6.md) section 5. Policies apply only when two events change the **same part** concurrently.
 
 | Part and kind | Policy on concurrent updates |
 |---|---|

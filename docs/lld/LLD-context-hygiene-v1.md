@@ -15,7 +15,7 @@ Section numbers are the Spec's own (for example 9.1), unchanged from Spec v9, so
 
 ### 7.6 Cleanup operations
 
-Implements [PRD-context-hygiene-v2](../prd/components/PRD-context-hygiene-v2.md)). All of these are events that replicate and converge like any other, except where purge says otherwise.
+Implements [PRD-context-hygiene-v2](../prd/components/PRD-context-hygiene-v2.md). All of these are events that replicate and converge like any other, except where purge says otherwise.
 
 #### 7.6.1 Flag and unflag
 

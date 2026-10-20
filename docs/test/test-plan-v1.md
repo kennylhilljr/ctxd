@@ -9,7 +9,7 @@
 | **Inputs** | Acceptance criteria in the current component PRDs ([PRD v8](../prd/PRD-v8.md) section 6.1 lists them); tests in `test/unit/` and `test/conformance/` |
 | **Strategy** | [Spec v10](../spec/SPEC-v10.md) section 14 (test layers and tooling) |
 
-Every acceptance criterion in the component PRDs has an ID (`<prefix>-AC-n`). This plan maps each ID to the tests that verify it, as of commit `9ffeea9`. Counts: **84 criteria**; Covered: 41, Gap: 7, Not built: 8, Partial: 28.
+Every acceptance criterion in the component PRDs has an ID (`<prefix>-AC-n`). This plan maps each ID to the tests that verify it, as of commit `9ffeea9`. Counts: **89 criteria**; Covered: 33, Diverges: 1, Gap: 5, Not built: 12, Partial: 38.
 
 | Status | Meaning |
 |---|---|
@@ -17,20 +17,20 @@ Every acceptance criterion in the component PRDs has an ID (`<prefix>-AC-n`). Th
 | Partial | Tests exercise the mechanism, but not every clause of the criterion; the note says what is missing |
 | Gap | No test found; the criterion is built but unverified |
 | Not built | The feature is not implemented yet (milestone named) |
+| Diverges | The code contradicts the spec; raised for the owner before any fix |
 
 **Rules.** A new criterion gets a row here in the same change that adds it. From now on, a new or changed test that verifies a criterion names its ID in the test title or a comment (for example `// HK-AC-5`), so this map can later be checked mechanically; the existing tests below were mapped by reading them. A gap is closed by adding the test, then changing the row; never by loosening the criterion.
 
 ## Gaps to close first
 
-| ID | Criterion | Note |
-|---|---|---|
-| BS-AC-5 | The SessionStart brief shall never exceed `session_start_max_chars`, and the header, notices and open signals shall survive the cut. | Spec section 14 lists this test; none was found in `test/`. |
-| CL-AC-3 | When the human client claims with `take_over: true` in a `strict` scope, ctxd shall grant the claim despite the overlap. | No test exercises the human override. |
-| FF-AC-2 | When `sync` is switched back on after a period off, the node shall converge with its peers with no event lost. | No off-then-on test for the `sync` flag. |
-| FF-AC-4 | The `tools/list` payload shall be byte-for-byte identical with every flag off and with every flag on. | `toolDefinitions()` takes no flag input by design, but no test compares the two payloads. |
-| PA-AC-11 | When the human runs `ctxd hold adopt`, ctxd shall move the holding scope's approved entries into the project scope and add the agent to the pool in one step. | No test for `ctxd hold adopt`. |
-| SK-AC-3 | While an agent-written skill is `proposed`, ctxd shall hide it from every agent except its author. | Spec section 14 lists this test; none was found. |
-| TS-AC-7 | When the human exports a scope that contains a home-directory path, ctxd shall print a categorized warning and ask for confirmation before writing. | Import preflight is tested (`mirror.test.ts:147`); export warnings are not. |
+| ID | Status | Criterion | Note |
+|---|---|---|---|
+| BS-AC-5 | Diverges | The SessionStart brief shall never exceed `session_start_max_chars`, and the header, notices and open signals shall survive the cut. | Code contradicts Spec 11.1: `src/hooks/readMoments.ts` cuts the text at the limit and appends a marker (up to 2 characters over, and it can cut open signals) instead of dropping sections lowest priority first. Raised for the owner; then fix the code and add the test. |
+| CL-AC-3 | Gap | When the human client claims with `take_over: true` in a `strict` scope, ctxd shall grant the claim despite the overlap. | No test exercises the human override. |
+| FF-AC-2 | Gap | When `sync` is switched back on after a period off, the node shall converge with its peers with no event lost. | No off-then-on test for the `sync` flag. |
+| FF-AC-4 | Gap | The `tools/list` payload shall be byte-for-byte identical with every flag off and with every flag on. | `toolDefinitions()` takes no flag input by design, but no test compares the two payloads. |
+| PA-AC-11 | Gap | When the human runs `ctxd hold adopt`, ctxd shall move the holding scope's approved entries into the project scope and add the agent to the pool in one step. | No test for `ctxd hold adopt`. |
+| TS-AC-7 | Gap | When the human exports a scope that contains a home-directory path, ctxd shall print a categorized warning and ask for confirmation before writing. | Import preflight is tested (`mirror.test.ts:147`); export warnings are not. |
 
 ## BS: Briefs and search
 
@@ -42,7 +42,7 @@ Criteria: [PRD-briefs-search-v5](../prd/components/PRD-briefs-search-v5.md).
 | BS-AC-2 | Partial | [`tools-read.test.ts:78`](../../test/unit/tools-read.test.ts#L78) finds a matching entry by full-text query, scoped to a readable scope<br>[`hybrid-search.test.ts:162`](../../test/unit/hybrid-search.test.ts#L162) ranks an entry matching on both FTS and vector above one matching on only the vector side | Top-3 rank is not asserted against a corpus. |
 | BS-AC-3 | Covered | [`tool-footprint.test.ts:8`](../../test/unit/tool-footprint.test.ts#L8) keeps the tools/list payload under about 1,500 tokens |  |
 | BS-AC-4 | Partial | [`brief.test.ts:122`](../../test/unit/brief.test.ts#L122) surfaces an open signal from a blocker journal entry (store/write.ts syncs signals on every write) | Only one size is exercised. |
-| BS-AC-5 | Gap | None | Spec section 14 lists this test; none was found in `test/`. |
+| BS-AC-5 | Diverges | None | Code contradicts Spec 11.1: `src/hooks/readMoments.ts` cuts the text at the limit and appends a marker (up to 2 characters over, and it can cut open signals) instead of dropping sections lowest priority first. Raised for the owner; then fix the code and add the test. |
 | BS-AC-6 | Covered | [`coerce.test.ts:29`](../../test/unit/coerce.test.ts#L29) coerces only enum fields, reports what changed, and then validates<br>[`coerce.test.ts:47`](../../test/unit/coerce.test.ts#L47) handles array fields and per-tool action tables |  |
 
 ## CL: Claims and write intent
@@ -67,7 +67,7 @@ Criteria: [PRD-context-hygiene-v2](../prd/components/PRD-context-hygiene-v2.md).
 | CH-AC-1 | Partial | [`flag.test.ts:65`](../../test/unit/flag.test.ts#L65) flags an entry and sets status to flagged, recording status_before | Brief exclusion and the review listing are not asserted. |
 | CH-AC-2 | Covered | [`hygiene.test.ts:111`](../../test/unit/hygiene.test.ts#L111) hides only the selected client's entries, recording status_before<br>[`sync-partition-property.test.ts:310`](../../test/unit/sync-partition-property.test.ts#L310) converges to identical state after a scripted mix of content, claims, purges, quarantine and revert, applied under partition and healed in varying order |  |
 | CH-AC-3 | Covered | [`hygiene.test.ts:161`](../../test/unit/hygiene.test.ts#L161) tombstones an entry created inside the window<br>[`hygiene.test.ts:179`](../../test/unit/hygiene.test.ts#L179) restores prior content for an entry edited inside the window, leaving an entry created before the window untouched<br>[`hygiene.test.ts:203`](../../test/unit/hygiene.test.ts#L203) marks a member conflicted, keeping it untouched, when another client edits the same part after the window |  |
-| CH-AC-4 | Covered | [`purge.test.ts:63`](../../test/unit/purge.test.ts#L63) erases title, summary, body and tags, setting purged_at and a fingerprint<br>[`sync-purge.test.ts:125`](../../test/unit/sync-purge.test.ts#L125) stores the event with payload {purged:true}, not its real content, and never un-erases the entry |  |
+| CH-AC-4 | Partial | [`purge.test.ts:63`](../../test/unit/purge.test.ts#L63) erases title, summary, body and tags, setting purged_at and a fingerprint<br>[`sync-purge.test.ts:125`](../../test/unit/sync-purge.test.ts#L125) stores the event with payload {purged:true}, not its real content, and never un-erases the entry | No test searches on a node that received the purge through sync. |
 | CH-AC-5 | Covered | [`tidy.test.ts:114`](../../test/unit/tidy.test.ts#L114) finds an entry past its review_after date, to review<br>[`write.test.ts:457`](../../test/unit/write.test.ts#L457) sets status to 14 days, handoff to 30, fact and lesson to 180, preference to 365 |  |
 
 ## FF: Feature flags
@@ -89,8 +89,8 @@ Criteria: [PRD-filesystem-view-v2](../prd/components/PRD-filesystem-view-v2.md).
 |---|---|---|---|
 | FS-AC-1 | Partial | [`cli-introspection.test.ts:193`](../../test/unit/cli-introspection.test.ts#L193) tree walks the root into scopes without crashing<br>[`cli-introspection.test.ts:186`](../../test/unit/cli-introspection.test.ts#L186) read prints a folder overview given a valid path | The folder list and summaries are not asserted. |
 | FS-AC-2 | Partial | [`tools-read.test.ts:216`](../../test/unit/tools-read.test.ts#L216) resolves nothing for a ref in a scope the client cannot read (regression: must not throw or leak) | A root listing under a persona is not asserted. |
-| FS-AC-3 | Covered | [`mirror.test.ts:53`](../../test/unit/mirror.test.ts#L53) honors status and review date frontmatter as events |  |
-| FS-AC-4 | Covered | [`mirror.test.ts:73`](../../test/unit/mirror.test.ts#L73) writes a conflict copy for a stale revision and does not apply it |  |
+| FS-AC-3 | Partial | [`mirror.test.ts:53`](../../test/unit/mirror.test.ts#L53) honors status and review date frontmatter as events | Human-client authorship of the event is not asserted. |
+| FS-AC-4 | Partial | [`mirror.test.ts:73`](../../test/unit/mirror.test.ts#L73) writes a conflict copy for a stale revision and does not apply it | The review item (`mirror_conflicts` row) is not asserted. |
 | FS-AC-5 | Covered | [`tools-read.test.ts:156`](../../test/unit/tools-read.test.ts#L156) restricts results to a path's folder prefix, deriving the scope from the path |  |
 
 ## HK: Hooks and agent lifecycle
@@ -103,7 +103,7 @@ Criteria: [PRD-hooks-v6](../prd/components/PRD-hooks-v6.md).
 | HK-AC-2 | Covered | [`write-moments.test.ts:130`](../../test/unit/write-moments.test.ts#L130) blocks once the turns threshold is reached, then the loop guard stops a second block<br>[`write-moments.test.ts:228`](../../test/unit/write-moments.test.ts#L228) writes a mechanical journal entry with client, branch, HEAD and changed-file count |  |
 | HK-AC-3 | Partial | [`hooks-core.test.ts:161`](../../test/unit/hooks-core.test.ts#L161) returns undefined (never breaks) when the client or node doesn't exist<br>[`hooks-core.test.ts:189`](../../test/unit/hooks-core.test.ts#L189) resolves to undefined, not a rejection, when the function exceeds the deadline<br>[`read-moments.test.ts:117`](../../test/unit/read-moments.test.ts#L117) falls back to the spec-literal unavailable notice if assembling the brief throws | No test stops a real server mid-session. |
 | HK-AC-4 | Covered | [`hooks.test.ts:70`](../../test/conformance/hooks.test.ts#L70) ${fixture.client} ${fixture.event} (${fixture.variant})<br>[`hooks.test.ts:50`](../../test/conformance/hooks.test.ts#L50) every adapter event has at least one fixture<br>[`hooks.test.ts:92`](../../test/conformance/hooks.test.ts#L92) every fixture whose event cannot block exits 0 |  |
-| HK-AC-5 | Covered | [`crash-sweep.test.ts:65`](../../test/unit/crash-sweep.test.ts#L65) finalizes a session silent longer than the grace period as ended, recording ended_by: sweep<br>[`crash-sweep.test.ts:111`](../../test/unit/crash-sweep.test.ts#L111) is idempotent: sweeping twice only finalizes a crashed session once<br>[`crash-sweep.test.ts:139`](../../test/unit/crash-sweep.test.ts#L139) writes the mechanical journal entry when the session recorded a cwd and scope |  |
+| HK-AC-5 | Partial | [`crash-sweep.test.ts:65`](../../test/unit/crash-sweep.test.ts#L65) finalizes a session silent longer than the grace period as ended, recording ended_by: sweep<br>[`crash-sweep.test.ts:111`](../../test/unit/crash-sweep.test.ts#L111) is idempotent: sweeping twice only finalizes a crashed session once<br>[`crash-sweep.test.ts:139`](../../test/unit/crash-sweep.test.ts#L139) writes the mechanical journal entry when the session recorded a cwd and scope | The claim release by the sweep is not asserted. |
 | HK-AC-6 | Covered | [`scope.test.ts:35`](../../test/unit/scope.test.ts#L35) origin normalization (SPEC v3 section 3)<br>[`scope.test.ts:104`](../../test/unit/scope.test.ts#L104) resolves via scope_repos when the repository is bound<br>[`scope.test.ts:58`](../../test/unit/scope.test.ts#L58) reads origin from .git/config, from subdirectories and worktrees |  |
 | HK-AC-7 | Partial | [`scope.test.ts:89`](../../test/unit/scope.test.ts#L89) honors the environment flag<br>[`scope.test.ts:94`](../../test/unit/scope.test.ts#L94) matches absolute and anywhere patterns | Zero server calls are not asserted through the CLI. |
 | HK-AC-8 | Partial | [`write-moments.test.ts:328`](../../test/unit/write-moments.test.ts#L328) journals a successful git commit, linked to its sha, and is idempotent on replay<br>[`digest.test.ts:192`](../../test/unit/digest.test.ts#L192) counts an auto-tagged commit entry and an auto-tagged session entry separately | The day view total is not asserted. |
@@ -115,11 +115,12 @@ Criteria: [PRD-knowledge-model-v4](../prd/components/PRD-knowledge-model-v4.md).
 | ID | Status | Verified by | Note |
 |---|---|---|---|
 | KM-AC-1 | Partial | [`sync-partition-property.test.ts:371`](../../test/unit/sync-partition-property.test.ts#L371) is deterministic across random sequences of operations, random partitions, heals and delivery order | No named test for this exact status-plus-relation case. |
-| KM-AC-2 | Covered | [`model-refs.test.ts:27`](../../test/unit/model-refs.test.ts#L27) finds references in free text such as commit messages<br>[`tools-read.test.ts:264`](../../test/unit/tools-read.test.ts#L264) follows a supersedes relation as a related entry when related: true |  |
+| KM-AC-2 | Partial | [`model-refs.test.ts:27`](../../test/unit/model-refs.test.ts#L27) finds references in free text such as commit messages<br>[`tools-read.test.ts:264`](../../test/unit/tools-read.test.ts#L264) follows a supersedes relation as a related entry when related: true | No test resolves an old reference to its replacement. |
 | KM-AC-3 | Partial | [`cli-introspection.test.ts:75`](../../test/unit/cli-introspection.test.ts#L75) prints one line per event, oldest first | Machine and prior value columns are not asserted. |
-| KM-AC-4 | Covered | [`write.test.ts:200`](../../test/unit/write.test.ts#L200) rejects agent writes that match a secret detector, and records a rejection row |  |
-| KM-AC-5 | Covered | [`write.test.ts:115`](../../test/unit/write.test.ts#L115) rejects a content update on an immutable kind<br>[`coerce.test.ts:62`](../../test/unit/coerce.test.ts#L62) requires body except for journal and allows significance only on journal |  |
+| KM-AC-4 | Partial | [`write.test.ts:200`](../../test/unit/write.test.ts#L200) rejects agent writes that match a secret detector, and records a rejection row | The test reads only the error code; assert that `detail` holds no part of the secret. |
+| KM-AC-5 | Partial | [`write.test.ts:115`](../../test/unit/write.test.ts#L115) rejects a content update on an immutable kind | The test uses a decision, not a journal entry. |
 | KM-AC-6 | Partial | [`paths.test.ts:25`](../../test/unit/paths.test.ts#L25) lays out each kind<br>[`paths.test.ts:40`](../../test/unit/paths.test.ts#L40) round-trips every entry path through the parser | A rename followed by a path lookup is not asserted. |
+| KM-AC-7 | Covered | [`coerce.test.ts:62`](../../test/unit/coerce.test.ts#L62) requires body except for journal and allows significance only on journal |  |
 
 ## MJ: Memory and journal
 
@@ -129,7 +130,7 @@ Criteria: [PRD-memory-journal-v2](../prd/components/PRD-memory-journal-v2.md).
 |---|---|---|---|
 | MJ-AC-1 | Partial | [`memory-journal.test.ts:77`](../../test/unit/memory-journal.test.ts#L77) creates a _me-scoped entry with the given kind, default scope | Covers the CLI path; the agent path and the cross-client brief are not asserted. |
 | MJ-AC-2 | Partial | [`memory-journal.test.ts:157`](../../test/unit/memory-journal.test.ts#L157) filters entries by `--day`, a single calendar day | Order and entry types are not asserted. |
-| MJ-AC-3 | Covered | [`brief.test.ts:122`](../../test/unit/brief.test.ts#L122) surfaces an open signal from a blocker journal entry (store/write.ts syncs signals on every write)<br>[`journal.test.ts:69`](../../test/unit/journal.test.ts#L69) opens for blockers and incidents that became active, and stays open when flagged |  |
+| MJ-AC-3 | Partial | [`brief.test.ts:122`](../../test/unit/brief.test.ts#L122) surfaces an open signal from a blocker journal entry (store/write.ts syncs signals on every write)<br>[`journal.test.ts:69`](../../test/unit/journal.test.ts#L69) opens for blockers and incidents that became active, and stays open when flagged | Only the normal size is exercised, as for BS-AC-4. |
 | MJ-AC-4 | Covered | [`digest.test.ts:168`](../../test/unit/digest.test.ts#L168) reports a blocker opened and resolved this week, with time to resolve |  |
 | MJ-AC-5 | Covered | [`cli-introspection.test.ts:122`](../../test/unit/cli-introspection.test.ts#L122) `--why` prints the importance score and its four parts (SPEC 11.3)<br>[`importance.test.ts:57`](../../test/unit/importance.test.ts#L57) explains itself with the same numbers |  |
 
@@ -145,8 +146,12 @@ Criteria: [PRD-mobile-inbox-v2](../prd/components/PRD-mobile-inbox-v2.md).
 | MI-AC-4 | Not built | None | M7. |
 | MI-AC-5 | Not built | None | M7. |
 | MI-AC-6 | Not built | None | M7. |
-| MI-AC-7 | Not built | None | M7 slice 1 registered the flag; behavior is not built. |
+| MI-AC-7 | Not built | None | M7. |
 | MI-AC-8 | Not built | None | M7. |
+| MI-AC-9 | Not built | None | M7 slice 1 registered the flag; behavior is not built. |
+| MI-AC-10 | Not built | None | M7. |
+| MI-AC-11 | Not built | None | M7. |
+| MI-AC-12 | Not built | None | M7. |
 
 ## PA: Persona pools and access
 
@@ -165,7 +170,7 @@ Criteria: [PRD-pools-access-v3](../prd/components/PRD-pools-access-v3.md).
 | PA-AC-9 | Partial | [`access.test.ts:105`](../../test/unit/access.test.ts#L105) gives an out-of-pool or unassigned agent only global _me | The notice text is not asserted. |
 | PA-AC-10 | Covered | [`write.test.ts:220`](../../test/unit/write.test.ts#L220) holds a write to a scope outside the client's pools and opens an access request<br>[`access.test.ts:73`](../../test/unit/access.test.ts#L73) holds every write from an unassigned agent outside its own holding scope |  |
 | PA-AC-11 | Gap | None | No test for `ctxd hold adopt`. |
-| PA-AC-12 | Covered | [`write.test.ts:239`](../../test/unit/write.test.ts#L239) holds a write to a scope that belongs to no pool, opening an access_requests row with pool_ids '[]' (SPEC v7 section 6 step 1)<br>[`write.test.ts:261`](../../test/unit/write.test.ts#L261) replays a held write's idempotent retry without bumping access_requests again |  |
+| PA-AC-12 | Partial | [`write.test.ts:239`](../../test/unit/write.test.ts#L239) holds a write to a scope that belongs to no pool, opening an access_requests row with pool_ids '[]' (SPEC v7 section 6 step 1)<br>[`write.test.ts:261`](../../test/unit/write.test.ts#L261) replays a held write's idempotent retry without bumping access_requests again | Tests check one attempt and an idempotent retry; no test makes repeated separate attempts. |
 
 ## RP: Replication and offline work
 
@@ -188,7 +193,7 @@ Criteria: [PRD-skills-v3](../prd/components/PRD-skills-v3.md).
 |---|---|---|---|
 | SK-AC-1 | Covered | [`skills.test.ts:63`](../../test/unit/skills.test.ts#L63) formats catalog lines and respects the budget<br>[`skills.test.ts:169`](../../test/unit/skills.test.ts#L169) writes a new skill into the client's folder and records it in skill_syncs<br>[`skills.test.ts:183`](../../test/unit/skills.test.ts#L183) writes into codex's folder too (W5.5: ~/.agents/skills, confirmed from source) |  |
 | SK-AC-2 | Partial | [`access.test.ts:114`](../../test/unit/access.test.ts#L114) includes the profile of each pool that grants the session scope | Not asserted for skills specifically. |
-| SK-AC-3 | Gap | None | Spec section 14 lists this test; none was found. |
+| SK-AC-3 | Partial | [`tools-read.test.ts:134`](../../test/unit/tools-read.test.ts#L134) excludes a proposed agent decision by default and includes it with include_proposed | Proposed entries are left out of search by default; no test covers proposed skills in get, lookup, listings, catalogs or sync. |
 | SK-AC-4 | Covered | [`skills.test.ts:237`](../../test/unit/skills.test.ts#L237) removes a synced file for a skill that is no longer active, and its folder if now empty |  |
 
 ## TS: Trust and safety

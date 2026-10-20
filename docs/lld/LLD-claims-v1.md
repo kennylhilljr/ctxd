@@ -15,7 +15,7 @@ Section numbers are the Spec's own (for example 9.1), unchanged from Spec v9, so
 
 ### 7.5 Claim semantics
 
-Implements [PRD-claims-v4](../prd/components/PRD-claims-v4.md)). Claims are events in the task entry's history (`op` `claim` or `release`); the `leases` table is materialized from them.
+Implements [PRD-claims-v4](../prd/components/PRD-claims-v4.md). Claims are events in the task entry's history (`op` `claim` or `release`); the `leases` table is materialized from them.
 
 #### 7.5.1 Write intent normalization
 

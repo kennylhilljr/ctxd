@@ -14,10 +14,10 @@ Keeps every agent one lookup away from the latest version of any document.
 
 ## Owned sections
 
-- docs/README.md doc map (A)
-- Glossary upkeep (A)
-- Version naming, link and style checks (A)
-- Persona file checks against the standard (A)
+- Template sections (generated from docs/templates/; the template owner line is authoritative):
+  - hld template, "How this spec is organized" (A)
+  - hld template, "Repository layout" (A)
+- docs/README.md doc map, glossary upkeep, link and version checks, persona file checks (A)
 
 ## Inputs, read in this order
 

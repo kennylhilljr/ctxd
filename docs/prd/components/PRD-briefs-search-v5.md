@@ -16,7 +16,7 @@
 
 Earlier changes are listed in [v4](PRD-briefs-search-v4.md) and before.
 
-- **Acceptance criteria in EARS, with IDs.** Every criterion is now one EARS statement with an ID (`BS-AC-n`) and the component requirements it verifies. The meaning of each v4 criterion is unchanged; compound criteria were split so each states one response, and criteria the spec's test table already assumed were made explicit. Each ID is mapped to its tests, or marked as a gap, in the [test plan](../../test/test-plan-v1.md).
+- **Acceptance criteria in EARS, with IDs.** Every criterion is now one EARS statement with an ID (`BS-AC-n`) and the component requirements it verifies. The 5 criteria became 6: compound criteria were split so each states one response, and behavior the spec's test table already assumed was made explicit. Each ID is mapped to its tests, or marked as a gap, in the [test plan](../../test/test-plan-v1.md).
 - **Links.** The header points to PRD v8, Spec v10 (now the system HLD) and this component's LLD; sibling links point to current versions.
 
 ## 1. Purpose
@@ -135,7 +135,7 @@ Agents make small mistakes: a plural kind, a synonym for an enum value, a retry 
 
 ## 8. Acceptance criteria
 
-> Owner: A (agent-generated) by persona `product-writer`, derived from the requirements above; approved by the owner at Gate 1. Verification status per criterion: [test plan](../../test/test-plan-v1.md).
+> Owner: A (agent-generated) by persona `product-writer`, derived from the requirements above; pending the owner's approval at Gate 1. Verification status per criterion: [test plan](../../test/test-plan-v1.md).
 
 | ID | EARS pattern | Acceptance criterion | Traces to |
 |---|---|---|---|

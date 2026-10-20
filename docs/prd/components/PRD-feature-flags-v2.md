@@ -15,7 +15,7 @@
 
 Earlier changes are listed in [v1](PRD-feature-flags-v1.md) and before.
 
-- **Acceptance criteria in EARS, with IDs.** Every criterion is now one EARS statement with an ID (`FF-AC-n`) and the component requirements it verifies. The meaning of each v1 criterion is unchanged; compound criteria were split so each states one response, and criteria the spec's test table already assumed were made explicit. Each ID is mapped to its tests, or marked as a gap, in the [test plan](../../test/test-plan-v1.md).
+- **Acceptance criteria in EARS, with IDs.** Every criterion is now one EARS statement with an ID (`FF-AC-n`) and the component requirements it verifies. Each of the 4 criteria keeps its meaning. Each ID is mapped to its tests, or marked as a gap, in the [test plan](../../test/test-plan-v1.md).
 - **Links.** The header points to PRD v8, Spec v10 (now the system HLD) and this component's LLD; sibling links point to current versions.
 
 ## 1. Purpose
@@ -85,11 +85,11 @@ ctxd runs inside my daily work: hooks fire in every Claude Code and Codex sessio
 
 ## 6. Acceptance criteria
 
-> Owner: A (agent-generated) by persona `product-writer`, derived from the requirements above; approved by the owner at Gate 1. Verification status per criterion: [test plan](../../test/test-plan-v1.md).
+> Owner: A (agent-generated) by persona `product-writer`, derived from the requirements above; pending the owner's approval at Gate 1. Verification status per criterion: [test plan](../../test/test-plan-v1.md).
 
 | ID | EARS pattern | Acceptance criterion | Traces to |
 |---|---|---|---|
-| FF-AC-1 | State-driven | While `CTXD_FEATURE_HOOKS=0` is set, every ctxd hook shall exit 0 with no output and no server call. | FF-2, FF-3 |
+| FF-AC-1 | State-driven | While `CTXD_FEATURE_HOOKS=0` is set in the environment, every ctxd hook shall exit 0 with no output and no server call, without any configuration file being edited. | FF-2, FF-3 |
 | FF-AC-2 | Event-driven | When `sync` is switched back on after a period off, the node shall converge with its peers with no event lost. | FF-6, FF-8 |
 | FF-AC-3 | Event-driven | When the human runs `ctxd features set hooks.nudge off`, the next Stop hook shall not nudge, without any restart. | FF-3, FF-5 |
 | FF-AC-4 | Ubiquitous | The `tools/list` payload shall be byte-for-byte identical with every flag off and with every flag on. | FF-7 |

@@ -13,11 +13,15 @@
 
 Section numbers are the Spec's own (for example 9.1), unchanged from Spec v9, so references in code comments, PRDs and AGENTS.md still resolve. Detail here is normative; [Spec v10](../spec/SPEC-v10.md) states the system-level design.
 
-## 3.3 Scope resolution and bypass
+## 3. Files and configuration
+
+Only 3.3 lives here. File locations are in [Spec v10](../spec/SPEC-v10.md) section 3; configuration keys and feature flags are in [LLD: Configuration](LLD-configuration-v1.md).
+
+### 3.3 Scope resolution and bypass
 
 Repositories hold no ctxd files. Bindings between repositories and scopes live only in ctxd's database (`scope_repos`), so scope and pool names never reach a repository or GitHub.
 
-**Scope resolution order** (first match wins). Implements [PRD-hooks-v6](../prd/components/PRD-hooks-v6.md)) section 2.1.
+**Scope resolution order** (first match wins). Implements [PRD-hooks-v6](../prd/components/PRD-hooks-v6.md) section 2.1.
 
 1. **Repository identity.** Find the repository root by walking up to a `.git` directory or `.git` file (worktrees), read its config file directly (no `git` subprocess) and take `remote "origin"` `url`. Normalize it as follows, then look it up in `scope_repos`:
    - `git@host:owner/repo.git`, `ssh://git@host/owner/repo` and `https://host/owner/repo.git` all become `host/owner/repo`;
@@ -58,7 +62,7 @@ ctxd hook <event> --client <claude-code|codex> [--scope <name>]
 | PreToolUse (file tools, Bash) | both | Path guard (9.9) | Deny with a reason when a ctxd data path is targeted; otherwise nothing |
 | PostToolUse (Bash) | both | If the command was a successful `git commit`: record the commit in the local `commits` table (7.5.6) and write a `journal` entry (significance `routine`, tag `auto`) titled with the commit subject, with the changed file list in its body and a `points_to commit:<sha>` link | none |
 
-**Session state and recovery intent** (implements [PRD-hooks-v6](../prd/components/PRD-hooks-v6.md)) HK-12 and HK-13). Every hook call upserts the `sessions` row for its session reference:
+**Session state and recovery intent** (implements [PRD-hooks-v6](../prd/components/PRD-hooks-v6.md) HK-12 and HK-13). Every hook call upserts the `sessions` row for its session reference:
 
 | Event | `state` | `recovery` update |
 |---|---|---|
@@ -92,7 +96,7 @@ Per-session state lives in `sessions/<client>-<session_id>.json`:
    - `last_assistant_message` contains a completion marker.
 5. **Rate limit.** If a trigger holds and `last_nudge_at` is older than `min_minutes_between`:
    - set `nudge_pending = true` and `last_nudge_at = now`;
-   - print the block JSON with the reason text from [Hooks v6](../prd/components/PRD-hooks-v6.md)) section 6, filled with the scope and session.
+   - print the block JSON with the reason text from [Hooks v6](../prd/components/PRD-hooks-v6.md) section 6, filled with the scope and session.
 6. **Otherwise** exit 0.
 
 The reason text explicitly allows "no handoff needed," so a nudge never forces filler. Besides the handoff, it asks for lessons, lasting preferences the user stated, procedures worth saving as skills, and a `blocker` journal entry when the agent is blocked; each of these is optional.
@@ -199,7 +203,7 @@ When we reach a conclusion or wrap up, offer to save a handoff with context_hand
 
 ### 9.7 Hook adapters and conformance kit
 
-Implements [PRD-hooks-v6](../prd/components/PRD-hooks-v6.md)) section 7. Every client integration is a frozen **adapter descriptor** in `src/hooks/adapters/<client>.ts`. The hook CLI core never branches on client names; it asks the adapter.
+Implements [PRD-hooks-v6](../prd/components/PRD-hooks-v6.md) section 7. Every client integration is a frozen **adapter descriptor** in `src/hooks/adapters/<client>.ts`. The hook CLI core never branches on client names; it asks the adapter.
 
 ```ts
 interface HookAdapter {
@@ -255,14 +259,14 @@ Per-session state (9.3) and checkpoints are small JSON files under `sessions/`. 
 
 ### 9.9 Path guard and bypass
 
-Implements [PRD-trust-safety-v5](../prd/components/PRD-trust-safety-v5.md)) TS-13 and TS-14.
+Implements [PRD-trust-safety-v5](../prd/components/PRD-trust-safety-v5.md) TS-13 and TS-14.
 
 - **Path guard.** The PreToolUse hook inspects file-tool inputs (`file_path`, `path`, glob patterns) and, for Bash, the command text. If any resolves under the ctxd data directory or `~/.config/ctxd/`, it denies the call with the reason: `ctxd data is managed by the ctxd server. Use context_search or context_get to read it, and context_write to change it.` Matching is by path prefix after `~` expansion and normalization; it is a guard against accidents and casual bypass, not a sandbox.
 - **Bypass.** Checked first in every hook, before reading stdin fully or contacting the server (3). A bypassed session also skips the path guard, which is acceptable because a bypassed session never has ctxd tools injected.
 
 ### 9.10 Crash sweep
 
-Implements [PRD-hooks-v6](../prd/components/PRD-hooks-v6.md)) section 7.1. Runs at the start of every SessionStart hook (bounded to 300 ms; remaining work is detached):
+Implements [PRD-hooks-v6](../prd/components/PRD-hooks-v6.md) section 7.1. Runs at the start of every SessionStart hook (bounded to 300 ms; remaining work is detached):
 
 1. Select `sessions` on this node with state other than `ended` and `last_seen_hlc` older than `crash_grace_minutes`, plus any leftover worker tickets.
 2. For each, idempotently:

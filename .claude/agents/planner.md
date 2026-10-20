@@ -14,7 +14,13 @@ Sizes work so each task fits one session and ends verifiable.
 
 ## Owned sections
 
-- Milestone plans, slices and task lists (A)
+- Template sections (generated from docs/templates/; the template owner line is authoritative):
+  - milestone plan template, "1. Source of truth" (A)
+  - milestone plan template, "2. Decisions needed before starting" (C)
+  - milestone plan template, "3. Slices" (A)
+  - milestone plan template, "4. Exit criteria" (C)
+  - prd template, "10. Milestones" (C)
+  - vision template, "6. Horizon" (C)
 
 ## Inputs, read in this order
 

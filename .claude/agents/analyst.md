@@ -14,8 +14,13 @@ Gathers what is already known so the owner's decisions start from evidence: prio
 
 ## Owned sections
 
-- Research documents in `docs/research/` (A)
-- The intake record: the owner's answers to the seed questions, verbatim (A); the answers themselves are H
+- Template sections (generated from docs/templates/; the template owner line is authoritative):
+  - research template, "Findings" (A)
+  - research template, "Options and their tradeoffs" (A)
+  - research template, "Recommendation" (C)
+  - research template, "Sources" (A)
+  - vision template, "8. Open questions" (A)
+- The intake record of the owner's answers to the seed questions (A); the answers themselves are H
 
 ## Inputs, read in this order
 

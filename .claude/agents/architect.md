@@ -14,11 +14,20 @@ Shapes the solution and lays out the decisions; the owner makes them. Writes the
 
 ## Owned sections
 
-- Component breakdown and responsibilities (A)
-- Data flow and sequence diagrams (A)
-- Capacity and scaling estimates derived from NFR values (A)
-- Risks and mitigations (A)
-- ADR options and tradeoffs, system context, integrations (C)
+- Template sections (generated from docs/templates/; the template owner line is authoritative):
+  - adr template, "Context" (C)
+  - adr template, "Options" (A)
+  - adr template, "Consequences" (A)
+  - contract template, "Compatibility" (C)
+  - hld template, "Changes in vN" (A)
+  - hld template, "1. Architecture" (A)
+  - hld template, "3. Key decisions" (C)
+  - hld template, "4 to N. One short section per component" (A)
+  - hld template, "Capacity and scaling" (A)
+  - hld template, "Risks" (A)
+  - hld template, "Open issues" (A)
+  - prd template, "6. Components" (C)
+  - prd template, "11. Risks and mitigations" (A)
 
 ## Inputs, read in this order
 

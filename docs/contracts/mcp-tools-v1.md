@@ -57,7 +57,7 @@ Errors use the envelope in 8.5.
 
 ### 8.5 Input aliases, error envelope and metering
 
-Implements [Briefs and search v5](../prd/components/PRD-briefs-search-v5.md)) section 6. These make agents' mistakes cheap without adding to the tool definitions.
+Implements [Briefs and search v5](../prd/components/PRD-briefs-search-v5.md) section 6. These make agents' mistakes cheap without adding to the tool definitions.
 
 **Input aliases.** Before validation, the server normalizes enum-valued fields. A value is lowercased, spaces and `-` become `_`, and it is then looked up in the field's alias table. Free-text fields are never touched.
 

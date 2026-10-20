@@ -14,8 +14,12 @@ Makes verification visible: every criterion ID has a status (Covered, Partial, G
 
 ## Owned sections
 
-- Test plan and criteria-to-test map (A)
-- Coverage gap list (A)
+- Template sections (generated from docs/templates/; the template owner line is authoritative):
+  - hld template, "Testing strategy" (A)
+  - lld template, "n.9 Test notes" (A)
+  - test plan template, "Status key" (A)
+  - test plan template, "Gaps to close first" (A)
+  - test plan template, "<PREFIX>: <Component>" (A)
 
 ## Inputs, read in this order
 

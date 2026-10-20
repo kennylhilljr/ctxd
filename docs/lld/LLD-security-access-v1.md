@@ -68,7 +68,7 @@ Rules are created from `ctxd review` ("approve and remember") or `ctxd review --
 
 ### 10.5 Access evaluation
 
-Implements [PRD-pools-access-v3](../prd/components/PRD-pools-access-v3.md)) sections 5 and 6. Every request carries a persona token, which identifies the client and its **assumed pools** for the session. `level(client, assumed pools, scope)` returns `none`, `read`, `propose` or `write`:
+Implements [PRD-pools-access-v3](../prd/components/PRD-pools-access-v3.md) sections 5 and 6. Every request carries a persona token, which identifies the client and its **assumed pools** for the session. `level(client, assumed pools, scope)` returns `none`, `read`, `propose` or `write`:
 
 1. **Human client:** `write` for every scope (the `all` pool).
 2. **Global `_me` (`kind = me`):** `read` for every client. For writes, `propose`, or `write` if a pool grants `_me` at `write`.
@@ -97,7 +97,7 @@ Implements [PRD-pools-access-v3](../prd/components/PRD-pools-access-v3.md)) sect
 
 ### 10.6 Sealed pools
 
-Implements [PRD-pools-access-v3](../prd/components/PRD-pools-access-v3.md)) section 7.1.
+Implements [PRD-pools-access-v3](../prd/components/PRD-pools-access-v3.md) section 7.1.
 
 - **Separate file, same schema.** `ctxd pool seal <pool>` moves the pool's scopes, their entries, events, relations, flags, FTS and vector rows into a new database file under `sealed/`, named from the pool id. It uses the same schema, so the access layer and queries are unchanged apart from the database prefix.
 - **Encryption at rest.** The file uses `better-sqlite3-multiple-ciphers` in SQLCipher compatibility mode. The key is 32 random bytes. Database construction is injected so tests use the same lifecycle with an isolated test provider.
@@ -131,7 +131,7 @@ Implements [PRD-pools-access-v3](../prd/components/PRD-pools-access-v3.md)) sect
 
 ### 10.7 Traversal rule
 
-Implements [PRD-pools-access-v3](../prd/components/PRD-pools-access-v3.md)) section 7.2. Every operation that moves from one entry to another re-evaluates `level` for the target's scope, under the session's persona:
+Implements [PRD-pools-access-v3](../prd/components/PRD-pools-access-v3.md) section 7.2. Every operation that moves from one entry to another re-evaluates `level` for the target's scope, under the session's persona:
 
 - related entries in `context_get`;
 - supersession chains and `superseded_by`;
