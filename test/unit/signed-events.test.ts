@@ -64,4 +64,23 @@ describe("signed events (Spec v9 section 7.7)", () => {
     rebuild(f.db);
     expect(f.db.prepare("SELECT payload_hash, signature, public_key FROM events WHERE event_id = (SELECT event_id FROM events ORDER BY origin_seq LIMIT 1)").get()).toEqual(before);
   });
+
+  it("verifies a signed raw late arrival before stripping it after purge", () => {
+    const source = fixture();
+    const created = writeEntry(ctx(source, true), { scope: "sample-app", kind: "note", title: "Late", body: "Raw signed body", request_id: newId() });
+    if ("held" in created) throw new Error("unexpected held write");
+    const wire = firstWire(source);
+
+    const target = fixture();
+    target.db.prepare("DELETE FROM scopes").run();
+    target.db.prepare("INSERT INTO scopes (scope_id, name, created_at) VALUES (?, 'sample-app', ?)").run(source.scopeId, new Date().toISOString());
+    applyEvent(target.db, wire);
+    purgeEntry(ctx(target, true), created.id, "remove before replay");
+    target.db.prepare("DELETE FROM events WHERE event_id = ?").run(wire.eventId);
+    expect(applyEvent(target.db, wire).outcome).toBe("purge-stripped");
+    expect(target.db.prepare("SELECT payload, payload_hash, signature, public_key FROM events WHERE event_id = ?").get(wire.eventId)).toMatchObject({
+      payload: JSON.stringify({ purged: true }), payload_hash: wire.payloadHash, signature: wire.signature, public_key: wire.publicKey,
+    });
+    expect(() => applyEvent(target.db, { ...wire, eventId: newId(), payload: { ...wire.payload, body: "tampered" } })).toThrow(/Payload hash mismatch/);
+  });
 });

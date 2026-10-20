@@ -5,6 +5,7 @@ import { mayReplicate } from "../security/policy.js";
 import { applyEvent, toWireEvent, type EventRow, type WireEvent } from "./apply.js";
 import type { SealedKeyProvider } from "../sealed/key-provider.js";
 import { decryptSealed, encryptSealed, type CiphertextEnvelope } from "../sealed/crypto.js";
+import type { SealedPoolStore } from "../sealed/store.js";
 
 /** POST /v1/pull's request and response bodies (Spec v8 7.1). */
 export interface PullRequest {
@@ -31,32 +32,48 @@ type PullRow = EventRow & { scope_replication: Replication; sealed_pool_id: stri
  * reports the highest origin_seq *considered* per origin in this page, including events filtered
  * out by the replication policy, so the puller's cursor advances past what it will never receive.
  */
-export function servePull(db: Database.Database, requesterRole: NodeRole, req: PullRequest, sealedKeys?: SealedKeyProvider): PullResponse {
-  const origins = db.prepare("SELECT origin_node, MAX(origin_seq) AS max_seq FROM events GROUP BY origin_node").all() as {
-    origin_node: string;
-    max_seq: number;
-  }[];
-  const candidates = origins.filter((o) => o.max_seq > (req.vector[o.origin_node] ?? 0));
-  if (candidates.length === 0) return { events: [], through: {}, more: false };
-
-  const whereParts = candidates.map(() => "(e.origin_node = ? AND e.origin_seq > ?)");
-  const whereArgs = candidates.flatMap((o) => [o.origin_node, req.vector[o.origin_node] ?? 0]);
-  const rows = db
-    .prepare(
+export function servePull(
+  db: Database.Database,
+  requesterRole: NodeRole,
+  req: PullRequest,
+  sealedKeys?: SealedKeyProvider,
+  sealedStore?: SealedPoolStore,
+): PullResponse {
+  const selectRows = (source: Database.Database): PullRow[] => {
+    const origins = source.prepare("SELECT origin_node, MAX(origin_seq) AS max_seq FROM events GROUP BY origin_node").all() as { origin_node: string; max_seq: number }[];
+    const behind = origins.filter((origin) => origin.max_seq > (req.vector[origin.origin_node] ?? 0));
+    if (behind.length === 0) return [];
+    const where = behind.map(() => "(e.origin_node = ? AND e.origin_seq > ?)").join(" OR ");
+    const args = behind.flatMap((origin) => [origin.origin_node, req.vector[origin.origin_node] ?? 0]);
+    return source.prepare(
       `SELECT e.event_id, e.origin_node, e.origin_seq, e.hlc, e.scope_id, e.entry_id, e.op, e.part, e.parent_revs, e.rev,
               e.client_id, e.session_ref, e.request_id, e.request_hash, e.payload, e.prev, e.payload_hash, e.signature, e.public_key,
               s.replication AS scope_replication,
               (SELECT pg.pool_id FROM pool_grants pg JOIN pools p ON p.pool_id = pg.pool_id
                WHERE pg.scope_id = e.scope_id AND p.storage = 'sealed' LIMIT 1) AS sealed_pool_id
        FROM events e JOIN scopes s ON s.scope_id = e.scope_id
-       WHERE ${whereParts.join(" OR ")}
-       ORDER BY e.origin_node, e.origin_seq
-       LIMIT ?`,
-    )
-    .all(...whereArgs, req.limit + 1) as PullRow[];
+       WHERE ${where}
+       ORDER BY e.origin_node, e.origin_seq`,
+    ).all(...args) as PullRow[];
+  };
 
-  const more = rows.length > req.limit;
-  const page = more ? rows.slice(0, req.limit) : rows;
+  const rows = selectRows(db);
+  if (sealedStore && sealedKeys) {
+    const pools = db.prepare(
+      `SELECT p.pool_id FROM pools p JOIN pool_enrollments pe ON pe.pool_id = p.pool_id
+       WHERE p.storage = 'sealed' AND pe.node_id = ? ORDER BY p.pool_id`,
+    ).all(req.node) as { pool_id: string }[];
+    for (const pool of pools) {
+      for (const row of sealedStore.withPool(pool.pool_id, selectRows)) rows.push({ ...row, sealed_pool_id: pool.pool_id });
+    }
+  }
+  const candidates = rows
+    .filter((row) => row.origin_seq > (req.vector[row.origin_node] ?? 0))
+    .sort((a, b) => a.origin_node.localeCompare(b.origin_node) || a.origin_seq - b.origin_seq);
+  if (candidates.length === 0) return { events: [], through: {}, more: false };
+
+  const more = candidates.length > req.limit;
+  const page = candidates.slice(0, req.limit);
 
   const through: Record<string, number> = {};
   const events: (WireEvent | EncryptedWireEvent)[] = [];
@@ -92,6 +109,7 @@ export async function pullFromPeer(
   peer: { peerId: string; name: string; url: string; outgoingToken: string },
   fetchImpl: typeof fetch = fetch,
   sealedKeys?: SealedKeyProvider,
+  sealedStore?: SealedPoolStore,
 ): Promise<PullOutcome> {
   const vector = currentVector(db, peer.name);
   let pulled = 0;
@@ -111,10 +129,12 @@ export async function pullFromPeer(
     const body = (await res.json()) as PullResponse;
 
     for (const incoming of body.events) {
-      const event = "sealed" in incoming && incoming.sealed
+      const isSealed = "sealed" in incoming && incoming.sealed;
+      const event = isSealed
         ? JSON.parse(decryptSealed(incoming.envelope, sealedKeys?.get(incoming.pool_id) ?? Buffer.alloc(0), incoming.event_id).toString("utf8")) as WireEvent
         : incoming as WireEvent;
-      const result = applyEvent(db, event);
+      if (isSealed && !sealedStore) throw new Error(`sealed event ${incoming.event_id} has no attached-store router`);
+      const result = isSealed ? sealedStore!.withPool(incoming.pool_id, (poolDb) => applyEvent(poolDb, event)) : applyEvent(db, event);
       if (result.outcome === "fast-forward") pulled++;
       else if (result.outcome === "conflict-resolved") conflicts++;
       else if (result.outcome === "purge-stripped") purged++;

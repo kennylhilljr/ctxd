@@ -94,12 +94,13 @@ describe("sealed pools (Spec v9 section 10.6)", () => {
 
   it("serves sealed events only to enrolled nodes and encrypts them in transit", () => {
     const f = fixture();
-    f.keys.create(f.poolId);
-    f.db.prepare("UPDATE pools SET storage = 'sealed', sealed_file = ? WHERE pool_id = ?").run(`sealed/${f.poolId}.db`, f.poolId);
-    const denied = servePull(f.db, "home", { node: "node-b", vector: {}, limit: 100 }, f.keys);
+    const relative = f.store.seal(f.poolId, f.nodeId);
+    f.db.prepare("UPDATE pools SET storage = 'sealed', sealed_file = ? WHERE pool_id = ?").run(relative, f.poolId);
+    expect(f.db.prepare("SELECT COUNT(*) AS n FROM events").get()).toEqual({ n: 0 });
+    const denied = servePull(f.db, "home", { node: "node-b", vector: {}, limit: 100 }, f.keys, f.store);
     expect(denied.events).toEqual([]);
     f.db.prepare("INSERT INTO pool_enrollments (pool_id, node_id, enrolled_at) VALUES (?, 'node-b', ?)").run(f.poolId, new Date().toISOString());
-    const allowed = servePull(f.db, "home", { node: "node-b", vector: {}, limit: 100 }, f.keys);
+    const allowed = servePull(f.db, "home", { node: "node-b", vector: {}, limit: 100 }, f.keys, f.store);
     expect(allowed.events).toHaveLength(1);
     expect(allowed.events[0]).toMatchObject({ sealed: true, pool_id: f.poolId });
     expect(JSON.stringify(allowed.events[0])).not.toContain("Sensitive body");

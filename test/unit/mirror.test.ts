@@ -99,4 +99,15 @@ describe("Markdown export and mirror (Spec v9 section 12.1)", () => {
     expect(syncMirror(f.ctx, f.mirror).applied).toBe(0);
     expect((f.db.prepare("SELECT COUNT(*) AS n FROM entries").get() as { n: number }).n).toBe(1);
   });
+
+  it("never exports or mirrors plaintext from a sealed scope", () => {
+    const f = fixture(); createNote(f);
+    const poolId = newId();
+    const scopeId = (f.db.prepare("SELECT scope_id FROM scopes WHERE name = 'sample-app'").get() as { scope_id: string }).scope_id;
+    f.db.prepare("INSERT INTO pools (pool_id, name, storage, sealed_file, created_at) VALUES (?, 'pool-private', 'sealed', ?, ?)").run(poolId, `sealed/${poolId}.db`, new Date().toISOString());
+    f.db.prepare("INSERT INTO pool_grants (pool_id, scope_id, level) VALUES (?, ?, 'write')").run(poolId, scopeId);
+    expect(exportMarkdown(f.db, join(f.root, "export"))).toEqual({ written: 0 });
+    expect(syncMirror(f.ctx, f.mirror).written).toBe(0);
+    expect(existsSync(f.mirror)).toBe(false);
+  });
 });
