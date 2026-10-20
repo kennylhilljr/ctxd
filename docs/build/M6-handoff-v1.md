@@ -7,18 +7,25 @@
 - `e75ab2f` `M6 slice 3: add sealed pool storage and replication`
 - `0745323` `M6 slice 4: add node adoption and migration runbook`
 - `bebd349` `M6 slice 5: add local model proposals and exit checks`
+- `5c08795` `M6 slice 6: route sealed requests without plaintext copies`
+- `6e9290a` `M6 slice 7: persist mirror stop and confirm archives`
+- `1eddbb4` `M6 slice 8: harden sealed sync and signed purge checks`
+- `2367129` `M6 slice 9: preserve sealed ciphertext in backups`
+- `3b0aa00` `M6 slice 10: replay sealed purges on unlock`
 
 Nothing was pushed and no pull request was opened.
 
 ## Delivered
 
-Signed events use one Ed25519 key per node, retain their payload hash through purge, verify during sync apply and rebuild, and continue verification with the feature switched off. Markdown export, import, mirror revision checks, conflict files, archive requests, new-file ingestion and server reconciliation are present. Sealed-pool code includes injected key and database providers, XChaCha20-Poly1305 event envelopes, enrollment filtering, lifecycle tests and a macOS key helper. Node adoption preserves the node ID and has a migration runbook. The local model worker accepts only loopback HTTP endpoints and writes machine-labeled summary and lesson proposals through the normal write path.
+Signed events use one Ed25519 key per node, retain their payload hash through purge, verify raw late arrivals before stripping them, verify during sync apply and rebuild, and continue verification with the feature switched off. Markdown export, import, mirror revision checks, conflict files, archive requests, new-file ingestion and server reconciliation are present. `ctxd mirror stop` now switches the mirror feature off in the persistent config. `ctxd archive-request confirm <ref> --yes` archives a requested entry through a status event and clears the request.
+
+Sealed pool unlock no longer copies plaintext rows into `ctxd.db`. Routed callbacks operate on the encrypted store, sealed sync reads and applies events there, and locked purge work replays through the normal purge event path on unlock. Sealing removes the main FTS copy. Mirror and export tests assert that sealed plaintext is excluded. Backups wrap each sealed database file directly with `age`, copy it with the main backup, prune it with the same generation and restore it into `sealed/`. Keys remain outside both databases. Node adoption preserves the node ID and has a migration runbook. The local model worker accepts only loopback HTTP endpoints and writes machine-labeled summary and lesson proposals through the normal write path.
 
 Spec v9 contains the shipped M6 formats and behavior. Optional M6 features are registered off by default.
 
 ## Verification
 
-Each slice ran `npm run typecheck` and the exact `npm test` command. The final sandbox-compatible suite passed 669 tests across 61 files. `npm run build` passed. Focused signed event, mirror, sealed-pool, adoption, local-model and sync property tests passed.
+Each corrective slice ran `npm run typecheck` and `npm test`. The latest run passed 684 tests across 61 files. Focused signed event, mirror, sealed pool, purge, backup and sync tests passed. The earlier `npm run build` passed. A final build remains to be run after the findings below are closed.
 
 The unfiltered suite cannot pass in this sandbox. Twenty-four hook conformance cases and the real two-node sync case fail because `tsx` cannot open its local IPC socket. Three MCP tests fail because loopback listeners receive `EPERM`. One launchd test cannot load a job. These are environment failures, not assertion failures in M6 code. Scratch `ctxd node adopt` preserved its node ID and passed database integrity; `ctxd doctor` could not inspect FileVault in the sandbox.
 
@@ -33,11 +40,11 @@ The following checks require the owner’s hardware, identity or live configurat
 
 ## Unresolved findings
 
-The SQLCipher package could not be installed because this environment cannot resolve the npm registry. `SqlCipherDatabaseProvider` fails closed with an installation error, while tests use `TestDatabaseProvider`. Before enabling sealed pools, install `better-sqlite3-multiple-ciphers@13.0.3`, record it in `package.json` and `package-lock.json`, then rerun the sealed tests against the real provider. The selected release documents macOS x64 and arm64 prebuilds for Node 22 and later.
+The SQLCipher package still cannot be installed because this environment cannot resolve `registry.npmjs.org`. The attempted `npm install better-sqlite3-multiple-ciphers@13.0.3 --save` ended with `ENOTFOUND`. `SqlCipherDatabaseProvider` fails closed with an installation error, while tests use `TestDatabaseProvider`. No substitute encryption was added. Before enabling sealed pools, install that exact package, record it in `package.json` and `package-lock.json`, then run the sealed tests against the production provider.
 
-The sealed lifecycle currently copies unlocked rows into the main database connection and moves them back on lock. That does not meet Spec 10.6’s stricter attached-file routing boundary, and queued purge records are not yet executed on unlock. Do not enable `sealed_pools` on real data until this is replaced with per-request attached-store routing and locked purge replay. This blocker prevents M6 completion.
+The storage and sync paths now use the sealed database without copying plaintext into the main database, and queued purges replay on unlock. Ordinary MCP and CLI read and write handlers have not all been connected to `SealedPoolStore.forScope`, so an unlocked sealed entry is not yet reachable through every normal command. Origin sequence allocation is also local to each database connection, which can duplicate one node's sequence numbers across shared and sealed stores. These are engineering gaps, not section 0 stop conditions. Do not enable `sealed_pools` on real data until both are fixed.
 
-`ctxd mirror stop` reports status but does not persistently switch the feature flag off, and archive requests do not yet have a dedicated confirmation command. Use `ctxd features set mirror off` to stop reconciliation. These two CLI gaps should be closed before treating the mirror as complete.
+Enrollment filtering still trusts the requesting node ID in the authenticated pull body. Peer authentication is not yet pinned to a remote node ID, so a peer token holder could claim another enrolled node ID. The enrollment command also only resolves the local row in `nodes`. This must be corrected before sealed replication is safe for real data.
 
 ## Exit checks still to run
 
