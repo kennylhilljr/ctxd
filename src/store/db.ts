@@ -100,9 +100,17 @@ export function openDatabase(path: string, { create = false }: OpenDatabaseOptio
     })();
   }
   const purgeMetadataVersion = db.pragma("user_version", { simple: true }) as number;
-  if (purgeMetadataVersion !== SCHEMA_VERSION) {
+  if (purgeMetadataVersion === 18 && SCHEMA_VERSION >= 19) {
+    db.transaction(() => {
+      db.exec("CREATE TABLE node_origin_sequences (node_id TEXT PRIMARY KEY, next_seq INTEGER NOT NULL)");
+      db.exec("INSERT INTO node_origin_sequences (node_id, next_seq) SELECT origin_node, MAX(origin_seq) FROM events GROUP BY origin_node");
+      db.pragma("user_version = 19");
+    })();
+  }
+  const sequenceVersion = db.pragma("user_version", { simple: true }) as number;
+  if (sequenceVersion !== SCHEMA_VERSION) {
     db.close();
-    throw new Error(`Database schema version ${purgeMetadataVersion} does not match ${SCHEMA_VERSION}; no migration is defined yet.`);
+    throw new Error(`Database schema version ${sequenceVersion} does not match ${SCHEMA_VERSION}; no migration is defined yet.`);
   }
   return db;
 }

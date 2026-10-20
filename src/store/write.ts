@@ -1,4 +1,5 @@
 import type Database from "better-sqlite3";
+import { allocateOriginSeq } from "./origin-seq.js";
 import type { z } from "zod";
 import type { contextWriteInput } from "../tools/schemas.js";
 import { accessLevel, atLeast, decideWrite, effectiveVendorPolicy, type ClientInfo } from "../access/level.js";
@@ -56,10 +57,7 @@ function defaultReviewAfter(kind: Kind, createdAtMs: number): string | null {
 }
 
 export function nextOriginSeq(db: Database.Database, nodeId: string): number {
-  const row = db.prepare("SELECT COALESCE(MAX(origin_seq), 0) + 1 AS next FROM events WHERE origin_node = ?").get(nodeId) as {
-    next: number;
-  };
-  return row.next;
+  return allocateOriginSeq(db, nodeId);
 }
 
 function recordRejection(

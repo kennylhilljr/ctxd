@@ -23,6 +23,7 @@ import { applyEvent } from "../store/materialize.js";
 import type { WriteContext } from "../store/write.js";
 import { EMBEDDING_DIM, MODEL_DTYPE, MODEL_ID, loadEmbedder } from "./model.js";
 import { signStoredEvent } from "../security/event-signatures.js";
+import { allocateOriginSeq } from "../store/origin-seq.js";
 
 export const FULL_MODEL_ID = `${MODEL_ID}@${MODEL_DTYPE}`;
 
@@ -63,9 +64,7 @@ function appendEmbeddingEvent(ctx: WriteContext, row: PendingRow, vector: readon
   const { db } = ctx;
   const eventId = newId();
   const hlc = ctx.clock.tick();
-  const nextOriginSeq = (
-    db.prepare("SELECT COALESCE(MAX(origin_seq), 0) + 1 AS next FROM events WHERE origin_node = ?").get(ctx.nodeId) as { next: number }
-  ).next;
+  const nextOriginSeq = allocateOriginSeq(db, ctx.nodeId);
   const payload = { model_id: FULL_MODEL_ID, dim: EMBEDDING_DIM, vector: [...vector] };
   db.transaction(() => {
     db.prepare(

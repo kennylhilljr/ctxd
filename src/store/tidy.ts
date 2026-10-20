@@ -13,6 +13,7 @@
  *   unflagEntry rather than duplicating its restore-status logic)
  */
 import type Database from "better-sqlite3";
+import { allocateOriginSeq } from "./origin-seq.js";
 import { newId, makeRev, revVersion } from "../core/ids.js";
 import { nowIso } from "../core/time.js";
 import { CtxdError } from "../core/errors.js";
@@ -190,7 +191,7 @@ export function setEntryStatus(ctx: WriteContext, ref: string, newStatus: string
   const rev = makeRev(revVersion(row.status_rev) + 1, eventId);
   const payload = { status: newStatus };
   const prev = { status: row.status };
-  const nextSeq = (db.prepare("SELECT COALESCE(MAX(origin_seq), 0) + 1 AS next FROM events WHERE origin_node = ?").get(ctx.nodeId) as { next: number }).next;
+  const nextSeq = allocateOriginSeq(db, ctx.nodeId);
   db.transaction(() => {
     db.prepare(
       `INSERT INTO events (event_id, origin_node, origin_seq, hlc, scope_id, entry_id, op, part, parent_revs, rev, client_id, session_ref, request_id, request_hash, payload, prev, received_at)

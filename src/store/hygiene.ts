@@ -10,6 +10,7 @@ import { applyEvent, recordSibling } from "./materialize.js";
 import { loadClient, loadScopeByName } from "./snapshot.js";
 import type { WriteContext } from "./write.js";
 import { signStoredEvent } from "../security/event-signatures.js";
+import { allocateOriginSeq } from "./origin-seq.js";
 
 /**
  * Quarantine, revert and release (SPEC v6 section 7.6.2-7.6.4): human-only cleanup for a
@@ -108,7 +109,7 @@ function entryIdFromRef(ref: string): string {
 }
 
 function nextOriginSeq(db: Database.Database, nodeId: string): number {
-  return (db.prepare("SELECT COALESCE(MAX(origin_seq), 0) + 1 AS next FROM events WHERE origin_node = ?").get(nodeId) as { next: number }).next;
+  return allocateOriginSeq(db, nodeId);
 }
 
 /** Allocates origin_seq once per transaction, matching store/write.ts's own seqAllocator. */

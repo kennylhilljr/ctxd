@@ -17,6 +17,7 @@
  * to apply to all of them (SPEC v8 4; `src/store/materialize.ts`'s `applyAclEvent`).
  */
 import type Database from "better-sqlite3";
+import { allocateOriginSeq } from "./origin-seq.js";
 import { makeRev, newId, revVersion } from "../core/ids.js";
 import { nowIso } from "../core/time.js";
 import { CtxdError } from "../core/errors.js";
@@ -219,7 +220,7 @@ export function buildReviewReport(db: Database.Database, rejectionWindowDays = 7
 }
 
 function nextOriginSeq(db: Database.Database, nodeId: string): number {
-  return (db.prepare("SELECT COALESCE(MAX(origin_seq), 0) + 1 AS next FROM events WHERE origin_node = ?").get(nodeId) as { next: number }).next;
+  return allocateOriginSeq(db, nodeId);
 }
 
 /** `ctxd review --approve <ref>` (human only): moves a proposed or conflicted entry to active. */

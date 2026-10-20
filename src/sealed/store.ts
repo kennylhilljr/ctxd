@@ -8,6 +8,7 @@ import type { SealedKeyProvider } from "./key-provider.js";
 import { loadVecExtension, VEC0_TABLE_SQL } from "../embed/vec.js";
 import { HlcClock } from "../core/hlc.js";
 import { purgeEntry } from "../store/purge.js";
+import { registerOriginSequenceCoordinator } from "../store/origin-seq.js";
 
 export interface SealedDatabaseProvider {
   open(path: string, key: Buffer, create: boolean): Database.Database;
@@ -90,9 +91,18 @@ function transferContent(source: Database.Database, target: Database.Database, s
 }
 
 function copyRoutingMetadata(source: Database.Database, target: Database.Database): void {
-  for (const table of ["nodes", "node_keys", "clients", "pools"] as const) {
+  for (const table of ["nodes", "node_origin_sequences", "node_keys", "clients", "pools"] as const) {
     copyRows(source, target, table, "1 = 1", []);
   }
+}
+
+function copyAccessMetadata(source: Database.Database, target: Database.Database): void {
+  copyRows(source, target, "pool_members", "1 = 1", []);
+  const scopes = (target.prepare("SELECT scope_id FROM scopes").all() as { scope_id: string }[]).map((row) => row.scope_id);
+  if (!scopes.length) return;
+  const marks = scopes.map(() => "?").join(",");
+  copyRows(source, target, "pool_grants", `scope_id IN (${marks})`, scopes);
+  copyRows(source, target, "client_grants", `scope_id IN (${marks})`, scopes);
 }
 
 export function createSealedPurgeReplay(
@@ -143,9 +153,11 @@ export class SealedPoolStore {
     const relative = `sealed/${poolId}.db`;
     const key = this.keys.create(poolId);
     const sealed = this.databases.open(`${this.dataDir}/${relative}`, key, true);
+    registerOriginSequenceCoordinator(sealed, this.main);
     const scopes = scopeIds(this.main, poolId);
     copyRoutingMetadata(this.main, sealed);
     transferContent(this.main, sealed, scopes);
+    copyAccessMetadata(this.main, sealed);
     eraseContent(this.main, scopes);
     sealed.close();
     void nodeId;
@@ -158,6 +170,7 @@ export class SealedPoolStore {
     const pool = this.main.prepare("SELECT sealed_file FROM pools WHERE pool_id = ? AND storage = 'sealed'").get(poolId) as { sealed_file: string } | undefined;
     if (!pool?.sealed_file) throw new Error("sealed pool not found");
     const sealed = this.databases.open(`${this.dataDir}/${pool.sealed_file}`, this.keys.get(poolId), false);
+    registerOriginSequenceCoordinator(sealed, this.main);
     this.openPools.set(poolId, { db: sealed, expiresAt: Date.now() + this.unlockMinutes * 60_000 });
     if (this.purgeReplay) this.replayQueuedPurges(poolId, this.purgeReplay);
   }
@@ -168,6 +181,7 @@ export class SealedPoolStore {
       const pool = this.main.prepare("SELECT sealed_file FROM pools WHERE pool_id = ? AND storage = 'sealed'").get(poolId) as { sealed_file: string } | undefined;
       if (!pool?.sealed_file) return;
       opened = { db: this.databases.open(`${this.dataDir}/${pool.sealed_file}`, this.keys.get(poolId), false), expiresAt: 0 };
+      registerOriginSequenceCoordinator(opened.db, this.main);
     }
     opened.db.close();
     this.openPools.delete(poolId);
@@ -194,6 +208,8 @@ export class SealedPoolStore {
     const opened = this.openPools.get(poolId);
     if (!opened) throw new Error("sealed pool failed to unlock");
     opened.expiresAt = Date.now() + this.unlockMinutes * 60_000;
+    copyRoutingMetadata(this.main, opened.db);
+    copyAccessMetadata(this.main, opened.db);
     return request(opened.db);
   }
 

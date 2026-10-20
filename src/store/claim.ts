@@ -12,6 +12,7 @@ import { applyEvent } from "./materialize.js";
 import { loadAccessSnapshot, loadClient, loadClientName, loadScopeByName } from "./snapshot.js";
 import { writeEntry, type WriteContext } from "./write.js";
 import { signStoredEvent } from "../security/event-signatures.js";
+import { allocateOriginSeq } from "./origin-seq.js";
 
 /**
  * context_claim (SPEC v6 section 7.5): claims are events in the task entry's history; `leases`
@@ -147,8 +148,7 @@ function resolveOrCreateTask(ctx: WriteContext, input: ClaimInput, scope: { id: 
 }
 
 function nextOriginSeq(db: Database.Database, nodeId: string): number {
-  return (db.prepare("SELECT COALESCE(MAX(origin_seq), 0) + 1 AS next FROM events WHERE origin_node = ?").get(nodeId) as { next: number })
-    .next;
+  return allocateOriginSeq(db, nodeId);
 }
 
 /** The session's last-observed git HEAD (src/cli/hook.ts writes this on every hook call), or null if unknown. */

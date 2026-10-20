@@ -19,6 +19,10 @@ import { HlcClock } from "../core/hlc.js";
 import { nowIso } from "../core/time.js";
 import { resolveBearerAuth } from "./auth.js";
 import type { RequestContext } from "./context.js";
+import type { SealedPoolStore } from "../sealed/store.js";
+import { accessLevel, atLeast } from "../access/level.js";
+import { loadAccessSnapshot, loadClient, loadScopeByName } from "../store/snapshot.js";
+import { parseRef } from "../model/refs.js";
 
 /**
  * MCP Streamable HTTP server on 127.0.0.1 (SPEC v6 sections 1 and 8): authenticates every
@@ -33,6 +37,7 @@ export interface StartServerOptions {
   listen: string;
   /** Reloaded fresh per request for live flag reload (PRD-feature-flags-v1 section 2); omitted means every flag uses its registry default. */
   configPath?: string;
+  sealedStore?: SealedPoolStore;
 }
 
 export interface RunningServer {
@@ -49,7 +54,7 @@ export async function startServer(opts: StartServerOptions): Promise<RunningServ
   const clock = new HlcClock(opts.nodeId);
 
   const httpServer = createHttpServer((req, res) => {
-    handleHttpRequest(req, res, opts.db, opts.nodeId, clock, opts.configPath).catch((err) => {
+    handleHttpRequest(req, res, opts.db, opts.nodeId, clock, opts.configPath, opts.sealedStore).catch((err) => {
       if (!res.headersSent) res.writeHead(500, { "content-type": "application/json" });
       res.end(JSON.stringify({ error: { code: "VALIDATION", message: (err as Error).message } }));
     });
@@ -108,6 +113,7 @@ async function handleHttpRequest(
   nodeId: string,
   clock: HlcClock,
   configPath?: string,
+  sealedStore?: SealedPoolStore,
 ): Promise<void> {
   if (req.method === "GET" && req.url === "/healthz") {
     res.writeHead(200, { "content-type": "text/plain" }).end("ok");
@@ -137,6 +143,7 @@ async function handleHttpRequest(
     assumedPools: auth.assumedPools,
     flags: currentFlags(configPath),
     dataDir: currentDataDir(configPath),
+    sealedStore,
   };
 
   let body: unknown;
@@ -180,7 +187,18 @@ async function handleToolCall(ctx: RequestContext, toolName: string, rawArgs: Re
 
   let result: unknown;
   try {
-    result = await handler(ctx, validated);
+    const routedScope = scopeNameForCall(validated);
+    if (routedScope && ctx.sealedStore) {
+      const scope = loadScopeByName(ctx.db, routedScope);
+      if (scope) {
+        const client = loadClient(ctx.db, ctx.clientId);
+        const required = toolName === "context_brief" || toolName === "context_search" || toolName === "context_get" || toolName === "context_flag" ? "read" : "write";
+        if (!client || !atLeast(accessLevel(client, scope, loadAccessSnapshot(ctx.db), Date.now(), ctx.assumedPools), required)) {
+          throw new CtxdError("SCOPE_FORBIDDEN", `No ${required} access to scope ${routedScope}`);
+        }
+        result = await ctx.sealedStore.forScope(scope.id, (routedDb) => handler({ ...ctx, db: routedDb }, validated));
+      } else result = await handler(ctx, validated);
+    } else result = await handler(ctx, validated);
   } catch (err) {
     if (err instanceof CtxdError) return errorResult(err, ctx, toolName, scopeId, coercions);
     throw err;
@@ -192,6 +210,21 @@ async function handleToolCall(ctx: RequestContext, toolName: string, rawArgs: Re
   const truncated = Boolean((result as { truncated?: boolean } | undefined)?.truncated);
   recordMetrics(ctx, toolName, scopeId, text, truncated);
   return { content: [{ type: "text", text }] };
+}
+
+function scopeNameForCall(input: Record<string, unknown>): string | null {
+  if (typeof input.scope === "string" && input.scope !== "*") return input.scope;
+  if (!Array.isArray(input.ids)) return null;
+  const names = new Set<string>();
+  for (const value of input.ids) {
+    if (typeof value !== "string") continue;
+    if (value.startsWith("ctxd://")) names.add(value.slice("ctxd://".length).split("/", 1)[0]!);
+    else {
+      const ref = parseRef(value);
+      if (ref?.scope) names.add(ref.scope);
+    }
+  }
+  return names.size === 1 ? [...names][0]! : null;
 }
 
 function errorResult(

@@ -35,8 +35,9 @@
  * Bumped to 17 for M6 hardening: signatures cover the immutable envelope and separate retained
  * payload hashes; peer records bind authenticated tokens to remote node identities and keys.
  * Bumped to 18: payload_stripped is trusted stored state for verified purge erasure.
+ * Bumped to 19: one durable origin sequence allocator coordinates shared and sealed stores.
  */
-export const SCHEMA_VERSION = 18;
+export const SCHEMA_VERSION = 19;
 
 export const SCHEMA_SQL = `
 CREATE TABLE nodes (
@@ -45,6 +46,11 @@ CREATE TABLE nodes (
   role         TEXT NOT NULL CHECK (role IN ('home','roaming')),
   revoked_at   TEXT,
   created_at   TEXT NOT NULL
+);
+
+CREATE TABLE node_origin_sequences (
+  node_id TEXT PRIMARY KEY,
+  next_seq INTEGER NOT NULL
 );
 
 CREATE TABLE node_keys (

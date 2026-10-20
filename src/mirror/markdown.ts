@@ -13,6 +13,7 @@ import type { EntryRow } from "../tools/support.js";
 import type { Kind, ScopeKind } from "../core/kinds.js";
 import { STATUSES } from "../core/kinds.js";
 import { canonicalJson } from "../store/idempotency.js";
+import { allocateOriginSeq } from "../store/origin-seq.js";
 import { applyEvent } from "../store/materialize.js";
 import { signStoredEvent } from "../security/event-signatures.js";
 import { setEntryStatus } from "../store/tidy.js";
@@ -161,7 +162,7 @@ function setReviewAfter(ctx: WriteContext, row: MarkdownRow, value: string | nul
   const rev = makeRev(revVersion(current.status_rev) + 1, eventId);
   const payload = { review_after: value };
   const prev = { review_after: current.review_after };
-  const seq = (ctx.db.prepare("SELECT COALESCE(MAX(origin_seq), 0) + 1 AS next FROM events WHERE origin_node = ?").get(ctx.nodeId) as { next: number }).next;
+  const seq = allocateOriginSeq(ctx.db, ctx.nodeId);
   ctx.db.transaction(() => {
     ctx.db.prepare(
       `INSERT INTO events (event_id, origin_node, origin_seq, hlc, scope_id, entry_id, op, part, parent_revs, rev, client_id, session_ref, request_id, request_hash, payload, prev, received_at)

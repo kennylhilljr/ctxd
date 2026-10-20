@@ -70,6 +70,20 @@ describe("sealed pools (Spec v9 section 10.6)", () => {
     expect(f.db.prepare("SELECT COUNT(*) AS n FROM entries").get()).toEqual({ n: 0 });
   });
 
+  it("allocates one origin sequence across shared and sealed databases", () => {
+    const f = fixture();
+    const relative = f.store.seal(f.poolId, f.nodeId);
+    f.db.prepare("UPDATE pools SET storage = 'sealed', sealed_file = ? WHERE pool_id = ?").run(relative, f.poolId);
+    f.db.prepare("INSERT INTO scopes (scope_id, name, created_at) VALUES (?, 'sample-app', ?)").run(newId(), new Date().toISOString());
+    writeEntry({ db: f.db, clock: new HlcClock(f.nodeId), nodeId: f.nodeId, clientId: f.humanId }, { scope: "sample-app", kind: "note", title: "Shared", body: "Shared body", request_id: newId() } as never);
+    f.store.withPool(f.poolId, (db) => {
+      writeEntry({ db, clock: new HlcClock(f.nodeId), nodeId: f.nodeId, clientId: f.humanId }, { scope: "private-a", kind: "note", title: "Second sealed", body: "Body", request_id: newId() } as never);
+    });
+    const shared = f.db.prepare("SELECT origin_seq FROM events ORDER BY origin_seq DESC LIMIT 1").get() as { origin_seq: number };
+    const sealed = f.store.withPool(f.poolId, (db) => db.prepare("SELECT origin_seq FROM events ORDER BY origin_seq DESC LIMIT 1").get() as { origin_seq: number });
+    expect(shared.origin_seq).not.toBe(sealed.origin_seq);
+  });
+
   it("replays queued purges inside the sealed store and removes the queue only after success", () => {
     const f = fixture();
     const relative = f.store.seal(f.poolId, f.nodeId);
