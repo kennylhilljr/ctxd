@@ -23,8 +23,12 @@
  * (`retryPendingFor`); `leases.earliest_claim_hlc` tracks a task's smallest claim_hlc across every
  * epoch, so a late-arriving concurrent claim is always resolved against the task's true earliest
  * claimant, not whichever claim happens to be current right now.
+ * Bumped to 13 for M5 slice 8 (semantic search, Spec 11.2.1): `events.part`'s CHECK now allows
+ * `'embedding'`; the new `embeddings` table materializes embedding vectors, current content
+ * only (like FTS), keyed by (entry_id, model_id) so a different model's vector is kept alongside
+ * rather than overwritten.
  */
-export const SCHEMA_VERSION = 12;
+export const SCHEMA_VERSION = 13;
 
 export const SCHEMA_SQL = `
 CREATE TABLE nodes (
@@ -80,7 +84,7 @@ CREATE TABLE events (
   scope_id     TEXT NOT NULL,
   entry_id     TEXT NOT NULL,
   op           TEXT NOT NULL CHECK (op IN ('create','update','status','delete','resolve','claim','release','relate','unrelate','flag','unflag','quarantine','unquarantine','revert','purge','acl','suspend','resume')),
-  part         TEXT NOT NULL CHECK (part IN ('content','status','relations','claim','meta')),
+  part         TEXT NOT NULL CHECK (part IN ('content','status','relations','claim','meta','embedding')),
   parent_revs  TEXT NOT NULL DEFAULT '[]',
   rev          TEXT NOT NULL,
   client_id    TEXT NOT NULL,
@@ -390,6 +394,16 @@ CREATE TABLE sync_state (
 
 CREATE VIRTUAL TABLE entries_fts USING fts5(
   title, body, tags, content='entries', content_rowid='rowid'
+);
+
+CREATE TABLE embeddings (               -- materialized from 'embedding' events (M5, 11.2.1); current content only, like FTS
+  entry_id     TEXT NOT NULL,
+  model_id     TEXT NOT NULL,           -- e.g. "Xenova/all-MiniLM-L6-v2@q8"
+  dim          INTEGER NOT NULL,
+  vector       TEXT NOT NULL,           -- JSON array of floats; sqlite-vec reads this into its own virtual table at query time
+  rev          TEXT NOT NULL,           -- the content rev this embedding was computed from
+  updated_hlc  TEXT NOT NULL,
+  PRIMARY KEY (entry_id, model_id)
 );
 
 CREATE TABLE commits (                 -- local facts recorded by the PostToolUse hook (SPEC v7 7.5)

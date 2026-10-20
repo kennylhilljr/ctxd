@@ -11,6 +11,8 @@ import { openDatabase } from "../../src/store/db.js";
 import { writeEntry, type WriteContext } from "../../src/store/write.js";
 import { flagEntry, unflagEntry } from "../../src/store/flag.js";
 import { previewPurge, purgeEntry } from "../../src/store/purge.js";
+import { upsertVecIndex } from "../../src/embed/vec.js";
+import { EMBEDDING_DIM } from "../../src/embed/model.js";
 import { rebuild } from "../../src/store/rebuild.js";
 import { CtxdError } from "../../src/core/errors.js";
 
@@ -289,5 +291,26 @@ describe("ctxd rebuild replays unflag deterministically (AGENTS.md: sync/apply c
     rebuild(f.db);
     const after = dumpHash(f.db);
     expect(after).toBe(before);
+  });
+});
+
+describe("purgeEntry deletes embeddings too (SPEC v8 11.2.1)", () => {
+  it("removes the entry's embeddings and vec0 index rows on purge", () => {
+    const f = setup();
+    const created = writeEntry(writeCtx(f, f.humanId), { scope: "notes", kind: "note", title: "N", body: "x", request_id: newId() } as never);
+    if ("held" in created) throw new Error("unexpected hold");
+
+    const vector = new Array(EMBEDDING_DIM).fill(0);
+    vector[0] = 1;
+    f.db
+      .prepare("INSERT INTO embeddings (entry_id, model_id, dim, vector, rev, updated_hlc) VALUES (?, 'm@q8', ?, ?, ?, ?)")
+      .run(created.id, EMBEDDING_DIM, JSON.stringify(vector), created.rev, now());
+    upsertVecIndex(f.db, created.id, "m@q8", EMBEDDING_DIM, vector);
+    const row = f.db.prepare("SELECT rowid FROM embeddings WHERE entry_id = ?").get(created.id) as { rowid: number };
+
+    purgeEntry(writeCtx(f, f.humanId), created.ref, "test purge");
+
+    expect(f.db.prepare("SELECT 1 FROM embeddings WHERE entry_id = ?").get(created.id)).toBeUndefined();
+    expect(f.db.prepare("SELECT 1 FROM embeddings_vec0 WHERE rowid = ?").get(row.rowid)).toBeUndefined();
   });
 });

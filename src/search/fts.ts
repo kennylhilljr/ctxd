@@ -19,6 +19,8 @@ import { formatRef } from "../model/refs.js";
 import { CtxdError } from "../core/errors.js";
 import { score } from "./rank.js";
 import type { RequestContext } from "../server/context.js";
+import { isModelCached, loadEmbedder } from "../embed/model.js";
+import { vecSearch } from "../embed/vec.js";
 
 /**
  * Full-text search (SPEC v6 section 11.2): FTS5 bm25 blended with importance, path/since/until
@@ -101,7 +103,64 @@ function scopeOfPath(path: string): string {
   throw new CtxdError("VALIDATION", "path must be inside a scope", {}, "path");
 }
 
-export function runSearch(ctx: RequestContext, input: SearchInput): { results: SearchResultRow[]; truncated: boolean; hint?: string } {
+const RRF_K = 60;
+const RRF_VEC_CANDIDATES = 200;
+
+/** Best-match-first rank (1-based) of each row with a bm25 value; rows with none (vector-only matches) are absent. */
+function ftsRanks(rows: readonly (EntryRow & { bm25?: number })[]): Map<string, number> {
+  const withBm25 = rows.filter((r) => r.bm25 !== undefined).sort((a, b) => (a.bm25 as number) - (b.bm25 as number));
+  return new Map(withBm25.map((r, i) => [r.entry_id, i + 1]));
+}
+
+/**
+ * Hybrid relevance (SPEC v8 11.2's M5 note): FTS and vector results each ranked independently,
+ * combined by reciprocal rank fusion rather than a weighted blend of raw scores, since bm25 and
+ * cosine distance are incomparable scales. Returns null when semantic_search is off or the
+ * model is not cached, so the caller falls back to the exact pre-M5 bm25-normalized relevance,
+ * unchanged ("exactly as it does with semantic_search off"). May append vector-only matches (no
+ * FTS keyword overlap -- the whole point of semantic search) to `rows`; the caller re-filters by
+ * scope and kind, since the vec0 index behind vecSearch has no scope or kind awareness.
+ */
+async function hybridRelevance(
+  ctx: RequestContext,
+  query: string,
+  rows: (EntryRow & { bm25?: number })[],
+  loadEmbedderFn: typeof loadEmbedder = loadEmbedder,
+): Promise<Map<string, number> | null> {
+  if (!isFlagOn(ctx.flags, "semantic_search") || !ctx.dataDir || !isModelCached(ctx.dataDir)) return null;
+  const embedder = await loadEmbedderFn(ctx.dataDir);
+  if (!embedder) return null;
+
+  const queryVector = await embedder.embed(query);
+  const vecMatches = vecSearch(ctx.db, queryVector, RRF_VEC_CANDIDATES);
+  const vecRankByEntry = new Map(vecMatches.map((m) => [m.entryId, m.rank]));
+
+  const known = new Set(rows.map((r) => r.entry_id));
+  const missing = vecMatches.map((m) => m.entryId).filter((id) => !known.has(id));
+  if (missing.length) {
+    const extra = ctx.db
+      .prepare(`SELECT ${entryColumns("e")} FROM entries e WHERE e.entry_id IN (${missing.map(() => "?").join(",")})`)
+      .all(...missing) as EntryRow[];
+    rows.push(...extra);
+  }
+
+  const ftsRankByEntry = ftsRanks(rows);
+  const rrf = new Map<string, number>();
+  for (const row of rows) {
+    const ftsRank = ftsRankByEntry.get(row.entry_id);
+    const vecRank = vecRankByEntry.get(row.entry_id);
+    rrf.set(row.entry_id, (ftsRank !== undefined ? 1 / (RRF_K + ftsRank) : 0) + (vecRank !== undefined ? 1 / (RRF_K + vecRank) : 0));
+  }
+  const maxRrf = Math.max(1e-9, ...rrf.values());
+  for (const [id, v] of rrf) rrf.set(id, v / maxRrf);
+  return rrf;
+}
+
+export async function runSearch(
+  ctx: RequestContext,
+  input: SearchInput,
+  loadEmbedderFn: typeof loadEmbedder = loadEmbedder,
+): Promise<{ results: SearchResultRow[]; truncated: boolean; hint?: string }> {
   const { db } = ctx;
   const snapshot = loadAccessSnapshot(db);
   const scopes = candidateScopes(db, ctx, snapshot, input.scope ?? (input.path ? scopeOfPath(input.path) : undefined));
@@ -129,12 +188,16 @@ export function runSearch(ctx: RequestContext, input: SearchInput): { results: S
         )
         .all(input.query, ...scopeIds, ...kindArgs) as (EntryRow & { bm25: number })[]);
 
-  const maxBm25 = isListMode ? 1 : Math.max(1e-9, ...rows.map((r) => -(r.bm25 ?? 0)));
+  const rrf = isListMode ? null : await hybridRelevance(ctx, input.query, rows, loadEmbedderFn);
+  const scopeIdSet = new Set(scopeIds);
+  const candidateRows = rrf ? rows.filter((r) => scopeIdSet.has(r.scope_id) && (!input.kinds?.length || input.kinds.includes(r.kind))) : rows;
+
+  const maxBm25 = isListMode ? 1 : Math.max(1e-9, ...rows.filter((r) => r.bm25 !== undefined).map((r) => -(r.bm25 as number)));
   const now = Date.now();
   const importanceOn = isFlagOn(ctx.flags, "importance");
 
   const scored: (SearchResultRow & { _score: number })[] = [];
-  for (const row of rows) {
+  for (const row of candidateRows) {
     if (EXCLUDED_STATUSES.has(row.status) || row.purged_at) continue;
     if (!input.include_proposed && row.status === "proposed") continue;
     if (row.kind === "skill" && row.status === "proposed" && ctx.vendor !== "human" && row.created_by !== ctx.clientId) continue;
@@ -151,7 +214,7 @@ export function runSearch(ctx: RequestContext, input: SearchInput): { results: S
     const flagged = flags.some((f) => f.resolved === null);
 
     const scopeInfo = scopes.find((s) => s.id === row.scope_id)!;
-    const relevance = isListMode ? 0 : Math.max(0, -(row.bm25 ?? 0)) / maxBm25;
+    const relevance = isListMode ? 0 : rrf ? rrf.get(row.entry_id) ?? 0 : Math.max(0, -(row.bm25 ?? 0)) / maxBm25;
     const imp = importanceOn ? entryImportance(db, row, now) : 0;
     let s = isListMode ? imp : score(relevance, imp);
     s *= scopeInfo.multiplier;

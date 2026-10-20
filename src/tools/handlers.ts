@@ -17,7 +17,7 @@ import type { ClaimInput } from "../store/claim.js";
  * One MCP tool's implementation: validated input in, a JSON-serializable result out (or it
  * throws a CtxdError, which the server turns into the error envelope, SPEC v6 section 8.5).
  */
-export type ToolHandler = (ctx: RequestContext, input: Record<string, unknown>) => unknown;
+export type ToolHandler = (ctx: RequestContext, input: Record<string, unknown>) => unknown | Promise<unknown>;
 
 /** Registry the server dispatches `tools/call` through. All seven M1 tools are live. */
 export const TOOL_HANDLERS: Record<string, ToolHandler> = {

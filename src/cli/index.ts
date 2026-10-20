@@ -43,6 +43,7 @@ import { run as runWorkerCommand } from "./worker.js";
 import { run as runTidyCommand } from "./tidy.js";
 import { run as runDigestCommand } from "./digest.js";
 import { run as runSkillsCommand } from "./skills.js";
+import { run as runModelCommand } from "./model.js";
 
 /** Each command's parsed-args entry point, added as its milestone lands. */
 const COMMAND_RUNNERS: Record<string, (argv: string[]) => number | Promise<number>> = {
@@ -88,6 +89,7 @@ const COMMAND_RUNNERS: Record<string, (argv: string[]) => number | Promise<numbe
   tidy: runTidyCommand,
   digest: runDigestCommand,
   skills: runSkillsCommand,
+  model: runModelCommand,
 };
 
 const COMMANDS: Record<string, { milestone: string; summary: string }> = {
@@ -139,6 +141,7 @@ const COMMANDS: Record<string, { milestone: string; summary: string }> = {
   signals: { milestone: "M2", summary: "Open blockers, incidents, blocking tasks and flags" },
   stats: { milestone: "M1", summary: "Response sizes per tool and client" },
   features: { milestone: "M3", summary: "List or set feature flags" },
+  model: { milestone: "M5", summary: "Fetch or check the local embedding model" },
 };
 
 function usage(): string {

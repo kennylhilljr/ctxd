@@ -5,7 +5,7 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { assertLoopback } from "../security/policy.js";
-import { loadConfig } from "../config/config.js";
+import { expandHome, loadConfig } from "../config/config.js";
 import { isFlagOn, resolveFlags } from "../config/flags.js";
 import { extractBearerToken, parseListen, readJsonBody } from "./http.js";
 import { toolDefinitions } from "../tools/list.js";
@@ -92,6 +92,15 @@ function currentFlags(configPath: string | undefined): Map<string, boolean> {
   return flags;
 }
 
+/** The node's data directory, for loading the local embedding model at query time (SPEC v8 11.2). */
+function currentDataDir(configPath: string | undefined): string | undefined {
+  try {
+    return expandHome(loadConfig(configPath).node.data_dir);
+  } catch {
+    return undefined;
+  }
+}
+
 async function handleHttpRequest(
   req: IncomingMessage,
   res: ServerResponse,
@@ -127,6 +136,7 @@ async function handleHttpRequest(
     vendor: auth.vendor,
     assumedPools: auth.assumedPools,
     flags: currentFlags(configPath),
+    dataDir: currentDataDir(configPath),
   };
 
   let body: unknown;
@@ -170,7 +180,7 @@ async function handleToolCall(ctx: RequestContext, toolName: string, rawArgs: Re
 
   let result: unknown;
   try {
-    result = handler(ctx, validated);
+    result = await handler(ctx, validated);
   } catch (err) {
     if (err instanceof CtxdError) return errorResult(err, ctx, toolName, scopeId, coercions);
     throw err;

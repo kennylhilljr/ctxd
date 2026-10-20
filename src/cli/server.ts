@@ -12,6 +12,7 @@ import { runSync } from "./sync.js";
 import { HlcClock } from "../core/hlc.js";
 import type { WriteContext } from "../store/write.js";
 import { runDueDigests } from "../journal/digest.js";
+import { embedPendingEntries, ensureEmbedClient } from "../embed/compute.js";
 
 export async function run(argv: string[]): Promise<number> {
   const { values } = parseArgs({
@@ -118,12 +119,35 @@ export async function run(argv: string[]): Promise<number> {
     }
   }
 
+  // Catch-up embedding (SPEC 11.2.1): off by default (writes outside ctxd's own data folder
+  // stay off by default -- the model cache -- and this also skips entirely, with no error, if
+  // the model was never fetched via `ctxd model fetch`).
+  let embedInterval: NodeJS.Timeout | undefined;
+  if (isFlagOn(flags, "semantic_search.compute")) {
+    let embedding = false;
+    const embedCtx: WriteContext = { db, clock: new HlcClock(node.node_id), nodeId: node.node_id, clientId: ensureEmbedClient(db, node.node_id) };
+    const tick = (): void => {
+      if (embedding) return;
+      embedding = true;
+      embedPendingEntries(embedCtx, dataDir)
+        .catch((err: unknown) => {
+          console.error(`ctxd server: embedding tick failed: ${err instanceof Error ? err.message : String(err)}`);
+        })
+        .finally(() => {
+          embedding = false;
+        });
+    };
+    tick();
+    embedInterval = setInterval(tick, 30_000);
+  }
+
   let stopping = false;
   const stop = (): void => {
     if (stopping) return;
     stopping = true;
     if (pullInterval) clearInterval(pullInterval);
     if (digestInterval) clearInterval(digestInterval);
+    if (embedInterval) clearInterval(embedInterval);
     void Promise.all([server.close(), syncServer?.close()]).then(() => {
       db.close();
       process.exit(0);

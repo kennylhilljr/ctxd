@@ -4,6 +4,7 @@ import { compareHlc, decodeHlc } from "../core/hlc.js";
 import { LWW_CONTENT_KINDS, type Kind } from "../core/kinds.js";
 import { persistOverlaps, scanOverlappingLeases } from "../claims/overlap.js";
 import { loadClient } from "./snapshot.js";
+import { removeFromVecIndex, upsertVecIndex } from "../embed/vec.js";
 
 /**
  * Turns one already-appended event into its effect on `entries` and `relations` (SPEC v6
@@ -17,7 +18,7 @@ export interface EventForMaterialize {
   scopeId: string;
   entryId: string;
   op: string;
-  part: "content" | "status" | "relations" | "claim" | "meta";
+  part: "content" | "status" | "relations" | "claim" | "meta" | "embedding";
   rev: string;
   clientId: string;
   hlc: string;
@@ -670,12 +671,31 @@ function applyEventCore(db: Database.Database, e: EventForMaterialize, skipFts: 
       // operation that rewrites events, ADR-0002's own carve-out) -- but not this purge event
       // itself, whose own payload is exactly what records the fingerprint that blocks reinsertion.
       db.prepare("UPDATE events SET payload = '{\"purged\":true}', prev = NULL WHERE entry_id = ? AND event_id != ?").run(e.entryId, e.eventId);
+      // Embeddings (SPEC 11.2.1): deleted on every node, same as the entry's other content. A
+      // plain DELETE on an already-empty set is a harmless no-op, unlike the FTS 'delete' command
+      // above, but grouped here anyway as part of the same one-time erasure.
+      const embeddingRows = db.prepare("SELECT rowid FROM embeddings WHERE entry_id = ?").all(e.entryId) as { rowid: number }[];
+      for (const er of embeddingRows) removeFromVecIndex(db, er.rowid);
+      db.prepare("DELETE FROM embeddings WHERE entry_id = ?").run(e.entryId);
     }
     return;
   }
 
   if (e.part === "meta" && e.op === "acl") {
     applyAclEvent(db, e);
+    return;
+  }
+
+  // Embeddings (SPEC 11.2.1): current content only, like FTS -- a later vector for the same
+  // (entry, model) replaces the earlier one; a different model_id is kept alongside, never
+  // overwritten, so a model change is additive rather than a silent mix of vector spaces.
+  if (e.part === "embedding" && e.op === "update") {
+    const p = e.payload as unknown as { model_id: string; dim: number; vector: number[] };
+    db.prepare(
+      `INSERT INTO embeddings (entry_id, model_id, dim, vector, rev, updated_hlc) VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT (entry_id, model_id) DO UPDATE SET dim = excluded.dim, vector = excluded.vector, rev = excluded.rev, updated_hlc = excluded.updated_hlc`,
+    ).run(e.entryId, p.model_id, p.dim, JSON.stringify(p.vector), e.rev, e.hlc);
+    upsertVecIndex(db, e.entryId, p.model_id, p.dim, p.vector);
     return;
   }
 
