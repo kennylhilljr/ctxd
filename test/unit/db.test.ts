@@ -52,6 +52,28 @@ describe("openDatabase (SPEC v6 section 4)", () => {
     expect(() => openDatabase(path)).toThrow(/schema version/);
   });
 
+  it("migrates a version-19 database by adding sessions.cwd (W5.2)", () => {
+    const path = tmpDbPath();
+    const fresh = openDatabase(path, { create: true });
+    fresh.prepare("INSERT INTO nodes (node_id, name, role, created_at) VALUES ('n1','air','home','t')").run();
+    fresh.prepare(
+      "INSERT INTO clients (client_id, name, vendor, node_id, token_hash, created_at) VALUES ('c1','human','human','n1','h','t')",
+    ).run();
+    fresh.prepare(
+      "INSERT INTO sessions (session_ref, client_id, scope_id, state, started_at, last_seen_hlc, head, cwd, recovery) VALUES ('c1:s1','c1',NULL,'active','t','h',NULL,'/old/cwd',NULL)",
+    ).run();
+    // Simulate a pre-W5.2 database: drop the column this slice adds, and roll user_version back.
+    fresh.exec("ALTER TABLE sessions DROP COLUMN cwd");
+    fresh.pragma("user_version = 19");
+    fresh.close();
+
+    const migrated = openDatabase(path);
+    expect(migrated.pragma("user_version", { simple: true })).toBe(SCHEMA_VERSION);
+    const row = migrated.prepare("SELECT cwd FROM sessions WHERE session_ref = 'c1:s1'").get() as { cwd: string | null };
+    expect(row.cwd).toBeNull();
+    migrated.close();
+  });
+
   it("enforces foreign keys", () => {
     const path = tmpDbPath();
     const db = openDatabase(path, { create: true });

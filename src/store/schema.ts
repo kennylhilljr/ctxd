@@ -35,9 +35,11 @@
  * Bumped to 17 for M6 hardening: signatures cover the immutable envelope and separate retained
  * payload hashes; peer records bind authenticated tokens to remote node identities and keys.
  * Bumped to 18: payload_stripped is trusted stored state for verified purge erasure.
- * Bumped to 19: one durable origin sequence allocator coordinates shared and sealed stores.
+ * Bumped to 20 for W5 slice 2: `sessions.cwd`, recorded at SessionStart and kept for that
+ * session's lifetime, so the crash sweep can run the same mechanical release and journal entry a
+ * real SessionEnd runs, for a session that crashed and never got there (SPEC 9.10).
  */
-export const SCHEMA_VERSION = 19;
+export const SCHEMA_VERSION = 20;
 
 export const SCHEMA_SQL = `
 CREATE TABLE nodes (
@@ -430,6 +432,7 @@ CREATE TABLE sessions (
   started_at   TEXT NOT NULL,
   last_seen_hlc TEXT NOT NULL,
   head         TEXT,                  -- latest observed git HEAD
+  cwd          TEXT,                  -- recorded at SessionStart, kept for the session's life (9.10's crash sweep)
   recovery     TEXT,                  -- JSON: {task_id?, phase, last_request_summary}; no transcript content
   ended_by     TEXT                   -- NULL for a real client end hook; 'sweep' when the crash sweep finalized it (9.10)
 );

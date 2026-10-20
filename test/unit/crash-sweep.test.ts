@@ -49,6 +49,18 @@ function staleHlc(nodeId: string, minutesAgo: number): string {
   return encodeHlc({ physical: Date.now() - minutesAgo * 60_000, counter: 0, node: nodeId });
 }
 
+function setupWithScope(): Fixture & { scopeId: string } {
+  const f = setup();
+  const scopeId = newId();
+  f.db.prepare("INSERT INTO scopes (scope_id, name, created_at) VALUES (?, 'notes', ?)").run(scopeId, now());
+  f.db.prepare("INSERT INTO client_grants (client_id, scope_id, level, expires_at, granted_by) VALUES (?, ?, 'write', ?, 'human')").run(
+    f.clientId,
+    scopeId,
+    new Date(Date.now() + 86_400_000).toISOString(),
+  );
+  return { ...f, scopeId };
+}
+
 describe("crashSweep (SPEC v6 section 9.10)", () => {
   it("finalizes a session silent longer than the grace period as ended, recording ended_by: sweep", () => {
     const f = setup();
@@ -123,6 +135,52 @@ describe("crashSweep (SPEC v6 section 9.10)", () => {
   });
 });
 
+describe("crashSweep's mechanical release and journal entry for a crashed session (W5.2)", () => {
+  it("writes the mechanical journal entry when the session recorded a cwd and scope", () => {
+    const f = setupWithScope();
+    upsertSession(f.db, { sessionRef: "claude-code:crashed-5", clientId: f.clientId, scopeId: f.scopeId, event: "session-start", nodeId: f.nodeId, clearRecovery: true, cwd: "/tmp" });
+    f.db.prepare("UPDATE sessions SET last_seen_hlc = ? WHERE session_ref = ?").run(staleHlc(f.nodeId, 45), "claude-code:crashed-5");
+
+    crashSweep(f.db, f.nodeId, 30, new Map([["claims.mechanical_release", true]]));
+
+    const row = f.db.prepare("SELECT title FROM entries WHERE scope_id = ? AND kind = 'journal'").get(f.scopeId) as { title: string } | undefined;
+    expect(row?.title).toBe("Session ended: claude-code");
+  });
+
+  it("does nothing beyond finalizing when claims.mechanical_release is off", () => {
+    const f = setupWithScope();
+    upsertSession(f.db, { sessionRef: "claude-code:crashed-6", clientId: f.clientId, scopeId: f.scopeId, event: "session-start", nodeId: f.nodeId, clearRecovery: true, cwd: "/tmp" });
+    f.db.prepare("UPDATE sessions SET last_seen_hlc = ? WHERE session_ref = ?").run(staleHlc(f.nodeId, 45), "claude-code:crashed-6");
+
+    crashSweep(f.db, f.nodeId, 30, new Map([["claims.mechanical_release", false]]));
+
+    const row = f.db.prepare("SELECT title FROM entries WHERE scope_id = ? AND kind = 'journal'").get(f.scopeId) as { title: string } | undefined;
+    expect(row).toBeUndefined();
+    const session = f.db.prepare("SELECT state, ended_by FROM sessions WHERE session_ref = ?").get("claude-code:crashed-6") as { state: string; ended_by: string | null };
+    expect(session.state).toBe("ended");
+    expect(session.ended_by).toBe("sweep");
+  });
+
+  it("does nothing beyond finalizing for a pre-W5.2 session with no recorded cwd", () => {
+    const f = setupWithScope();
+    upsertSession(f.db, { sessionRef: "claude-code:crashed-7", clientId: f.clientId, scopeId: f.scopeId, event: "session-start", nodeId: f.nodeId, clearRecovery: true });
+    f.db.prepare("UPDATE sessions SET last_seen_hlc = ? WHERE session_ref = ?").run(staleHlc(f.nodeId, 45), "claude-code:crashed-7");
+
+    crashSweep(f.db, f.nodeId, 30, new Map([["claims.mechanical_release", true]]));
+
+    const row = f.db.prepare("SELECT title FROM entries WHERE scope_id = ? AND kind = 'journal'").get(f.scopeId) as { title: string } | undefined;
+    expect(row).toBeUndefined();
+  });
+
+  it("does nothing beyond finalizing for a session with no scope", () => {
+    const f = setup();
+    upsertSession(f.db, { sessionRef: "claude-code:crashed-8", clientId: f.clientId, scopeId: null, event: "session-start", nodeId: f.nodeId, clearRecovery: true, cwd: "/tmp" });
+    f.db.prepare("UPDATE sessions SET last_seen_hlc = ? WHERE session_ref = ?").run(staleHlc(f.nodeId, 45), "claude-code:crashed-8");
+
+    expect(() => crashSweep(f.db, f.nodeId, 30, new Map([["claims.mechanical_release", true]]))).not.toThrow();
+  });
+});
+
 describe("the registered session-start handler (via dispatchWithDb)", () => {
   it("runs the crash sweep as a side effect alongside whatever read moments returns", async () => {
     // Read moments (slice 7) registers its own session-start output on top of the crash sweep's
@@ -159,18 +217,6 @@ describe("sweepLeftoverTickets (SPEC 9.7): a SessionEnd ticket a crash or reboot
     const past = new Date(Date.now() - ageMinutes * 60_000);
     utimesSync(path, past, past);
     return path;
-  }
-
-  function setupWithScope(): Fixture & { scopeId: string } {
-    const f = setup();
-    const scopeId = newId();
-    f.db.prepare("INSERT INTO scopes (scope_id, name, created_at) VALUES (?, 'notes', ?)").run(scopeId, now());
-    f.db.prepare("INSERT INTO client_grants (client_id, scope_id, level, expires_at, granted_by) VALUES (?, ?, 'write', ?, 'human')").run(
-      f.clientId,
-      scopeId,
-      new Date(Date.now() + 86_400_000).toISOString(),
-    );
-    return { ...f, scopeId };
   }
 
   it("leaves a fresh ticket alone (its own worker may still be running)", async () => {

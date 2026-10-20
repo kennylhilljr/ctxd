@@ -107,6 +107,13 @@ export function openDatabase(path: string, { create = false }: OpenDatabaseOptio
       db.pragma("user_version = 19");
     })();
   }
+  const sessionCwdVersion = db.pragma("user_version", { simple: true }) as number;
+  if (sessionCwdVersion === 19 && SCHEMA_VERSION >= 20) {
+    db.transaction(() => {
+      db.exec("ALTER TABLE sessions ADD COLUMN cwd TEXT");
+      db.pragma("user_version = 20");
+    })();
+  }
   const sequenceVersion = db.pragma("user_version", { simple: true }) as number;
   if (sequenceVersion !== SCHEMA_VERSION) {
     db.close();

@@ -24,7 +24,7 @@ HOOK_HANDLERS["session-start"] = async (ctx: HookContext): Promise<HookResult> =
   if (isFlagOn(ctx.flags, "hooks.crash_sweep")) {
     const graceMinutes = ctx.config?.hooks.crash_grace_minutes ?? 30;
     await withDeadline(300, async () => {
-      crashSweep(ctx.db, ctx.nodeId, graceMinutes);
+      crashSweep(ctx.db, ctx.nodeId, graceMinutes, ctx.flags);
       await sweepLeftoverTickets(ctx.db, ctx.nodeId, ctx.dataDir, graceMinutes, ctx.flags);
     });
   }

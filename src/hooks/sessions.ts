@@ -34,6 +34,8 @@ export interface UpsertSessionInput {
   /** Explicit recovery to set (e.g. PreCompact's phase and summary); omit to leave the existing value alone. */
   recovery?: RecoveryIntent | null;
   head?: string | null;
+  /** The session's cwd, recorded only on its first upsert (SessionStart): left out of the ON CONFLICT SET below so it survives for the session's life rather than tracking whatever cwd a later event happens to report. */
+  cwd?: string | null;
 }
 
 /** Whether this event changes session state at all (subagent-start, user-prompt-submit, pre/post-tool-use don't). */
@@ -52,10 +54,10 @@ export function upsertSession(db: Database.Database, input: UpsertSessionInput):
   const startedAt = existing?.started_at ?? nowIso();
 
   db.prepare(
-    `INSERT INTO sessions (session_ref, client_id, scope_id, state, started_at, last_seen_hlc, head, recovery)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO sessions (session_ref, client_id, scope_id, state, started_at, last_seen_hlc, head, cwd, recovery)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (session_ref) DO UPDATE SET
        client_id = excluded.client_id, scope_id = excluded.scope_id, state = excluded.state,
        last_seen_hlc = excluded.last_seen_hlc, head = excluded.head, recovery = excluded.recovery`,
-  ).run(input.sessionRef, input.clientId, input.scopeId, state, startedAt, hlc, input.head ?? null, recovery);
+  ).run(input.sessionRef, input.clientId, input.scopeId, state, startedAt, hlc, input.head ?? null, input.cwd ?? null, recovery);
 }
