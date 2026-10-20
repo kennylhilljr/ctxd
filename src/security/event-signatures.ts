@@ -71,7 +71,7 @@ function signatureBytes(event: SignedEventFields, payloadHash: string, prevHash:
   }));
 }
 
-function databasePath(db: Database.Database): string {
+export function databasePath(db: Database.Database): string {
   const row = db.prepare("SELECT file FROM pragma_database_list WHERE name = 'main'").get() as { file: string };
   return row.file;
 }
