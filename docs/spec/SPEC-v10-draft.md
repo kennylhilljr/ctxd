@@ -20,3 +20,10 @@ Closes the gap 9.10 already described but the implementation had not reached: a 
 - `sessions.cwd` (schema v20) is recorded once, at SessionStart, and kept for that session's life; a later event's reported `cwd` never overwrites it.
 - The crash sweep now runs the same mechanical journal entry and claim release a real SessionEnd runs (`performSessionEnd`), for a finalized session that has a recorded `cwd` and scope, gated behind `claims.mechanical_release` (the same flag that already gates live SessionEnd's release).
 - A session with no recorded `cwd` (a row from before this slice) or no scope is only finalized, exactly as before this slice.
+
+### W5.3 List mode ordering
+
+Fixes a bug against Spec v9's own 11.2: "With `query: '*'` and a time filter, results are listed newest first instead of by relevance." The implementation listed by time at the SQL level, but then re-sorted the results by a score that, in list mode, was the entry's importance, whatever the `importance` flag said.
+
+- List mode (`query: "*"`) now lists strictly by time in both `importance` flag states: every list-mode row gets `_score = 0`, so the final stable sort leaves the SQL's own time-descending order alone.
+- The scope fan-out multipliers (0.9/0.8/1.0, 11.2) and the flagged-entry penalty are relevance adjustments; they apply only to scored (non-`"*"`) search, never to list mode.
