@@ -165,3 +165,41 @@ describe("sealed pools (Spec v9 section 10.6)", () => {
     expect(JSON.stringify(allowed.events[0])).not.toContain("Sensitive body");
   });
 });
+
+/**
+ * A sealed file gets its schema once, at creation (`SealedDatabaseProvider.open`'s `create &&
+ * user_version === 0` branch), and `openDatabase`'s migration chain only ever ran against the main
+ * database. So a pool sealed before a schema bump stayed at its old version forever, and the first
+ * write that used a newly added column failed inside the encrypted file. W10 made that concrete by
+ * adding `entries.origin` at schema 23.
+ */
+describe("sealed pools are migrated, not frozen at the schema they were created with (W10 review)", () => {
+  it("accepts an entry written into a sealed file created at schema 22", () => {
+    const f = fixture();
+    const relative = f.store.seal(f.poolId, f.nodeId);
+    f.db.prepare("UPDATE pools SET storage = 'sealed', sealed_file = ? WHERE pool_id = ?").run(relative, f.poolId);
+    f.store.lock(f.poolId);
+
+    // Roll the sealed file back to look like one sealed before schema 23, the same way
+    // test/unit/db.test.ts simulates an older main database.
+    const sealedPath = join(f.root, relative);
+    const old = openDatabase(sealedPath, { create: false });
+    old.exec("ALTER TABLE entries DROP COLUMN origin");
+    old.pragma("user_version = 22");
+    old.close();
+
+    // The real write path into a sealed scope: open the pool and write through it. Before sealed
+    // files were migrated on open this threw "no such column: origin".
+    const written = f.store.withPool(f.poolId, (sealed) =>
+      writeEntry(
+        { db: sealed, clock: new HlcClock(f.nodeId), nodeId: f.nodeId, clientId: f.humanId, origin: { source: "mobile-inbox", captured_at: "2026-10-21T09:30:00.000Z" } },
+        { scope: "private-a", kind: "note", title: "Captured later", body: "Written after the bump.", request_id: newId() } as never,
+      ),
+    );
+    if ("held" in written) throw new Error("unexpected hold");
+
+    const row = f.store.withPool(f.poolId, (sealed) => sealed.prepare("SELECT origin FROM entries WHERE entry_id = ?").get(written.id)) as { origin: string | null };
+    expect(JSON.parse(row.origin as string)).toEqual({ source: "mobile-inbox", captured_at: "2026-10-21T09:30:00.000Z" });
+    f.store.close();
+  });
+});

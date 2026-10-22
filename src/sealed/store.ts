@@ -5,6 +5,7 @@ import { dirname } from "node:path";
 import type Database from "better-sqlite3";
 import BetterSqlite3 from "better-sqlite3";
 import { SCHEMA_SQL, SCHEMA_VERSION } from "../store/schema.js";
+import { migrateSchema } from "../store/db.js";
 import type { SealedKeyProvider } from "./key-provider.js";
 import { loadVecExtension, VEC0_TABLE_SQL } from "../embed/vec.js";
 import { HlcClock } from "../core/hlc.js";
@@ -34,6 +35,9 @@ export class SqlCipherDatabaseProvider implements SealedDatabaseProvider {
       db.exec(VEC0_TABLE_SQL);
       db.pragma(`user_version = ${SCHEMA_VERSION}`);
     }
+    // Walk the same migration chain the main database gets: a sealed file created at an older
+    // schema would otherwise stay there forever (see migrateSchema).
+    migrateSchema(db);
     return db;
   }
 
@@ -57,6 +61,9 @@ export class TestDatabaseProvider implements SealedDatabaseProvider {
       db.exec(VEC0_TABLE_SQL);
       db.pragma(`user_version = ${SCHEMA_VERSION}`);
     }
+    // Walk the same migration chain the main database gets: a sealed file created at an older
+    // schema would otherwise stay there forever (see migrateSchema).
+    migrateSchema(db);
     return db;
   }
 

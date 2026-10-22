@@ -52,7 +52,9 @@ satisfies all three.
 
 ## Verification
 
-`npm run typecheck` and `npm test`: 846 of 846 tests passing across 79 files. New or changed:
+`npm run typecheck`, `npm run build` and `npm test`: 866 of 866 tests passing across 81 files
+(the count rose after rebasing onto a `main` that had taken W8 and W9, plus the two review fixes
+above). New or changed:
 
 - `db.test.ts`: a 22 to 23 migration test (an entry written before the column reads NULL after
   migrating), plus the three existing simulated-old-version tests extended to drop the new column
@@ -67,6 +69,28 @@ Live, against a scratch `ctxd init` instance: captured an entry through the loca
 tag and a `clientRef`, ran `ctxd inbox pull`, and `ctxd show` printed
 `origin: via mobile-inbox, captured 2026-10-21T09:30:00.000Z, ref msg_123` with `tags: errand`
 intact.
+
+## Added after review
+
+Two further defects came out of the review of this PR, both fixed on this branch:
+
+- **Purge did not clear `entries.origin`.** The purge stub's `ON CONFLICT ... DO UPDATE` reset
+  title, summary, body and tags but not the new column, while its `INSERT` never set it. So a
+  live purge kept the provenance ("captured from this phone at this time, their ref `msg_123`")
+  and a rebuild dropped it, which is both a leak of exactly the trail purge exists to remove and a
+  divergence between the live path and the replay, the very thing that handler's own comment warns
+  against. Fixed with `origin = NULL`, and covered two ways: a test asserting NULL live *and*
+  after a rebuild, and provenance added to the purge-replay property test so its state-hash
+  comparison catches it. Both fail without the fix; I checked by reverting it.
+- **Sealed pool files were never migrated.** A sealed file got its schema once, at creation, and
+  `openDatabase`'s migration chain only ever ran against the main database. So a pool sealed
+  before any schema bump stayed at its old version forever, and the first write needing a newly
+  added column failed *inside the encrypted file* with `table entries has no column named
+  origin`. This was a latent architectural gap that `entries.origin` happened to expose; it would
+  have bitten the next schema change regardless. The chain is now `migrateSchema` in
+  `src/store/db.ts`, called by `openDatabase` and by both sealed database providers on open. The
+  test writes into a sealed file rolled back to schema 22, and failed exactly as predicted before
+  the fix.
 
 ## What was not done and why
 

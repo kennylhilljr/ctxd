@@ -40,29 +40,20 @@ export function checkDatabaseIntegrity(db: Database.Database): IntegrityResult {
   return { ok: true };
 }
 
-export function openDatabase(path: string, { create = false }: OpenDatabaseOptions = {}): Database.Database {
-  if (!create && !existsSync(path)) {
-    throw new Error(`Database not found at ${path}. Run "ctxd init" to create one.`);
-  }
-  const db = new Database(path);
-  db.pragma("journal_mode = WAL");
-  db.pragma("foreign_keys = ON");
-  // Loaded unconditionally, independent of semantic_search.compute: every node must be able to
-  // store and query vectors that arrive through sync, even one that never computes its own
-  // (ADR 0004). No model and no network dependency, so this is always cheap and safe.
-  loadVecExtension(db);
+/**
+ * The linear schema migration chain, applied to any ctxd database: the main one and, since W10's
+ * review, each sealed pool file too (`src/sealed/store.ts`). A sealed file used to get its schema
+ * once at creation and never again, so a pool sealed before a schema bump stayed at its old
+ * version and the first write that needed a newly added column failed inside the encrypted file.
+ *
+ * Every step is `if (version === N && SCHEMA_VERSION >= N + 1)`, re-reading the version between
+ * steps, so a database several versions behind walks forward one step at a time. A version this
+ * chain has no step for is refused rather than guessed at, and the handle is closed first so no
+ * caller is left holding an unusable database.
+ */
+export function migrateSchema(db: Database.Database): void {
   const version = db.pragma("user_version", { simple: true }) as number;
-  if (version === 0) {
-    if (!create) {
-      db.close();
-      throw new Error(`Database at ${path} has no schema applied; refusing to initialize it outside "ctxd init".`);
-    }
-    db.transaction(() => {
-      db.exec(SCHEMA_SQL);
-      db.exec(VEC0_TABLE_SQL);
-      db.pragma(`user_version = ${SCHEMA_VERSION}`);
-    })();
-  } else if (version === 13 && SCHEMA_VERSION >= 14) {
+  if (version === 13 && SCHEMA_VERSION >= 14) {
     db.transaction(() => {
       db.exec("ALTER TABLE events ADD COLUMN payload_hash TEXT; ALTER TABLE events ADD COLUMN signature TEXT; ALTER TABLE events ADD COLUMN public_key TEXT;");
       db.exec("CREATE TABLE node_keys (node_id TEXT PRIMARY KEY, public_key TEXT NOT NULL, first_seen_at TEXT NOT NULL)");
@@ -143,5 +134,31 @@ export function openDatabase(path: string, { create = false }: OpenDatabaseOptio
     db.close();
     throw new Error(`Database schema version ${sequenceVersion} does not match ${SCHEMA_VERSION}; no migration is defined yet.`);
   }
+}
+
+export function openDatabase(path: string, { create = false }: OpenDatabaseOptions = {}): Database.Database {
+  if (!create && !existsSync(path)) {
+    throw new Error(`Database not found at ${path}. Run "ctxd init" to create one.`);
+  }
+  const db = new Database(path);
+  db.pragma("journal_mode = WAL");
+  db.pragma("foreign_keys = ON");
+  // Loaded unconditionally, independent of semantic_search.compute: every node must be able to
+  // store and query vectors that arrive through sync, even one that never computes its own
+  // (ADR 0004). No model and no network dependency, so this is always cheap and safe.
+  loadVecExtension(db);
+  const version = db.pragma("user_version", { simple: true }) as number;
+  if (version === 0) {
+    if (!create) {
+      db.close();
+      throw new Error(`Database at ${path} has no schema applied; refusing to initialize it outside "ctxd init".`);
+    }
+    db.transaction(() => {
+      db.exec(SCHEMA_SQL);
+      db.exec(VEC0_TABLE_SQL);
+      db.pragma(`user_version = ${SCHEMA_VERSION}`);
+    })();
+  }
+  migrateSchema(db);
   return db;
 }

@@ -646,7 +646,7 @@ function applyEventCore(db: Database.Database, e: EventForMaterialize, skipFts: 
          purged_at, purge_fingerprint, created_by, updated_by, created_hlc, updated_hlc
        ) VALUES (?, ?, ?, ?, '[purged]', '', '', '[]', ?, 1, 'archived', ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (entry_id) DO UPDATE SET
-         title = '[purged]', summary = '', body = '', tags = '[]',
+         title = '[purged]', summary = '', body = '', tags = '[]', origin = NULL,
          content_rev = excluded.content_rev, content_version = excluded.content_version,
          status = excluded.status, status_rev = excluded.status_rev, relations_rev = excluded.relations_rev,
          purged_at = excluded.purged_at, purge_fingerprint = excluded.purge_fingerprint,
