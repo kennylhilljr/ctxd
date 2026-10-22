@@ -1,4 +1,5 @@
 import { createRequire } from "node:module";
+import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import type Database from "better-sqlite3";
@@ -12,6 +13,8 @@ import { registerOriginSequenceCoordinator } from "../store/origin-seq.js";
 
 export interface SealedDatabaseProvider {
   open(path: string, key: Buffer, create: boolean): Database.Database;
+  /** Re-encrypt an already-open sealed database in place under `newKey`. The handle stays usable afterwards, but `SealedPoolStore.rekey` closes it regardless. */
+  rekey(db: Database.Database, newKey: Buffer): void;
 }
 
 export class SqlCipherDatabaseProvider implements SealedDatabaseProvider {
@@ -33,9 +36,17 @@ export class SqlCipherDatabaseProvider implements SealedDatabaseProvider {
     }
     return db;
   }
+
+  /** SQLCipher's own in-place re-encryption. Same quoted-hex form `open` uses for `key`, so a rekeyed file reopens identically with the new key. */
+  rekey(db: Database.Database, newKey: Buffer): void {
+    db.pragma(`rekey = "x'${newKey.toString("hex")}'"`);
+  }
 }
 
 export class TestDatabaseProvider implements SealedDatabaseProvider {
+  /** Keys this provider was asked to re-encrypt under, in order. The test database is never actually encrypted, so this is how a test observes that the rekey step ran, and with what. */
+  readonly rekeyCalls: Buffer[] = [];
+
   open(path: string, _key: Buffer, create: boolean): Database.Database {
     if (!create && !existsSync(path)) throw new Error(`sealed database not found: ${path}`);
     mkdirSync(dirname(path), { recursive: true });
@@ -48,9 +59,13 @@ export class TestDatabaseProvider implements SealedDatabaseProvider {
     }
     return db;
   }
+
+  rekey(_db: Database.Database, newKey: Buffer): void {
+    this.rekeyCalls.push(Buffer.from(newKey));
+  }
 }
 
-const ENTRY_TABLES = ["relations", "flags", "read_stats", "signals", "embeddings", "entry_siblings", "leases"] as const;
+const ENTRY_TABLES =["relations", "flags", "read_stats", "signals", "embeddings", "entry_siblings", "leases"] as const;
 
 function columns(db: Database.Database, table: string): string[] {
   return (db.pragma(`table_info(${table})`) as { name: string }[]).map((row) => row.name);
@@ -205,6 +220,70 @@ export class SealedPoolStore {
     if (!pool || pool.storage !== "sealed") throw new Error(`pool not found or not sealed: ${poolId}`);
     this.keys.store(poolId, key);
     this.main.prepare("INSERT INTO pool_enrollments (pool_id, node_id, enrolled_at) VALUES (?, ?, ?) ON CONFLICT (pool_id, node_id) DO NOTHING").run(poolId, nodeId, new Date().toISOString());
+  }
+
+  /** Where a rekey's new key is parked between generating it and committing it, so a crash in the one irreversible step is recoverable rather than fatal. */
+  static stagingKeyId(poolId: string): string {
+    return `${poolId}.rekey-pending`;
+  }
+
+  /**
+   * Rotate a sealed pool's key (W7's approved follow-up to W2). Generates a fresh 32-byte key,
+   * re-encrypts the pool's own database file under it, and reports which *other* nodes were
+   * holding the old key, so the caller can emit one `pool_unenroll` acl event each: their copies
+   * of the key stop being useful for anything new, and they have to re-enroll through W2's
+   * authenticated transfer to get the new one. Deleting those rows is deliberately not done here,
+   * since materialized access state only ever changes through an event (ADR 0002).
+   *
+   * Step order is the whole design, because exactly one step cannot be undone:
+   *
+   *   1. stage the new key under `stagingKeyId(poolId)`;
+   *   2. re-encrypt the file (**irreversible**);
+   *   3. promote the new key to `poolId`;
+   *   4. drop the staging copy.
+   *
+   * A crash between 2 and 3 leaves a file on the new key while `poolId` still holds the old one,
+   * so the pool will not unlock; the staging entry is the recovery path, and the thrown error
+   * names it rather than leaving the owner to guess. Staging before step 2 (rather than after) is
+   * what makes that window recoverable at all.
+   *
+   * What this deliberately does not do: re-wrap the new key for the remaining enrolled nodes.
+   * That needs each one's prekey and the owner's approval per node, which is exactly W2's
+   * transfer flow; doing it silently here would hand out a pool key without the confirmation
+   * step W2 exists to provide.
+   */
+  rekey(poolId: string, selfNodeId: string): string[] {
+    const pool = this.main.prepare("SELECT sealed_file FROM pools WHERE pool_id = ? AND storage = 'sealed'").get(poolId) as { sealed_file: string } | undefined;
+    if (!pool?.sealed_file) throw new Error(`pool not found or not sealed: ${poolId}`);
+
+    const current = this.keys.get(poolId); // throws if this node has no key for the pool
+    const next = randomBytes(32);
+    const staging = SealedPoolStore.stagingKeyId(poolId);
+    this.keys.store(staging, next);
+
+    if (this.isUnlocked(poolId)) this.lock(poolId); // re-encrypt a quiesced file, never an open handle
+    const sealed = this.databases.open(`${this.dataDir}/${pool.sealed_file}`, current, false);
+    try {
+      this.databases.rekey(sealed, next);
+    } catch (err) {
+      this.keys.remove(staging); // step 2 never happened, so the old key is still the right one
+      throw err;
+    } finally {
+      sealed.close();
+    }
+
+    try {
+      this.keys.store(poolId, next);
+      this.keys.remove(staging);
+    } catch (err) {
+      throw new Error(
+        `sealed pool ${poolId} was re-encrypted but its new key could not be committed (${err instanceof Error ? err.message : String(err)}); the new key is still stored as "${staging}" and the pool will not unlock until it is promoted to "${poolId}"`,
+      );
+    }
+
+    return (this.main.prepare("SELECT node_id FROM pool_enrollments WHERE pool_id = ? AND node_id <> ? ORDER BY node_id").all(poolId, selfNodeId) as { node_id: string }[]).map(
+      (row) => row.node_id,
+    );
   }
 
   /**

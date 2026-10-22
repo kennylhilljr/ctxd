@@ -48,6 +48,7 @@ Commands marked human only are refused for agent clients (access evaluation, [LL
 | `ctxd persona prefer <client> <scope> <pool>` | Resolve multi-pool ambiguity for a scope |
 | `ctxd pool seal\|enroll\|lock <pool> [<node>]` | Sealed pools (10.6) |
 | `ctxd pool approve-key-transfer <transferId>` | Human only, on the source node: approve a pending sealed key transfer and print its confirmation code (10.6.1); needs `sealed_pools.key_transfer` |
+| `ctxd pool rekey <pool> [--yes]` | Human only: rotate a sealed pool's key, re-encrypting its file and un-enrolling every other node until it re-enrolls (10.6.2). Without `--yes` it previews and changes nothing; needs `sealed_pools.rekey` |
 | `ctxd scope set <name> --intent-policy <observe\|warn\|strict>` | Set a scope's overlap policy |
 | `ctxd export --markdown <dir>` | Human-readable export. Passes all text through the 6.1 pipeline in redact-in-place mode, then prints warnings by category (possible secret, home-directory path, email or phone pattern) and asks for confirmation before writing |
 | `ctxd ls <path> [--all]` / `tree <path> [-L <n>]` / `read <path>` | Browse the filesystem view (4.2) |

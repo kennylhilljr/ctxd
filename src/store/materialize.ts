@@ -735,6 +735,7 @@ type AclPayload =
   | { action: "pool_remove_member"; principal: string }
   | { action: "pool_seal"; sealed_file: string }
   | { action: "pool_enroll"; node_id: string }
+  | { action: "pool_unenroll"; node_id: string }
   | { action: "client_grant"; scope_id: string; level: string; expires_at: string; granted_by: string };
 
 /**
@@ -819,6 +820,14 @@ function applyAclEvent(db: Database.Database, e: EventForMaterialize): void {
     case "pool_enroll":
       if (!aclGuardPasses(db, `pool_enrollment:${e.entryId}:${p.node_id}`, e.hlc)) return;
       db.prepare("INSERT OR REPLACE INTO pool_enrollments (pool_id, node_id, enrolled_at) VALUES (?, ?, ?)").run(e.entryId, p.node_id, createdAt);
+      return;
+    // `ctxd pool rekey` (W7's approved follow-up): the node's copy of the old key is no longer the
+    // pool's key, so its enrollment goes away and it has to re-enroll through W2's authenticated
+    // transfer. Shares `pool_enroll`'s own guard target, so an enroll and an unenroll for the same
+    // node converge on whichever carries the later HLC rather than on arrival order.
+    case "pool_unenroll":
+      if (!aclGuardPasses(db, `pool_enrollment:${e.entryId}:${p.node_id}`, e.hlc)) return;
+      db.prepare("DELETE FROM pool_enrollments WHERE pool_id = ? AND node_id = ?").run(e.entryId, p.node_id);
       return;
     case "client_grant":
       if (!aclGuardPasses(db, `client_grant:${e.entryId}:${p.scope_id}`, e.hlc)) return;

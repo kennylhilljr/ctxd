@@ -218,6 +218,7 @@ Pool definitions replicate to every machine as metadata, so an agent has the sam
 | PA-10 | Denials logged as metadata and summarized in review | FR-32 | P1 |
 | PA-11 | `ctxd access <client>` explains effective access | FR-33 | P1 |
 | PA-12 | Pool definitions replicate; access is identical on every machine | FR-13 | P1 |
+| PA-20 | A sealed pool's key can be rotated on demand, re-encrypting its file and un-enrolling every other machine until it re-enrolls | FR-42 | P2 |
 
 ## 12. Acceptance criteria
 
@@ -237,6 +238,7 @@ Pool definitions replicate to every machine as metadata, so an agent has the sam
 | PA-AC-10 | Event-driven | When an unassigned agent writes a decision into a project scope, ctxd shall hold it in that agent's holding scope as `proposed`, name the holding scope in the result, and keep it invisible to other agents. | PA-3, PA-13 |
 | PA-AC-11 | Event-driven | When the human runs `ctxd hold adopt`, ctxd shall move the holding scope's approved entries into the project scope and add the agent to the pool in one step. | PA-13 |
 | PA-AC-12 | Event-driven | When the same agent repeats a held write into one scope, ctxd shall keep a single access request, count the attempts, and write nothing to that scope until the human decides. | PA-14 |
+| PA-AC-13 | Event-driven | When the human rotates a sealed pool's key, ctxd shall re-encrypt that pool's file under a new key, keep the pool openable on this machine, and un-enroll every other machine until it completes a fresh key transfer. | PA-20, PA-18 |
 
 ## 13. Open questions
 
