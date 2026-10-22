@@ -100,9 +100,11 @@ ctxd inbox schedule status      # installed? loaded? last exit status?
 ctxd inbox schedule uninstall   # unload and remove it
 ```
 
-The cadence comes from `[inbox] schedule_minutes` (default 15, valid 1 to 1440), so set that
-before installing if 15 minutes is wrong for you; changing it later means reinstalling, since the
-interval is baked into the plist. Logs land in `~/Library/Logs/ctxd/inbox-pull.log` and
+The cadence comes from `[inbox] schedule_minutes` (default 15, valid 1 to 1440). The interval is
+baked into the plist, so changing it means reinstalling, and reinstalling does apply the new value:
+`install` unloads the loaded job before loading the new definition. Worth knowing if you installed
+a schedule before W11 landed, because back then it did not, and a reinstall left the old interval
+running while reporting success. Logs land in `~/Library/Logs/ctxd/inbox-pull.log` and
 `inbox-pull.err.log`.
 
 Safe to install before step 6: with `mobile_inbox` off, each run reports the flag is off and exits

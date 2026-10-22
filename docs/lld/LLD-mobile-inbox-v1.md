@@ -132,17 +132,19 @@ part of `ctxd server`'s own scheduled loop. It writes
 `~/Library/LaunchAgents/dev.ctxd.inbox-pull.plist` with `StartInterval` (seconds), never
 `RunAtLoad` or `KeepAlive` (those belong to the long-running server agent, 12: on an interval job
 they would mean "run now, then restart forever"), lints it with `plutil` and loads it with
-`launchctl`, reusing `src/cli/service.ts`'s own plist lint. The installed job inherits whichever
-`--config` and `--data-dir` the installing invocation was given, so a scratch instance schedules
-itself rather than the default one. Because `ctxd inbox pull` exits cleanly without a network call
-when `mobile_inbox` is off, a loaded job on a machine with the flag off does nothing, so the
-schedule is safe to install before the flag is turned on. Changing the cadence means reinstalling,
-since launchd reads the interval from the plist.
+`launchctl`. The installed job inherits whichever `--config` and `--data-dir` the installing
+invocation was given, resolved to absolute paths, so a scratch instance schedules itself rather
+than the default one and the job can still find them with no useful working directory of its own.
+Because `ctxd inbox pull` exits cleanly without a network call when `mobile_inbox` is off, a
+loaded job on a machine with the flag off does nothing, so the schedule is safe to install before
+the flag is turned on. Changing the cadence means reinstalling, which applies the new interval
+because install reloads rather than only rewriting the file.
 
-This is the same shape as `ctxd backup schedule` (W4, [LLD: Operations](LLD-operations-v1.md) 12),
-differing only in what it launches and in `StartInterval` versus that one's
-`StartCalendarInterval`. The two are deliberately near-identical so they can collapse into one
-plist helper; that extraction is listed, unbuilt, in [W7's plan](../build/W7-plan-v1.md).
+The plist generation, lint, load, unload and status parsing all live in the one shared launchd
+helper, [LLD: Operations](LLD-operations-v1.md) 12, which `ctxd service` and `ctxd backup
+schedule` use too; this command contributes only its own command, log name and
+`StartInterval` schedule. That extraction was W7's listed follow-up, done in W11 once this
+third agent made it the obvious place to fix two bugs once instead of three times.
 
 **Configuration** (`[inbox]` in `config.toml`): `transport` (`local` or `cloudflare`), `dir` (for
 `local`), `endpoint` (for `cloudflare`), `pull_limit` (default 50), `publish_scopes` (default
