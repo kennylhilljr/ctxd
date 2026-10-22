@@ -9,12 +9,8 @@
  * harmless, scratch-pathed, test-labeled job and tear it down in the same run; they never touch
  * `~/Library/LaunchAgents/dev.ctxd.backup.plist` or run a real backup.
  */
-import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
-import { lintPlist } from "./service.js";
+import { agentPlistPath, agentStatus, buildAgentPlist, installAgent, uninstallAgent } from "./launchd.js";
 
 export const BACKUP_SCHEDULE_LABEL = "dev.ctxd.backup";
 
@@ -29,12 +25,8 @@ export interface BackupSchedulePlistOptions {
   dataDir?: string;
 }
 
-function ctxdEntryPoint(): string {
-  return join(dirname(fileURLToPath(import.meta.url)), "index.js");
-}
-
 export function backupSchedulePlistPath(label: string = BACKUP_SCHEDULE_LABEL, home: string = homedir()): string {
-  return join(home, "Library", "LaunchAgents", `${label}.plist`);
+  return agentPlistPath(label, home);
 }
 
 /** Parses the config-validated "HH:MM" into launchd's StartCalendarInterval Hour/Minute integers. */
@@ -45,39 +37,18 @@ export function parseScheduleTime(time: string): { hour: number; minute: number 
 }
 
 export function backupSchedulePlist(opts: BackupSchedulePlistOptions): string {
-  const label = opts.label ?? BACKUP_SCHEDULE_LABEL;
-  const nodeBin = opts.nodeBin ?? process.execPath;
-  const entryPoint = opts.entryPoint ?? ctxdEntryPoint();
-  const home = opts.home ?? homedir();
   const { hour, minute } = parseScheduleTime(opts.time);
-  const args = [nodeBin, entryPoint, "backup"];
-  if (opts.configPath) args.push("--config", opts.configPath);
-  if (opts.dataDir) args.push("--data-dir", opts.dataDir);
-  const argLines = args.map((a) => `    <string>${a}</string>`).join("\n");
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key>
-  <string>${label}</string>
-  <key>ProgramArguments</key>
-  <array>
-${argLines}
-  </array>
-  <key>StartCalendarInterval</key>
-  <dict>
-    <key>Hour</key>
-    <integer>${hour}</integer>
-    <key>Minute</key>
-    <integer>${minute}</integer>
-  </dict>
-  <key>StandardOutPath</key>
-  <string>${home}/Library/Logs/ctxd/backup.log</string>
-  <key>StandardErrorPath</key>
-  <string>${home}/Library/Logs/ctxd/backup.err.log</string>
-</dict>
-</plist>
-`;
+  return buildAgentPlist({
+    label: opts.label ?? BACKUP_SCHEDULE_LABEL,
+    command: ["backup"],
+    logName: "backup",
+    schedule: { kind: "calendar", hour, minute },
+    ...(opts.nodeBin ? { nodeBin: opts.nodeBin } : {}),
+    ...(opts.entryPoint ? { entryPoint: opts.entryPoint } : {}),
+    ...(opts.home ? { home: opts.home } : {}),
+    ...(opts.configPath ? { configPath: opts.configPath } : {}),
+    ...(opts.dataDir ? { dataDir: opts.dataDir } : {}),
+  });
 }
 
 export interface BackupScheduleInstallResult {
@@ -85,17 +56,21 @@ export interface BackupScheduleInstallResult {
   label: string;
 }
 
-/** Writes and lints the plist, creates the log directory, then loads it with `launchctl load`. Idempotent, same as `installService`. */
+/** Writes and lints the plist, creates the log directory, then reloads the agent so a reinstall really applies (src/cli/launchd.ts's `installAgent`). */
 export function installBackupSchedule(opts: BackupSchedulePlistOptions & { path?: string }): BackupScheduleInstallResult {
-  const label = opts.label ?? BACKUP_SCHEDULE_LABEL;
-  const path = opts.path ?? backupSchedulePlistPath(label, opts.home);
-  const home = opts.home ?? homedir();
-  mkdirSync(join(home, "Library", "Logs", "ctxd"), { recursive: true });
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, backupSchedulePlist(opts));
-  lintPlist(path);
-  execFileSync("launchctl", ["load", path]);
-  return { path, label };
+  const { hour, minute } = parseScheduleTime(opts.time);
+  return installAgent({
+    label: opts.label ?? BACKUP_SCHEDULE_LABEL,
+    command: ["backup"],
+    logName: "backup",
+    schedule: { kind: "calendar", hour, minute },
+    ...(opts.nodeBin ? { nodeBin: opts.nodeBin } : {}),
+    ...(opts.entryPoint ? { entryPoint: opts.entryPoint } : {}),
+    ...(opts.home ? { home: opts.home } : {}),
+    ...(opts.configPath ? { configPath: opts.configPath } : {}),
+    ...(opts.dataDir ? { dataDir: opts.dataDir } : {}),
+    ...(opts.path ? { path: opts.path } : {}),
+  });
 }
 
 export interface BackupScheduleUninstallResult {
@@ -104,16 +79,11 @@ export interface BackupScheduleUninstallResult {
 }
 
 export function uninstallBackupSchedule(opts: { label?: string; path?: string; home?: string } = {}): BackupScheduleUninstallResult {
-  const label = opts.label ?? BACKUP_SCHEDULE_LABEL;
-  const path = opts.path ?? backupSchedulePlistPath(label, opts.home);
-  if (!existsSync(path)) return { removed: false, path };
-  try {
-    execFileSync("launchctl", ["unload", path]);
-  } catch {
-    // Already not loaded: still remove the file.
-  }
-  unlinkSync(path);
-  return { removed: true, path };
+  return uninstallAgent({
+    label: opts.label ?? BACKUP_SCHEDULE_LABEL,
+    ...(opts.path ? { path: opts.path } : {}),
+    ...(opts.home ? { home: opts.home } : {}),
+  });
 }
 
 export interface BackupScheduleStatus {
@@ -125,16 +95,11 @@ export interface BackupScheduleStatus {
 
 /** Parses `launchctl list <label>`'s simple key/value block; absent entirely (not loaded) is reported, not thrown. A scheduled job has no PID between runs, so unlike `serviceStatus` this never reports one. */
 export function backupScheduleStatus(opts: { label?: string; path?: string; home?: string } = {}): BackupScheduleStatus {
-  const label = opts.label ?? BACKUP_SCHEDULE_LABEL;
-  const path = opts.path ?? backupSchedulePlistPath(label, opts.home);
-  const installed = existsSync(path);
-  try {
-    const output = execFileSync("launchctl", ["list", label], { encoding: "utf8" });
-    const lastExitStatus = /"LastExitStatus"\s*=\s*(\d+)/.exec(output)?.[1];
-    return { installed, path, loaded: true, lastExitStatus: lastExitStatus ? Number(lastExitStatus) : undefined };
-  } catch {
-    return { installed, path, loaded: false };
-  }
+  return agentStatus({
+    label: opts.label ?? BACKUP_SCHEDULE_LABEL,
+    ...(opts.path ? { path: opts.path } : {}),
+    ...(opts.home ? { home: opts.home } : {}),
+  });
 }
 
 function usage(): string {

@@ -17,6 +17,26 @@ Section numbers are the Spec's own (for example 9.1), unchanged from Spec v9, so
 
 - **Service:** `launchd` agent `dev.ctxd.server` with `KeepAlive` and `RunAtLoad`.
 - **Logs:** `~/Library/Logs/ctxd/`.
+- **One launchd helper for all three agents** (`src/cli/launchd.ts`, W11). ctxd installs three
+  agents: the keepalive server above, the daily backup below, and the mobile inbox's interval pull
+  ([LLD: Mobile inbox](LLD-mobile-inbox-v1.md) 17.6). They differ only in what they launch and in
+  one scheduling key (`RunAtLoad` plus `KeepAlive`, `StartCalendarInterval`, or `StartInterval`),
+  so plist generation, the `plutil` lint, the `launchctl` calls and the `launchctl list` status
+  parsing live in one place. Two behaviors all three had wrong while each carried its own copy:
+  - **Install reloads, so a reinstall applies.** Loading a label launchd already knows prints
+    `Load failed: 5: Input/output error` *and exits 0*, so the old code wrote the new plist,
+    discarded launchd's complaint because the exit status looked fine, and left the running job on
+    its previous definition. Changing a schedule and reinstalling therefore did nothing, silently.
+    Install now unloads first (ignoring the failure when nothing was loaded) and checks `load`'s
+    own output rather than its exit code, so a refused load becomes an error the command reports.
+  - **Paths written into a plist are absolute.** launchd gives a job no useful working directory,
+    so a relative `--config ./ctxd.toml` would not resolve at run time; both `--config` and
+    `--data-dir` are resolved before they are written.
+
+  For anyone writing a test here: `launchctl list <label>` reports `Label`, `OnDemand`,
+  `LastExitStatus`, `Program` and `ProgramArguments`, but **not** the schedule, so a changed
+  interval is only observable in the plist on disk while a changed argument is observable in the
+  definition launchd is actually holding.
 - **Health:** `GET /healthz` on the MCP listener; `ctxd doctor` checks:
   - bind addresses;
   - token file permissions;
@@ -27,7 +47,7 @@ Section numbers are the Spec's own (for example 9.1), unchanged from Spec v9, so
   - hook installation per client;
   - backup age: the newest `*.db.age` file's modification time in `backups/`, warning past 36 hours; it fails when no backup exists yet, and is informational when `backups` is off (W4).
 - **Startup integrity.** The server runs `PRAGMA quick_check` and a schema version check before listening. If the database is missing but backups or peers exist, or if it is unreadable or corrupt, the server refuses to start and points to `ctxd doctor` and `ctxd restore`. It never creates a fresh empty database over an existing path. `ctxd init` is the only command that creates one.
-- **Backups:** `ctxd backup schedule install|uninstall|status` installs a launchd agent that runs `ctxd backup` daily at `backup.schedule` (local `HH:MM`, default `03:15`) through `StartCalendarInterval`, not `RunAtLoad` or `KeepAlive`, reusing the service plist generation and `lintPlist`; it respects the `backups` flag, and installing it on a real machine is the owner's step (W4). Each run is a nightly `VACUUM INTO` to a temporary file, then `age` encryption to `backups/`, keeping 14 copies, then an optional copy to `copy_to`. `ctxd restore <file>` is tested in CI.
+- **Backups:** `ctxd backup schedule install|uninstall|status` installs a launchd agent that runs `ctxd backup` daily at `backup.schedule` (local `HH:MM`, default `03:15`) through `StartCalendarInterval`, not `RunAtLoad` or `KeepAlive`, through the shared launchd helper above; it respects the `backups` flag, and installing it on a real machine is the owner's step (W4). Each run is a nightly `VACUUM INTO` to a temporary file, then `age` encryption to `backups/`, keeping 14 copies, then an optional copy to `copy_to`. `ctxd restore <file>` is tested in CI.
 - **Air settings:**
   - prevent sleep on power;
   - restart automatically after power failure;

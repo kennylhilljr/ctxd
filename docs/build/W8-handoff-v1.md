@@ -71,6 +71,14 @@ real plist path, and an unknown subcommand prints usage and exits 1.
 - **Changing the interval still means reinstalling**, since launchd reads it from the plist. Noted
   in the runbook rather than solved with a watcher.
 
+**Corrected by [W11](W11-handoff-v1.md), after review:** reinstalling did not actually work. This
+handoff and the runbook both told the owner to change `schedule_minutes` and reinstall, but
+`launchctl load` on an already-loaded label prints `Load failed: 5` *and exits 0*, so the install
+rewrote the plist, swallowed the complaint and left the old interval running. W11 reloads instead,
+checks `load`'s output rather than its exit code, writes `--config`/`--data-dir` as absolute paths,
+and moves all of this into one shared launchd helper that `ctxd service` and `ctxd backup schedule`
+use too, so the same two bugs are fixed once rather than three times.
+
 ## Owner steps
 
 1. Merge W1 (#60) first; this branch is stacked on it.

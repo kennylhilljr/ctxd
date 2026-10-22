@@ -18,12 +18,8 @@
  * harmless, scratch-pathed, test-labeled job and tear it down in the same run; they never touch
  * `~/Library/LaunchAgents/dev.ctxd.inbox-pull.plist` or pull a real inbox.
  */
-import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
-import { lintPlist } from "./service.js";
+import { agentPlistPath, agentStatus, buildAgentPlist, installAgent, uninstallAgent } from "./launchd.js";
 
 export const INBOX_SCHEDULE_LABEL = "dev.ctxd.inbox-pull";
 
@@ -38,12 +34,8 @@ export interface InboxSchedulePlistOptions {
   dataDir?: string;
 }
 
-function ctxdEntryPoint(): string {
-  return join(dirname(fileURLToPath(import.meta.url)), "index.js");
-}
-
 export function inboxSchedulePlistPath(label: string = INBOX_SCHEDULE_LABEL, home: string = homedir()): string {
-  return join(home, "Library", "LaunchAgents", `${label}.plist`);
+  return agentPlistPath(label, home);
 }
 
 /** launchd's StartInterval is in seconds; the config is in minutes, since "every 30 seconds" is never the right cadence for a cloud inbox. */
@@ -55,34 +47,17 @@ export function scheduleIntervalSeconds(minutes: number): number {
 }
 
 export function inboxSchedulePlist(opts: InboxSchedulePlistOptions): string {
-  const label = opts.label ?? INBOX_SCHEDULE_LABEL;
-  const nodeBin = opts.nodeBin ?? process.execPath;
-  const entryPoint = opts.entryPoint ?? ctxdEntryPoint();
-  const home = opts.home ?? homedir();
-  const interval = scheduleIntervalSeconds(opts.minutes);
-  const args = [nodeBin, entryPoint, "inbox", "pull"];
-  if (opts.configPath) args.push("--config", opts.configPath);
-  if (opts.dataDir) args.push("--data-dir", opts.dataDir);
-  const argLines = args.map((a) => `    <string>${a}</string>`).join("\n");
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key>
-  <string>${label}</string>
-  <key>ProgramArguments</key>
-  <array>
-${argLines}
-  </array>
-  <key>StartInterval</key>
-  <integer>${interval}</integer>
-  <key>StandardOutPath</key>
-  <string>${home}/Library/Logs/ctxd/inbox-pull.log</string>
-  <key>StandardErrorPath</key>
-  <string>${home}/Library/Logs/ctxd/inbox-pull.err.log</string>
-</dict>
-</plist>
-`;
+  return buildAgentPlist({
+    label: opts.label ?? INBOX_SCHEDULE_LABEL,
+    command: ["inbox", "pull"],
+    logName: "inbox-pull",
+    schedule: { kind: "interval", seconds: scheduleIntervalSeconds(opts.minutes) },
+    ...(opts.nodeBin ? { nodeBin: opts.nodeBin } : {}),
+    ...(opts.entryPoint ? { entryPoint: opts.entryPoint } : {}),
+    ...(opts.home ? { home: opts.home } : {}),
+    ...(opts.configPath ? { configPath: opts.configPath } : {}),
+    ...(opts.dataDir ? { dataDir: opts.dataDir } : {}),
+  });
 }
 
 export interface InboxScheduleInstallResult {
@@ -90,17 +65,20 @@ export interface InboxScheduleInstallResult {
   label: string;
 }
 
-/** Writes and lints the plist, creates the log directory, then loads it with `launchctl load`. Idempotent, same as `installService`. */
+/** Writes and lints the plist, creates the log directory, then reloads the agent so a reinstall really applies the new interval (src/cli/launchd.ts's `installAgent`). */
 export function installInboxSchedule(opts: InboxSchedulePlistOptions & { path?: string }): InboxScheduleInstallResult {
-  const label = opts.label ?? INBOX_SCHEDULE_LABEL;
-  const path = opts.path ?? inboxSchedulePlistPath(label, opts.home);
-  const home = opts.home ?? homedir();
-  mkdirSync(join(home, "Library", "Logs", "ctxd"), { recursive: true });
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, inboxSchedulePlist(opts));
-  lintPlist(path);
-  execFileSync("launchctl", ["load", path]);
-  return { path, label };
+  return installAgent({
+    label: opts.label ?? INBOX_SCHEDULE_LABEL,
+    command: ["inbox", "pull"],
+    logName: "inbox-pull",
+    schedule: { kind: "interval", seconds: scheduleIntervalSeconds(opts.minutes) },
+    ...(opts.nodeBin ? { nodeBin: opts.nodeBin } : {}),
+    ...(opts.entryPoint ? { entryPoint: opts.entryPoint } : {}),
+    ...(opts.home ? { home: opts.home } : {}),
+    ...(opts.configPath ? { configPath: opts.configPath } : {}),
+    ...(opts.dataDir ? { dataDir: opts.dataDir } : {}),
+    ...(opts.path ? { path: opts.path } : {}),
+  });
 }
 
 export interface InboxScheduleUninstallResult {
@@ -109,16 +87,11 @@ export interface InboxScheduleUninstallResult {
 }
 
 export function uninstallInboxSchedule(opts: { label?: string; path?: string; home?: string } = {}): InboxScheduleUninstallResult {
-  const label = opts.label ?? INBOX_SCHEDULE_LABEL;
-  const path = opts.path ?? inboxSchedulePlistPath(label, opts.home);
-  if (!existsSync(path)) return { removed: false, path };
-  try {
-    execFileSync("launchctl", ["unload", path]);
-  } catch {
-    // Already not loaded: still remove the file.
-  }
-  unlinkSync(path);
-  return { removed: true, path };
+  return uninstallAgent({
+    label: opts.label ?? INBOX_SCHEDULE_LABEL,
+    ...(opts.path ? { path: opts.path } : {}),
+    ...(opts.home ? { home: opts.home } : {}),
+  });
 }
 
 export interface InboxScheduleStatus {
@@ -130,16 +103,11 @@ export interface InboxScheduleStatus {
 
 /** Parses `launchctl list <label>`'s simple key/value block; absent entirely (not loaded) is reported, not thrown. An interval job has no PID between runs, so unlike `serviceStatus` this never reports one. */
 export function inboxScheduleStatus(opts: { label?: string; path?: string; home?: string } = {}): InboxScheduleStatus {
-  const label = opts.label ?? INBOX_SCHEDULE_LABEL;
-  const path = opts.path ?? inboxSchedulePlistPath(label, opts.home);
-  const installed = existsSync(path);
-  try {
-    const output = execFileSync("launchctl", ["list", label], { encoding: "utf8" });
-    const lastExitStatus = /"LastExitStatus"\s*=\s*(\d+)/.exec(output)?.[1];
-    return { installed, path, loaded: true, lastExitStatus: lastExitStatus ? Number(lastExitStatus) : undefined };
-  } catch {
-    return { installed, path, loaded: false };
-  }
+  return agentStatus({
+    label: opts.label ?? INBOX_SCHEDULE_LABEL,
+    ...(opts.path ? { path: opts.path } : {}),
+    ...(opts.home ? { home: opts.home } : {}),
+  });
 }
 
 function usage(): string {
