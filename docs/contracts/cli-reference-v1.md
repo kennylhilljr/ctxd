@@ -65,6 +65,7 @@ Commands marked human only are refused for agent clients (access evaluation, [LL
 | `ctxd backup` / `restore <file>` | Backups |
 | `ctxd backup schedule install\|uninstall\|status` | Daily launchd agent that runs `ctxd backup` at `backup.schedule` (12) |
 | `ctxd rebuild` | Rebuild materialized state and FTS from the event log |
+| `ctxd upgrade --from <database> [--to <database>]` | Rebuild a database older than the migration chain's first step (versions 1 to 12) into the current schema, by replaying its event log into a new file. Reads the source read-only and never modifies it; refuses an existing target (4) |
 | `ctxd doctor` | Diagnostics |
 | `ctxd install-hooks --client <claude-code\|codex>` | Write the hook and MCP config snippets (with confirmation and a backup of existing files) |
 | `ctxd inbox pull\|status\|set-token <token>` | Mobile inbox: pull and apply, pending count, store the hub token in the Keychain (17.6) |
