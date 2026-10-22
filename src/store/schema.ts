@@ -46,7 +46,7 @@
  * `ctxd doctor` and `ctxd status`/`statusline` can report real sync age and unsynced counts
  * instead of "not tracked yet."
  */
-export const SCHEMA_VERSION = 22;
+export const SCHEMA_VERSION = 23;
 
 export const SCHEMA_SQL = `
 CREATE TABLE nodes (
@@ -172,7 +172,12 @@ CREATE TABLE entries (
   created_by   TEXT NOT NULL,
   updated_by   TEXT NOT NULL,
   created_hlc  TEXT NOT NULL,
-  updated_hlc  TEXT NOT NULL
+  updated_hlc  TEXT NOT NULL,
+  -- Where this entry really came from, when created_by alone does not say it: JSON
+  -- {source, captured_at?, client_ref?}, set at create by a trusted internal caller (the mobile
+  -- inbox, W1) and never by an agent, since provenance a writer can claim is worth nothing.
+  -- NULL for an ordinary write, which created_by already explains (schema version 23).
+  origin       TEXT
 );
 CREATE INDEX entries_scope_kind ON entries(scope_id, kind, status, updated_hlc);
 CREATE INDEX entries_slug ON entries(scope_id, kind, slug);      -- not unique: entries created offline on two nodes may collide (4.2)

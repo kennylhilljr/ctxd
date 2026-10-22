@@ -1,6 +1,7 @@
 import type Database from "better-sqlite3";
 import { HlcClock } from "../core/hlc.js";
 import { sha256Hex } from "../core/hash.js";
+import type { EntryOrigin } from "../core/kinds.js";
 import { isFlagOn } from "../config/flags.js";
 import { recordRejection, writeEntry, type WriteContext } from "../store/write.js";
 import { inboxEntrySchema, type InboxEntry, type InboxTransport } from "./types.js";
@@ -35,16 +36,28 @@ const MAX_TAG_CHARS = 40;
 export const INBOX_MAX_BODY_BYTES = 16 * 1024;
 export const INBOX_MAX_PAYLOAD_BYTES = 32 * 1024;
 
-/** Provenance (MI-8), carried as tags since entries has no generic metadata column: origin, capture time, and the external reference if the client gave one, ahead of whatever tags the entry itself declared. */
-function provenanceTags(entry: InboxEntry): string[] {
-  const tags = ["origin:mobile-inbox", `captured:${entry.capturedAt}`.slice(0, MAX_TAG_CHARS)];
-  if (entry.clientRef) tags.push(`ref:${entry.clientRef}`.slice(0, MAX_TAG_CHARS));
+/**
+ * Provenance (MI-8) as a real column, not a tag convention: `entries.origin` (W7's approved
+ * follow-up, schema 23). Before that column existed this was squeezed into `tags`, which both
+ * polluted the entry's own tags and made the capture time and client reference compete for the
+ * ten tag slots. Declared tags now pass through untouched.
+ */
+export const INBOX_ORIGIN_SOURCE = "mobile-inbox";
+
+function originOf(entry: InboxEntry): EntryOrigin {
+  const origin: EntryOrigin = { source: INBOX_ORIGIN_SOURCE, captured_at: entry.capturedAt };
+  if (entry.clientRef) origin.client_ref = entry.clientRef;
+  return origin;
+}
+
+function declaredTags(entry: InboxEntry): string[] {
+  const tags: string[] = [];
   for (const raw of entry.tags ?? []) {
     if (tags.length >= MAX_TAGS) break;
     const t = raw.slice(0, MAX_TAG_CHARS);
     if (!tags.includes(t)) tags.push(t);
   }
-  return tags.slice(0, MAX_TAGS);
+  return tags;
 }
 
 /** A stable, bounded (requestId is 8 to 64 characters) idempotency key derived from the transport's own id, never from anything inside the payload. */
@@ -79,12 +92,14 @@ function applyOneInboxEntry(ctx: WriteContext, inboxEntryId: string, raw: unknow
     }
   }
 
-  const result = writeEntry(ctx, {
+  // Provenance rides on the context, not the input: the entry's own payload must not be able to
+  // claim where it came from (src/core/kinds.ts's EntryOrigin).
+  const result = writeEntry({ ...ctx, origin: originOf(entry) }, {
     scope: entry.scope,
     kind: entry.kind,
     title: entry.title,
     body: entry.body,
-    tags: provenanceTags(entry),
+    tags: declaredTags(entry),
     request_id: requestIdFor(inboxEntryId),
   } as never);
   return "held" in result ? "held" : "applied";

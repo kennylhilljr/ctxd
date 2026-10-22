@@ -75,23 +75,38 @@ describe("runInboxPull", () => {
     expect(pullCalls).toBe(0);
   });
 
-  it("applies an entry for an allowlisted scope as proposed, tagged with its origin", async () => {
+  it("applies an entry for an allowlisted scope as proposed, with its provenance in entries.origin", async () => {
     const f = setup();
     const transport = new FakeInboxTransport();
-    transport.seed("evt-1", capture());
+    transport.seed("evt-1", capture({ tags: ["errand"], clientRef: "msg_123" }));
 
     const outcome = await runInboxPull(f.db, f.nodeId, f.clientId, transport, FLAGS_ON);
     expect(outcome).toEqual({ fetched: 1, applied: 1, held: 0, rejected: 0, errored: 0 });
     expect(await transport.status()).toEqual({ pending: 0 }); // acked
 
-    const row = f.db.prepare("SELECT status, tags, created_by FROM entries WHERE scope_id = ?").get(f.allowedScopeId) as {
+    const row = f.db.prepare("SELECT status, tags, created_by, origin FROM entries WHERE scope_id = ?").get(f.allowedScopeId) as {
       status: string;
       tags: string;
       created_by: string;
+      origin: string | null;
     };
     expect(row.status).toBe("proposed");
     expect(row.created_by).toBe(f.clientId);
-    expect(JSON.parse(row.tags)).toContain("origin:mobile-inbox");
+    // W7: provenance is a real column now, so the entry's own tags are left alone rather than
+    // rewritten to carry origin, capture time and reference.
+    expect(JSON.parse(row.origin as string)).toEqual({ source: "mobile-inbox", captured_at: "2026-10-20T12:00:00.000Z", client_ref: "msg_123" });
+    expect(JSON.parse(row.tags)).toEqual(["errand"]);
+  });
+
+  it("omits client_ref from the provenance when the capture did not give one", async () => {
+    const f = setup();
+    const transport = new FakeInboxTransport();
+    transport.seed("evt-1", capture());
+
+    await runInboxPull(f.db, f.nodeId, f.clientId, transport, FLAGS_ON);
+
+    const row = f.db.prepare("SELECT origin FROM entries WHERE scope_id = ?").get(f.allowedScopeId) as { origin: string };
+    expect(JSON.parse(row.origin)).toEqual({ source: "mobile-inbox", captured_at: "2026-10-20T12:00:00.000Z" });
   });
 
   it("holds an entry for a scope the client has no grant for, rather than applying or silently dropping it", async () => {

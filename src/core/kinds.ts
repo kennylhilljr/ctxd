@@ -81,6 +81,22 @@ export type Replication = "all" | "home" | "local";
 export const REPLICATIONS: readonly Replication[] = ["all", "home", "local"];
 export type VendorPolicy = "any" | "local-only";
 export const VENDOR_POLICIES: readonly VendorPolicy[] = ["any", "local-only"];
+/**
+ * Where an entry came from, when `entries.created_by` alone does not say it: an entry written on
+ * another system's behalf (the mobile inbox's phone captures, W1). Stored as JSON in
+ * `entries.origin` and set only by a trusted internal caller through `WriteContext`, never by an
+ * agent through `context_write`: provenance a writer can claim for itself is worth nothing, and
+ * keeping it off the tool surface also keeps the tool footprint unchanged (PRD NFR-4).
+ */
+export interface EntryOrigin {
+  /** The system the content came through, e.g. `mobile-inbox`. */
+  source: string;
+  /** When that system captured it, ISO-8601, if it reported one. */
+  captured_at?: string;
+  /** That system's own reference for the item, e.g. a chat message id. */
+  client_ref?: string;
+}
+
 export type Vendor = "anthropic" | "openai" | "google" | "local" | "human" | "other";
 export const VENDORS: readonly Vendor[] = ["anthropic", "openai", "google", "local", "human", "other"];
 export type NodeRole = "home" | "roaming";

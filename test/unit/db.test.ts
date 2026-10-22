@@ -69,6 +69,7 @@ describe("openDatabase (SPEC v6 section 4)", () => {
     fresh.exec("DROP TABLE node_encryption_keys");
     fresh.exec("DROP TABLE sealed_key_transfers");
     fresh.exec("DROP TABLE peer_watermarks");
+    fresh.exec("ALTER TABLE entries DROP COLUMN origin");
     fresh.pragma("user_version = 19");
     fresh.close();
 
@@ -85,6 +86,7 @@ describe("openDatabase (SPEC v6 section 4)", () => {
     fresh.exec("DROP TABLE node_encryption_keys");
     fresh.exec("DROP TABLE sealed_key_transfers");
     fresh.exec("DROP TABLE peer_watermarks");
+    fresh.exec("ALTER TABLE entries DROP COLUMN origin");
     fresh.pragma("user_version = 20");
     fresh.close();
 
@@ -102,6 +104,7 @@ describe("openDatabase (SPEC v6 section 4)", () => {
     const path = tmpDbPath();
     const fresh = openDatabase(path, { create: true });
     fresh.exec("DROP TABLE peer_watermarks");
+    fresh.exec("ALTER TABLE entries DROP COLUMN origin");
     fresh.pragma("user_version = 21");
     fresh.close();
 
@@ -110,6 +113,30 @@ describe("openDatabase (SPEC v6 section 4)", () => {
     migrated.prepare("INSERT INTO peer_watermarks (peer_id, origin_node, through_seq, updated_at) VALUES ('p1', 'o1', 5, 't')").run();
     const row = migrated.prepare("SELECT through_seq FROM peer_watermarks WHERE peer_id = 'p1'").get() as { through_seq: number };
     expect(row.through_seq).toBe(5);
+    migrated.close();
+  });
+
+  it("migrates a version-22 database by adding entries.origin (W7), leaving existing entries NULL", () => {
+    const path = tmpDbPath();
+    const fresh = openDatabase(path, { create: true });
+    fresh.prepare("INSERT INTO nodes (node_id, name, role, created_at) VALUES ('n1','air','home','t')").run();
+    fresh.prepare("INSERT INTO clients (client_id, name, vendor, node_id, token_hash, created_at) VALUES ('c1','human','human','n1','h','t')").run();
+    fresh.prepare("INSERT INTO scopes (scope_id, name, created_at) VALUES ('s1','notes','t')").run();
+    fresh.prepare(
+      `INSERT INTO entries (entry_id, scope_id, kind, slug, title, summary, body, tags, content_rev, content_version,
+         status, status_rev, relations_rev, created_by, updated_by, created_hlc, updated_hlc)
+       VALUES ('e1','s1','note','note-e1','Old note','Old note','body','[]','1-e1',1,'active','1-e1','1-e1','c1','c1','h','h')`,
+    ).run();
+    fresh.exec("ALTER TABLE entries DROP COLUMN origin");
+    fresh.pragma("user_version = 22");
+    fresh.close();
+
+    const migrated = openDatabase(path);
+    expect(migrated.pragma("user_version", { simple: true })).toBe(SCHEMA_VERSION);
+    // An entry written before the column existed has no provenance to claim, and the column says
+    // so rather than guessing: created_by already explains an ordinary write.
+    const row = migrated.prepare("SELECT origin FROM entries WHERE entry_id = 'e1'").get() as { origin: string | null };
+    expect(row.origin).toBeNull();
     migrated.close();
   });
 

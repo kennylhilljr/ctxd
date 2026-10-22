@@ -6,7 +6,7 @@ import { accessLevel, atLeast, decideWrite, effectiveVendorPolicy, type ClientIn
 import { makeRev, newId, revVersion } from "../core/ids.js";
 import type { HlcClock } from "../core/hlc.js";
 import { nowIso } from "../core/time.js";
-import { ALWAYS_REVIEWED_KINDS, defaultAgentStatus, IMMUTABLE_KINDS, type Kind, type Status } from "../core/kinds.js";
+import { ALWAYS_REVIEWED_KINDS, defaultAgentStatus, IMMUTABLE_KINDS, type EntryOrigin, type Kind, type Status } from "../core/kinds.js";
 import { isFlagOn } from "../config/flags.js";
 import { CtxdError } from "../core/errors.js";
 import { sanitizeAgentText } from "../security/redact.js";
@@ -33,6 +33,13 @@ export interface WriteContext {
   assumedPools?: readonly string[];
   /** Effective feature flags (PRD-feature-flags-v1); undefined only in call sites predating M3, where every flag behaves as on. */
   flags?: Map<string, boolean>;
+  /**
+   * Provenance for entries this write creates, when the client id alone does not explain where
+   * the content came from (the mobile inbox writing a phone capture, W1). Deliberately here and
+   * not in `contextWriteInput`: an agent must not be able to claim its own provenance, and the
+   * tool surface stays unchanged (PRD NFR-4). Recorded at create only; an update never changes it.
+   */
+  origin?: EntryOrigin;
 }
 
 export type WriteResult =
@@ -343,6 +350,7 @@ function performDirectWrite(
         supersedes: supersedesTarget ? formatRef(supersedesTarget.scopeName, supersedesTarget.id) : null,
         skill_name: skillName ?? null,
         review_after: defaultReviewAfter(input.kind, Date.now()),
+        origin: ctx.origin ?? null,
       };
       appendPrimaryEvent(db, ctx, input, hash, allocSeq, { scopeId: scope.id, entryId, op: "create", part: "content", rev: contentRev, parentRevs: [], payload, eventId, hlc });
       applyEvent(db, { eventId, scopeId: scope.id, entryId, op: "create", part: "content", rev: contentRev, clientId: ctx.clientId, hlc, payload, prev: null });

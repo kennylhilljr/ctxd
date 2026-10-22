@@ -9,6 +9,7 @@ import { applyEvent } from "../store/materialize.js";
 import { parseRef } from "../model/refs.js";
 import { parseWhen } from "../journal/time.js";
 import { CtxdError } from "../core/errors.js";
+import type { EntryOrigin } from "../core/kinds.js";
 import { entryImportanceDetailed, type EntryRow } from "../tools/support.js";
 import { explainImportance } from "../model/importance.js";
 
@@ -77,6 +78,15 @@ export function printShow(db: Database.Database, ref: string, asOf?: string, why
   console.log(`  summary: ${row.summary}`);
   console.log(`  created by ${by(row.created_by)} at ${row.created_hlc}`);
   console.log(`  updated by ${by(row.updated_by)} at ${row.updated_hlc}`);
+  // W7's entries.origin: shown only when something other than the writing client explains where
+  // the content came from, so an ordinary write's output is unchanged.
+  if (row.origin) {
+    const origin = JSON.parse(row.origin) as EntryOrigin;
+    const parts = [`via ${origin.source}`];
+    if (origin.captured_at) parts.push(`captured ${origin.captured_at}`);
+    if (origin.client_ref) parts.push(`ref ${origin.client_ref}`);
+    console.log(`  origin: ${parts.join(", ")}`);
+  }
   console.log(`  tags: ${JSON.parse(row.tags).join(", ") || "(none)"}`);
   if (why) printWhy(db, id, asOf);
   console.log("");

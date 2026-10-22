@@ -204,6 +204,29 @@ describe("purgeEntry (SPEC v6 section 7.6.6)", () => {
     expect(row!.purge_fingerprint).not.toBeNull();
     expect(row!.kind).toBe("note");
   });
+
+  it("clears entries.origin, live and after a rebuild, since provenance is content too (W10)", () => {
+    const f = setup();
+    const created = writeEntry(
+      { ...writeCtx(f, f.humanId), origin: { source: "mobile-inbox", captured_at: "2026-10-21T09:30:00.000Z", client_ref: "msg_123" } },
+      { scope: "notes", kind: "note", title: "Captured", body: "Sensitive body.", request_id: newId() } as never,
+    );
+    if ("held" in created) throw new Error("unexpected hold");
+    const origin = () => (f.db.prepare("SELECT origin FROM entries WHERE entry_id = ?").get(created.id) as { origin: string | null }).origin;
+    expect(origin()).not.toBeNull();
+
+    purgeEntry(writeCtx(f, f.humanId), created.ref, "contains a secret");
+
+    // Purge erases content, and "captured from this phone at this time, their ref msg_123" is
+    // content about where it came from: keeping it would leave exactly the trail purge exists to
+    // remove.
+    expect(origin()).toBeNull();
+
+    // The stub a rebuild reconstructs must match, or the live purge and the replay diverge, which
+    // is the invariant the purge handler's own comment states.
+    rebuild(f.db);
+    expect(origin()).toBeNull();
+  });
 });
 
 function dumpHashWithLeases(db: Database.Database): string {
@@ -229,7 +252,10 @@ describe("ctxd rebuild reconstructs a purged entry's stub row regardless of repl
           const f = setup();
           const created: { id: string; ref: string; rev: string }[] = [];
           for (const n of notes) {
-            const result = writeEntry(writeCtx(f, f.humanId), {
+            // Every entry carries provenance (W10), so whichever one the seed picks to purge has
+            // an `origin` for the dump comparison below to catch: a purge that clears it live but
+            // not on replay (or the reverse) changes the hash.
+            const result = writeEntry({ ...writeCtx(f, f.humanId), origin: { source: "mobile-inbox", captured_at: "2026-10-21T09:30:00.000Z" } }, {
               scope: "notes",
               kind: "note",
               title: n.title || "untitled",
