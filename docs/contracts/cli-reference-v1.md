@@ -67,4 +67,5 @@ Commands marked human only are refused for agent clients (access evaluation, [LL
 | `ctxd doctor` | Diagnostics |
 | `ctxd install-hooks --client <claude-code\|codex>` | Write the hook and MCP config snippets (with confirmation and a backup of existing files) |
 | `ctxd inbox pull\|status\|set-token <token>` | Mobile inbox: pull and apply, pending count, store the hub token in the Keychain (17.6) |
+| `ctxd inbox schedule <install\|uninstall\|status>` | Install, remove or check the launchd agent that runs `ctxd inbox pull` every `[inbox] schedule_minutes` (17.6) |
 | `ctxd features` / `ctxd features set <name> on\|off` | List every feature flag with its effective value and source, or set one (3.1) |
