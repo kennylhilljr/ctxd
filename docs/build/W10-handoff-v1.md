@@ -5,8 +5,9 @@ The third of [W7's](W7-plan-v1.md) approved follow-ups ("a generic provenance co
 
 ## Commits
 
-- `5b20bf8` `W10 slice 1: entries.origin, provenance as a column instead of tags`
-- this handoff
+- `aa1d216` W10 slice 1: entries.origin, provenance as a column instead of tags
+- `b3b7ec8` W10: handoff
+- `b8d67ce` W10: purge clears entries.origin, and sealed files migrate
 
 Branch `done/w10-entry-origin`, based on `main` after W1 to W7 had all merged.
 
