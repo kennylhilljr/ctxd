@@ -76,10 +76,16 @@ exactly one entry per distinct id) and a dedicated crash-recovery test.
 
 ### 17.3 Provenance
 
-`entries` has no generic metadata column, so provenance (MI-8) is carried as tags, ahead of
-whatever tags the entry itself declared, capped at 10 total: `origin:mobile-inbox`,
-`captured:<capturedAt>`, and `ref:<clientRef>` if the client gave one. `created_by` already
-attributes the entry to the `mobile-inbox` client through the ordinary provenance framing (10.1).
+Provenance (MI-8, MI-AC-7) is stored in `entries.origin` (schema version 23, W7): canonical JSON
+`{source: "mobile-inbox", captured_at, client_ref?}`, set through `WriteContext.origin` and never
+from the entry's own payload, so a capture cannot claim where it came from. The entry's declared
+tags pass through untouched, and `created_by` separately attributes it to the `mobile-inbox`
+client through the ordinary provenance framing (10.1). `ctxd show` prints the origin line.
+
+Until that column existed, these same facts were squeezed into `tags`
+(`origin:mobile-inbox`, `captured:<capturedAt>`, `ref:<clientRef>`), which polluted the entry's
+own tags and made provenance compete with them for the ten tag slots. W7's plan listed the column
+as the fix, and the owner approved it; see [LLD: Data model](LLD-data-model-v1.md) 4.
 
 ### 17.4 Cloud adapter
 

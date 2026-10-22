@@ -17,7 +17,7 @@ Section numbers are the Spec's own (for example 9.1), unchanged from Spec v9, so
 
 The **event log is the source of truth**. Entry state, FTS and vectors are materialized from it and can be rebuilt with `ctxd rebuild`.
 
-The schema below is the executable one, copied from `src/store/schema.ts` at schema version 22. If this block and that file ever disagree, the file is what runs; raise the difference rather than silently diverging (AGENTS.md).
+The schema below is the executable one, copied from `src/store/schema.ts` at schema version 23. If this block and that file ever disagree, the file is what runs; raise the difference rather than silently diverging (AGENTS.md).
 
 ```sql
 CREATE TABLE nodes (
@@ -143,7 +143,12 @@ CREATE TABLE entries (
   created_by   TEXT NOT NULL,
   updated_by   TEXT NOT NULL,
   created_hlc  TEXT NOT NULL,
-  updated_hlc  TEXT NOT NULL
+  updated_hlc  TEXT NOT NULL,
+  -- Where this entry really came from, when created_by alone does not say it: JSON
+  -- {source, captured_at?, client_ref?}, set at create by a trusted internal caller (the mobile
+  -- inbox, W1) and never by an agent, since provenance a writer can claim is worth nothing.
+  -- NULL for an ordinary write, which created_by already explains (schema version 23).
+  origin       TEXT
 );
 CREATE INDEX entries_scope_kind ON entries(scope_id, kind, status, updated_hlc);
 CREATE INDEX entries_slug ON entries(scope_id, kind, slug);      -- not unique: entries created offline on two nodes may collide (4.2)
@@ -496,6 +501,7 @@ CREATE TABLE commits (                 -- local facts recorded by the PostToolUs
 - **`sessions.cwd`** is recorded once, at SessionStart, and kept for the session's life; a later event's reported `cwd` never overwrites it. The crash sweep (9.10) reads it. (Spec v10 draft W5.2.)
 - **`peer_watermarks`** is the served-side mirror of `sync_state`: per `(peer_id, origin_node)`, the highest `origin_seq` this node has served that peer. The pull handler writes it right after serving a page, taking the max against any existing value so a retried or out-of-order page never regresses it (7.1). It backs real sync age and unsynced counts in `ctxd doctor` and `ctxd status` (12, 9.11). (W3, schema version 22.)
 - **Key transfer tables.** `node_encryption_keys` and `sealed_key_transfers` back the sealed pool key transfer in [LLD: Security and access](LLD-security-access-v1.md) section 10.6.1. (Spec v10 draft W2.)
+- **`entries.origin`** records where an entry's content actually came from when `created_by` alone does not say it: canonical JSON `{source, captured_at?, client_ref?}`, written at create and never changed by a later update. It is set only by a trusted internal caller, through `WriteContext.origin`, and is deliberately absent from `contextWriteInput`: provenance an agent can claim for itself is worth nothing, and keeping it off the tool surface leaves the tool footprint unchanged (NFR-4). It rides in the create event's payload, so replication and `ctxd rebuild` carry it for free; the column is written canonically for exactly that reason, so a live write and a replay serialize identically. NULL for an ordinary write. Its one producer today is the mobile inbox ([LLD: Mobile inbox](LLD-mobile-inbox-v1.md) 17.3), which previously squeezed the same facts into `tags`; `ctxd show` prints it. (W7, schema version 23.)
 
 ### 4.1 References and relations
 

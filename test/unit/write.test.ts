@@ -520,6 +520,56 @@ describe("ctxd rebuild (SPEC v6 section 13)", () => {
     expect(after).toBe(before);
   });
 
+  it("replays entries.origin from the event log (W7), since provenance is carried in the create payload", () => {
+    const f = setup();
+    const written = writeEntry(
+      { ...ctxFor(f, f.humanId), origin: { source: "mobile-inbox", captured_at: "2026-10-20T12:00:00.000Z", client_ref: "msg_123" } },
+      { scope: "notes", kind: "note", title: "Captured on the phone", body: "Body.", request_id: requestId() } as never,
+    );
+    if ("held" in written) throw new Error("unexpected hold");
+
+    const origin = () => (f.db.prepare("SELECT origin FROM entries WHERE entry_id = ?").get(written.id) as { origin: string | null }).origin;
+    const beforeRebuild = origin();
+    expect(JSON.parse(beforeRebuild as string)).toEqual({ source: "mobile-inbox", captured_at: "2026-10-20T12:00:00.000Z", client_ref: "msg_123" });
+
+    rebuild(f.db);
+    expect(origin()).toBe(beforeRebuild);
+  });
+});
+
+describe("entries.origin (W7)", () => {
+  it("is NULL for an ordinary write, which created_by already explains", () => {
+    const f = setup();
+    const written = writeEntry(ctxFor(f, f.humanId), { scope: "notes", kind: "note", title: "Ordinary", body: "Body.", request_id: requestId() } as never);
+    if ("held" in written) throw new Error("unexpected hold");
+    const row = f.db.prepare("SELECT origin FROM entries WHERE entry_id = ?").get(written.id) as { origin: string | null };
+    expect(row.origin).toBeNull();
+  });
+
+  it("is recorded at create and left alone by a later update, even one with no origin in its context", () => {
+    const f = setup();
+    const created = writeEntry(
+      { ...ctxFor(f, f.humanId), origin: { source: "mobile-inbox", captured_at: "2026-10-20T12:00:00.000Z" } },
+      { scope: "notes", kind: "note", title: "Captured", body: "v1", request_id: requestId() } as never,
+    );
+    if ("held" in created) throw new Error("unexpected hold");
+
+    const updated = writeEntry(ctxFor(f, f.humanId), {
+      scope: "notes",
+      kind: "note",
+      id: created.id,
+      expected_rev: created.rev,
+      title: "Captured, edited",
+      body: "v2",
+      request_id: requestId(),
+    } as never);
+    if ("held" in updated) throw new Error("unexpected hold");
+
+    const row = f.db.prepare("SELECT origin, body FROM entries WHERE entry_id = ?").get(created.id) as { origin: string | null; body: string };
+    expect(row.body).toBe("v2");
+    expect(JSON.parse(row.origin as string)).toEqual({ source: "mobile-inbox", captured_at: "2026-10-20T12:00:00.000Z" });
+  });
+
   it("is deterministic across random sequences of creates and updates (property test)", () => {
     fc.assert(
       fc.property(

@@ -131,6 +131,13 @@ export function openDatabase(path: string, { create = false }: OpenDatabaseOptio
       db.pragma("user_version = 22");
     })();
   }
+  const entryOriginVersion = db.pragma("user_version", { simple: true }) as number;
+  if (entryOriginVersion === 22 && SCHEMA_VERSION >= 23) {
+    db.transaction(() => {
+      db.exec("ALTER TABLE entries ADD COLUMN origin TEXT");
+      db.pragma("user_version = 23");
+    })();
+  }
   const sequenceVersion = db.pragma("user_version", { simple: true }) as number;
   if (sequenceVersion !== SCHEMA_VERSION) {
     db.close();

@@ -1,8 +1,9 @@
 import type Database from "better-sqlite3";
 import { revVersion } from "../core/ids.js";
 import { compareHlc, decodeHlc } from "../core/hlc.js";
-import { LWW_CONTENT_KINDS, type Kind } from "../core/kinds.js";
+import { LWW_CONTENT_KINDS, type EntryOrigin, type Kind } from "../core/kinds.js";
 import { persistOverlaps, scanOverlappingLeases } from "../claims/overlap.js";
+import { canonicalJson } from "./idempotency.js";
 import { loadClient } from "./snapshot.js";
 import { removeFromVecIndex, upsertVecIndex } from "../embed/vec.js";
 
@@ -298,6 +299,7 @@ interface CreatePayload {
   review_after?: string | null;
   supersedes?: string | null;
   approved?: boolean; // true only for an auto-accept review rule match (W5.1); never for a kind's unreviewed default status
+  origin?: EntryOrigin | null; // W7's entries.origin: set by a trusted internal caller, never by an agent
 }
 
 export interface ApplyEventOptions {
@@ -393,8 +395,8 @@ function applyEventCore(db: Database.Database, e: EventForMaterialize, skipFts: 
       `INSERT INTO entries (
          entry_id, scope_id, kind, slug, significance, skill_name, title, summary, body, tags,
          content_rev, content_version, status, status_rev, relations_rev, review_after,
-         confirmed_by_user, supersedes, approved_by, approved_hlc, created_by, updated_by, created_hlc, updated_hlc
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         confirmed_by_user, supersedes, approved_by, approved_hlc, created_by, updated_by, created_hlc, updated_hlc, origin
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       e.entryId,
       e.scopeId,
@@ -419,6 +421,12 @@ function applyEventCore(db: Database.Database, e: EventForMaterialize, skipFts: 
       e.clientId,
       e.hlc,
       e.hlc,
+      // Carried in the create payload, so replication and `ctxd rebuild` preserve provenance for
+      // free: both replay create events through this same function (W7's entries.origin).
+      // Canonical, not plain JSON.stringify: the stored event payload is itself canonical, so a
+      // live write and a rebuild from the log must serialize this column identically or the two
+      // differ byte-for-byte (which `dumpHash`-style state comparisons would report as drift).
+      p.origin ? canonicalJson(p.origin) : null,
     );
     if (!skipFts) syncFtsRow(db, e.entryId, null);
     return;

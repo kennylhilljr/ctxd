@@ -9,7 +9,7 @@
 | **Inputs** | Acceptance criteria in the current component PRDs ([PRD v8](../prd/PRD-v8.md) section 6.1 lists them); tests in `test/unit/` and `test/conformance/` |
 | **Strategy** | [Spec v10](../spec/SPEC-v10.md) section 14 (test layers and tooling) |
 
-Every acceptance criterion in the component PRDs has an ID (`<prefix>-AC-n`). This plan maps each ID to the tests that verify it. It was first mapped at commit `9ffeea9` and updated as the W1 to W6 workstreams merged; each link is re-resolved by test title, so line numbers stay current. Counts: **90 criteria**; Covered: 40, Diverges: 1, Gap: 8, Partial: 41.
+Every acceptance criterion in the component PRDs has an ID (`<prefix>-AC-n`). This plan maps each ID to the tests that verify it. It was first mapped at commit `9ffeea9` and updated as the W1 to W6 workstreams merged; each link is re-resolved by test title, so line numbers stay current. Counts: **90 criteria**; Covered: 41, Diverges: 1, Gap: 8, Partial: 40.
 
 | Status | Meaning |
 |---|---|
@@ -150,7 +150,7 @@ Criteria: [PRD-mobile-inbox-v2](../prd/components/PRD-mobile-inbox-v2.md).
 | MI-AC-4 | Gap | None | No inbox test. The pull engine writes through the agent write path, which rejects a secret (`REDACTED_SECRET`) rather than redacting it; the owner should confirm whether MI-5 means reject or redact. |
 | MI-AC-5 | Covered | [`inbox-pull.test.ts:78`](../../test/unit/inbox-pull.test.ts#L78) applies an entry for an allowlisted scope as proposed, tagged with its origin |  |
 | MI-AC-6 | Covered | [`inbox-pull.test.ts:97`](../../test/unit/inbox-pull.test.ts#L97) holds an entry for a scope the client has no grant for, rather than applying or silently dropping it |  |
-| MI-AC-7 | Partial | [`inbox-pull.test.ts:78`](../../test/unit/inbox-pull.test.ts#L78) applies an entry for an allowlisted scope as proposed, tagged with its origin | The origin tag is asserted; capture time and reference tags are not. |
+| MI-AC-7 | Covered | [`inbox-pull.test.ts`](../../test/unit/inbox-pull.test.ts) applies an entry for an allowlisted scope as proposed, with its provenance in entries.origin<br>[`inbox-pull.test.ts`](../../test/unit/inbox-pull.test.ts) omits client_ref from the provenance when the capture did not give one<br>[`write.test.ts`](../../test/unit/write.test.ts) replays entries.origin from the event log (W7), since provenance is carried in the create payload | Source, capture time and reference are now all asserted, as a real column rather than tags (W7, schema 23). |
 | MI-AC-8 | Partial | [`inbox-pull.test.ts:108`](../../test/unit/inbox-pull.test.ts#L108) rejects a home-replication scope outright, without holding it for review (MI-7)<br>[`inbox-publish-briefs.test.ts:62`](../../test/unit/inbox-publish-briefs.test.ts#L62) skips a local-only scope and a home-replication scope even when allowlisted | Pull tests cover a `home` scope; `local-only` and sealed exclusion are tested only for brief publishing. |
 | MI-AC-9 | Covered | [`inbox-pull.test.ts:63`](../../test/unit/inbox-pull.test.ts#L63) makes zero transport calls when mobile_inbox is off<br>[`cli-inbox.test.ts:44`](../../test/unit/cli-inbox.test.ts#L44) makes no transport calls and returns 0 when mobile_inbox is off |  |
 | MI-AC-10 | Covered | [`cli-inbox.test.ts:44`](../../test/unit/cli-inbox.test.ts#L44) makes no transport calls and returns 0 when mobile_inbox is off<br>[`cli-inbox.test.ts:73`](../../test/unit/cli-inbox.test.ts#L73) reports mobile_inbox off without calling the transport |  |

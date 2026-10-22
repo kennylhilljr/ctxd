@@ -17,6 +17,8 @@ export interface EntryRow {
   entry_id: string;
   scope_id: string;
   kind: Kind;
+  /** Raw JSON from `entries.origin` (W7), present on `SELECT *` reads; NULL for an ordinary write. Deliberately not in ENTRY_COLUMNS, so no brief or search query pays for it. */
+  origin?: string | null;
   slug: string;
   significance: Significance | null;
   skill_name: string | null;
