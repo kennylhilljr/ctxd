@@ -2,7 +2,9 @@
 
 ## Read first
 
-- The parent [PRD v7](docs/prd/PRD-v7.md), the latest version of each component PRD in [docs/prd/components/](docs/prd/components/) (the parent's component index lists them), and the latest spec in [docs/spec/](docs/spec/) (Spec v7, then v8 once M3 writes it) are the source of truth. If code and spec disagree, raise it; do not silently diverge.
+- [docs/README.md](docs/README.md) is the map: it lists every documentation layer and the latest version of each document. The latest parent PRD, component PRDs, the Spec (the system HLD), the LLDs and the contracts it lists are the source of truth. If code and spec disagree, raise it; do not silently diverge.
+- Spec section numbers (for example `SPEC 9.1`) are one namespace across the HLD and the LLDs; the HLD's section table says which file holds each number. A change inside one component goes into the next version of its LLD or contract; a change to system shape goes into the next HLD version, usually with an ADR.
+- Acceptance criteria have IDs (`<prefix>-AC-n`). A new or changed test that verifies one names its ID in the test title or a comment, and the [test plan](docs/test/test-plan-v1.md) maps every ID to its tests.
 - Component PRDs reference their parent, their siblings and the spec sections that implement them. Keep those references current when adding or versioning a document. Links inside an unchanged component may point to sibling versions current when it was written; the parent PRD's component index is authoritative.
 - Use the latest numbered version of each document. Never edit a past version; create the next numbered file instead.
 
@@ -20,6 +22,10 @@
 - **Writing style for docs:** no em dashes, en dashes or double hyphens in prose; use commas, colons, semicolons, periods or parentheses.
 - **Every optional behavior has a feature flag** ([Feature flags](docs/prd/components/PRD-feature-flags-v1.md)): registered once, readable by hooks without the server, safe to switch off (no data loss, no change to the tool list, hooks still exit 0). New risky features ship switched off.
 - **Commits are authored by the owner.** Use the git identity already configured on the machine. Never change `user.name` or `user.email` (repository or global), never pass `--author` or `-c user.*`, and never rewrite authors of existing commits. Agents credit themselves with a `Co-Authored-By:` trailer in the commit message instead. If no identity is configured, stop and ask the owner rather than inventing one.
+
+## Personas
+
+Documents are written section by section by named agent personas, defined in [.claude/agents/](.claude/agents/) and governed by the [persona standard](docs/standards/agent-personas-v1.md). Each template section in [docs/templates/](docs/templates/) names its owner (H human, C co-authored, A agent) and, for C and A, its persona. Never write an H section; list it as an open question. Never verify work you produced. Agents without subagent support (Codex) read the persona file for the section they are writing and follow it by hand.
 
 ## Commands
 

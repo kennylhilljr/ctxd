@@ -1,7 +1,7 @@
 /**
  * W2: the authenticated sealed pool key transfer protocol. `ctxd pool enroll <pool> <node>`'s own
  * stub (`SealedPoolStore.enroll`) used to throw unconditionally; this is what it now drives.
- * Design in docs/spec/SPEC-v10-draft.md's "W2: sealed pool key transfer" section.
+ * Design in docs/lld/LLD-security-access-v1.md section 10.6.1 (formerly the Spec v10 draft's W2 section).
  *
  * Four steps, each a small pure-ish function against the main database, deliberately with no
  * MCP tool anywhere near them: every one of these is reachable only from `ctxd pool`'s own CLI

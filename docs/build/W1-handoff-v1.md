@@ -60,10 +60,10 @@ set-token` (Keychain, MI-10). `ctxd status`/`statusline` gained an `inboxPending
 the local transport, `null` for Cloudflare (a network call would violate `statusline`'s latency
 budget, the same convention `unsynced` already uses).
 
-**Spec, runbook** (slice 8): [Spec v10](../spec/SPEC-v10.md) section 17, written from
+**Spec, runbook** (slice 8): [Spec v10](../lld/LLD-mobile-inbox-v1.md) section 17, written from
 [Spec v9](../spec/SPEC-v9.md) plus W2's and W5's merged content (folded in from
-[SPEC-v10-draft.md](../spec/SPEC-v10-draft.md), left in place for W3/W4/W6 to still append to
-before their own merge) and this workstream's own section. [M7-deploy-runbook-v1.md](M7-deploy-runbook-v1.md)
+[SPEC-v10-draft.md](../spec/SPEC-v10.md#changes-in-v10), left in place for W3/W4/W6 to still append to
+before their own merge) and this workstream's own section. [M7-deploy-runbook-v1.md](../runbooks/mobile-inbox-deploy-v1.md)
 is the step-by-step owner walkthrough: deploy the Worker, mint tokens, connect phone apps, turn
 the flag on.
 
@@ -88,7 +88,7 @@ this slice's own scope:
 
 - **Deploying the Worker, minting real tokens, connecting real phone apps, and turning
   `mobile_inbox` on for real** are the owner's steps (completion-kickoff-v1.md section 0's stop
-  rule: real cloud accounts and real tokens). [M7-deploy-runbook-v1.md](M7-deploy-runbook-v1.md)
+  rule: real cloud accounts and real tokens). [M7-deploy-runbook-v1.md](../runbooks/mobile-inbox-deploy-v1.md)
   covers all of it.
 - **Scheduling `ctxd inbox pull`** (so capture works unattended, not only when run by hand) was not
   built: M7's own slice 7 asked only for the CLI subcommands, not a `ctxd server`-loop scheduler or
@@ -102,7 +102,7 @@ this slice's own scope:
 
 ## Owner steps
 
-1. Follow [M7-deploy-runbook-v1.md](M7-deploy-runbook-v1.md) to deploy the Worker, mint tokens,
+1. Follow [M7-deploy-runbook-v1.md](../runbooks/mobile-inbox-deploy-v1.md) to deploy the Worker, mint tokens,
    connect phone apps, and turn `mobile_inbox` on.
 2. Schedule `ctxd inbox pull` for unattended capture (runbook section 7).
 3. Decide D2 for real (which scopes, if any, publish briefs back to the phone) once the capture

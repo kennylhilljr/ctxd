@@ -105,6 +105,37 @@ function embedNote(f: Fixture, entry: { id: string }, title: string, body: strin
   upsertVecIndex(f.db, entry.id, FULL_MODEL_ID, EMBEDDING_DIM, vector);
 }
 
+describe("runSearch: scored-query FTS5 escaping (regression, found building the W6 search benchmark)", () => {
+  it("does not throw on a query containing FTS5 syntax characters, and still matches", async () => {
+    const f = setup();
+    note(f, "Blue-green deployment rollback", "The blue-green deployment keeps the previous release warm.");
+
+    const result = await runSearch(requestCtx(f, new Map([["semantic_search", false]])), {
+      scope: "notes",
+      query: "blue-green deployment rollback",
+      limit: 10,
+      max_tokens: 4000,
+      include_proposed: true,
+    });
+    expect(result.results.map((r) => r.title)).toContain("Blue-green deployment rollback");
+  });
+
+  it("does not throw on a query with a literal double quote", async () => {
+    const f = setup();
+    note(f, "Quoting rules", "How to escape a literal quote character.");
+
+    await expect(
+      runSearch(requestCtx(f, new Map([["semantic_search", false]])), {
+        scope: "notes",
+        query: 'escape a "quote" character',
+        limit: 10,
+        max_tokens: 4000,
+        include_proposed: true,
+      }),
+    ).resolves.not.toThrow();
+  });
+});
+
 describe("runSearch: hybrid relevance (semantic_search off, or model not cached)", () => {
   it("falls back to pure FTS, unchanged, when semantic_search is off", async () => {
     const f = setup();

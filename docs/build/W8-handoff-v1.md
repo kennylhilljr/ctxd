@@ -8,8 +8,13 @@ by the owner on 2026-10-21.
 - `3dc5332` `W8 slice 1: ctxd inbox schedule, for unattended mobile inbox pulls`
 - this handoff
 
-Branch `done/w8-inbox-schedule`, **stacked on `done/w1-mobile-inbox`** (PR #60), not on `main`:
-the command it schedules, `ctxd inbox pull`, only exists on that branch. Merge W1 first.
+Branch `done/w8-inbox-schedule`. It was first cut from `done/w1-mobile-inbox` (PR #60), since the
+command it schedules only existed there; W1 merged while this was open, so `main` has been merged
+back in (one merge commit) and the PR now targets `main` directly. That merge also moved this
+change's documentation: `main` had meanwhile split the spec into an L3 HLD plus L4 LLDs and
+contracts, so what this originally added to `SPEC-v10.md` section 17.6 now lives in
+[LLD: Mobile inbox](../lld/LLD-mobile-inbox-v1.md) 17.6 and the
+[CLI contract](../contracts/cli-reference-v1.md).
 
 ## Delivered
 
@@ -24,10 +29,11 @@ schedules itself rather than the default one.
 **Deliberately a near-twin of W4's `src/cli/backup-schedule.ts`**, down to the function names. The
 two differ only in what they launch and in how launchd is told when to run it (`StartInterval`
 here, since inbox capture wants "every few minutes"; `StartCalendarInterval` there, since a backup
-wants "once a day at 03:15"). W4 is still on an unmerged branch, so this reuses only `lintPlist`,
-which is already on this one. **This is now the second concrete instance W7's plan said was needed
-before generalizing**: once both merge, extracting one shared plist helper is a small, obvious,
-test-covered refactor, and W7's "shared scheduling abstraction" item is ready to build.
+wants "once a day at 03:15"). Only `lintPlist` is shared today. **W4 has since merged, so this is
+the second concrete instance W7's plan said was needed before generalizing**: extracting one
+shared plist helper is now a small, obvious, test-covered refactor. It is deliberately not done
+here, because the owner approved this item and not that one; it stays listed in
+[W7's plan](W7-plan-v1.md).
 
 **Safe with the flag off.** `ctxd inbox pull` already reports `mobile_inbox` off and exits 0
 without a single network call, so a loaded job on a machine with the flag off does nothing. The

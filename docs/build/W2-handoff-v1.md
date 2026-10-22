@@ -15,7 +15,7 @@ Branch `done/w2-sealed-key-transfer`, eight commits on top of `main`. Nothing wa
 
 ## Delivered
 
-**The design** (slice 1, in [docs/spec/SPEC-v10-draft.md](../spec/SPEC-v10-draft.md)'s "W2: sealed pool key transfer" section) covers every point the kickoff plan asked for: a recipient's encryption key bound to its already-enrolled signing identity, the owner's explicit approval on the source, a confirmation code shown on both nodes without transmitting it, replay protection, and what revoking a node does. It does not contradict Spec 10.6, which already describes the key as "copied once ... over the tailnet with my approval on both machines"; this fills in how.
+**The design** (slice 1, in [docs/spec/SPEC-v10-draft.md](../lld/LLD-security-access-v1.md)'s "W2: sealed pool key transfer" section) covers every point the kickoff plan asked for: a recipient's encryption key bound to its already-enrolled signing identity, the owner's explicit approval on the source, a confirmation code shown on both nodes without transmitting it, replay protection, and what revoking a node does. It does not contradict Spec 10.6, which already describes the key as "copied once ... over the tailnet with my approval on both machines"; this fills in how.
 
 **Every node gets a long-lived, signed X25519 encryption keypair** (`node_encryption_keys`, schema v21), separate from its Ed25519 event-signing identity but bound to it: the prekey is signed with the node's own Ed25519 private key, so a peer that already trusts that node's Ed25519 identity (`peers.remote_public_key`, pinned at enrollment, M6) can verify the prekey actually belongs to it. The private key lives in a PEM file beside the Ed25519 identity file, never in the database, mirroring `FileEventKeyProvider` exactly.
 
@@ -29,7 +29,7 @@ Branch `done/w2-sealed-key-transfer`, eight commits on top of `main`. Nothing wa
 
 **Revoking a node:** at minimum, no new keys — a revoked peer fails the trust check at request time, so it can never start or complete a new transfer. Existing sealed pools are **not** re-keyed on revocation; a pool key a since-revoked node already holds stays valid for whatever it already has. A future `ctxd pool rekey <pool>` is the place for that, not built here.
 
-Spec changes are in [docs/spec/SPEC-v10-draft.md](../spec/SPEC-v10-draft.md), which M7 slice 8 folds into the numbered Spec v10.
+Spec changes are in [docs/spec/SPEC-v10-draft.md](../lld/LLD-security-access-v1.md), which M7 slice 8 folds into the numbered Spec v10.
 
 ## Verification
 

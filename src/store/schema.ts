@@ -41,8 +41,12 @@
  * Bumped to 21 for W2: `node_encryption_keys` holds each node's long-lived signed X25519
  * encryption prekey; `sealed_key_transfers` tracks the state of an authenticated sealed pool key
  * transfer to a newly enrolled node, from request through one-time-use fetch.
+ * Bumped to 22 for W3: `peer_watermarks` records, per peer and origin, the highest origin_seq
+ * this node has served that peer (POST /v1/pull is otherwise stateless on the serving side), so
+ * `ctxd doctor` and `ctxd status`/`statusline` can report real sync age and unsynced counts
+ * instead of "not tracked yet."
  */
-export const SCHEMA_VERSION = 21;
+export const SCHEMA_VERSION = 22;
 
 export const SCHEMA_SQL = `
 CREATE TABLE nodes (
@@ -395,7 +399,7 @@ CREATE TABLE tool_metrics (            -- local only: response metering (8.5)
 CREATE INDEX tool_metrics_at ON tool_metrics(at);
 
 CREATE TABLE scope_repos (
-  repo         TEXT PRIMARY KEY,       -- normalized origin, e.g. github.com/kennylhilljr/ctxd
+  repo         TEXT PRIMARY KEY,       -- normalized origin, e.g. github.com/example/sample-app
   scope_id     TEXT NOT NULL REFERENCES scopes(scope_id)
 );
 
@@ -466,6 +470,14 @@ CREATE TABLE sync_state (
   origin_node  TEXT NOT NULL,
   through_seq  INTEGER NOT NULL,
   PRIMARY KEY (peer_node, origin_node)
+);
+
+CREATE TABLE peer_watermarks (          -- the served-side mirror of sync_state (W3): how far we've served each peer, per origin
+  peer_id      TEXT NOT NULL,
+  origin_node  TEXT NOT NULL,
+  through_seq  INTEGER NOT NULL,
+  updated_at   TEXT NOT NULL,
+  PRIMARY KEY (peer_id, origin_node)
 );
 
 CREATE VIRTUAL TABLE entries_fts USING fts5(

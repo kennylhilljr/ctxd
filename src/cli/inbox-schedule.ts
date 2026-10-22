@@ -4,11 +4,12 @@
  * docs/build/M7-deploy-runbook-v1.md both named this as the follow-up that makes the mobile inbox
  * usable without running it by hand; W7's plan listed it, and the owner approved it.
  *
- * Deliberately shaped like `src/cli/backup-schedule.ts` (W4), down to the function names, so the
- * two can be unified into one helper once both land: they differ only in what they launch and in
- * how launchd is told when to run it (`StartInterval` here, since inbox capture wants "every few
- * minutes"; `StartCalendarInterval` there, since a backup wants "once a day at 03:15"). That file
- * is on an unmerged branch, so this one reuses only `lintPlist`, which is already here.
+ * Deliberately shaped like `src/cli/backup-schedule.ts` (W4), down to the function names: the two
+ * differ only in what they launch and in how launchd is told when to run it (`StartInterval` here,
+ * since inbox capture wants "every few minutes"; `StartCalendarInterval` there, since a backup
+ * wants "once a day at 03:15"). Both now exist, which is the second instance W7's plan said was
+ * needed before generalizing; extracting one shared plist helper is listed there, unbuilt, and is
+ * deliberately not done in this change. Only `lintPlist` is shared today.
  *
  * Safe with the flag off: `ctxd inbox pull` itself reports `mobile_inbox` off and exits 0 without
  * a single network call, so a loaded job on a machine with the flag off does nothing at all.

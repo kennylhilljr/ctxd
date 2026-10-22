@@ -19,8 +19,10 @@ export const configSchema = z.object({
     .object({
       listen: listen.default("127.0.0.1:7412"),
       interval_seconds: z.number().int().min(15).default(120),
+      /** `ctxd doctor`'s per-peer "last sync age" warning threshold (W3). */
+      stale_hours: z.number().int().min(1).default(24),
     })
-    .default({ listen: "127.0.0.1:7412", interval_seconds: 120 }),
+    .default({ listen: "127.0.0.1:7412", interval_seconds: 120, stale_hours: 24 }),
   brief: z
     .object({
       micro_tokens: z.number().int().default(300),
@@ -43,8 +45,13 @@ export const configSchema = z.object({
     }),
   scope_map: z.record(z.string(), z.string()).default({}),
   backup: z
-    .object({ age_recipient: z.string().default(""), copy_to: z.string().default("") })
-    .default({ age_recipient: "", copy_to: "" }),
+    .object({
+      age_recipient: z.string().default(""),
+      copy_to: z.string().default(""),
+      /** `ctxd backup schedule install`'s launchd StartCalendarInterval time, "HH:MM" local (W4). */
+      schedule: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "HH:MM").default("03:15"),
+    })
+    .default({ age_recipient: "", copy_to: "", schedule: "03:15" }),
   hooks: z
     .object({
       bypass_patterns: z.array(z.string()).default([]),
