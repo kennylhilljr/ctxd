@@ -9,7 +9,7 @@
 | **Inputs** | Acceptance criteria in the current component PRDs ([PRD v8](../prd/PRD-v8.md) section 6.1 lists them); tests in `test/unit/` and `test/conformance/` |
 | **Strategy** | [Spec v10](../spec/SPEC-v10.md) section 14 (test layers and tooling) |
 
-Every acceptance criterion in the component PRDs has an ID (`<prefix>-AC-n`). This plan maps each ID to the tests that verify it. It was first mapped at commit `9ffeea9` and updated as the W1 to W6 workstreams merged; each link is re-resolved by test title, so line numbers stay current. Counts: **89 criteria**; Covered: 39, Diverges: 1, Gap: 8, Partial: 41.
+Every acceptance criterion in the component PRDs has an ID (`<prefix>-AC-n`). This plan maps each ID to the tests that verify it. It was first mapped at commit `9ffeea9` and updated as the W1 to W6 workstreams merged; each link is re-resolved by test title, so line numbers stay current. Counts: **90 criteria**; Covered: 40, Diverges: 1, Gap: 8, Partial: 41.
 
 | Status | Meaning |
 |---|---|
@@ -33,6 +33,7 @@ Every acceptance criterion in the component PRDs has an ID (`<prefix>-AC-n`). Th
 | MI-AC-11 | Gap | While `mobile_inbox` is off, every ctxd hook shall still exit 0. | No hook test with the flag off. |
 | MI-AC-12 | Gap | ctxd shall keep inbox API tokens and encryption keys only in the macOS Keychain, never in a repository or configuration file. | No test for `ctxd inbox set-token`. |
 | PA-AC-11 | Gap | When the human runs `ctxd hold adopt`, ctxd shall move the holding scope's approved entries into the project scope and add the agent to the pool in one step. | No test for `ctxd hold adopt`. |
+| PA-AC-13 | Covered | [`sealed-rekey.test.ts`](../../test/unit/sealed-rekey.test.ts) re-encrypts under a fresh key, commits it, and leaves no staging entry behind<br>[`sealed-rekey.test.ts`](../../test/unit/sealed-rekey.test.ts) still unlocks afterwards, with the rotated key<br>[`sealed-rekey.test.ts`](../../test/unit/sealed-rekey.test.ts) reports the other enrolled nodes, never this one, and deletes no rows itself<br>[`sealed-rekey.test.ts`](../../test/unit/sealed-rekey.test.ts) deletes the enrollment a pool_enroll event created | The Touch ID prompt on a real Keychain is a manual check on a real Mac, as for PA-AC-7. |
 | TS-AC-7 | Gap | When the human exports a scope that contains a home-directory path, ctxd shall print a categorized warning and ask for confirmation before writing. | Import preflight is tested (`mirror.test.ts:147`); export warnings are not. |
 
 ## BS: Briefs and search

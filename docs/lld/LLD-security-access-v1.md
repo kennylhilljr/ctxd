@@ -129,6 +129,45 @@ Implements [PRD-pools-access-v3](../prd/components/PRD-pools-access-v3.md) secti
 
 **Flag:** `sealed_pools.key_transfer`, off by default, gating both the new endpoints and the CLI commands; `ctxd pool enroll` keeps refusing outright when it is off, same as today.
 
+#### 10.6.2 Key rotation
+
+Implements PA-20 and PA-AC-13. Builds the `ctxd pool rekey <pool>` that 10.6.1 above named and
+deferred, for the case 10.6.1 deliberately does not cover: a key a since-revoked node already
+holds. Flag `sealed_pools.rekey`, off by default (a risky operation ships switched off); the
+command refuses outright when it is off.
+
+**What it does.** Generates a fresh 32-byte key, re-encrypts the pool's own database file under it
+(SQLCipher's `PRAGMA rekey`, through the same injected database provider that `open` uses, so
+tests exercise the same lifecycle against an unencrypted test database), commits the new key, and
+reports which *other* nodes were holding the old one.
+
+**Step order is the design, because exactly one step cannot be undone:**
+
+1. stage the new key under `<poolId>.rekey-pending`;
+2. re-encrypt the file (**irreversible**);
+3. promote the new key to `<poolId>`;
+4. drop the staging copy.
+
+A crash between 2 and 3 leaves a file on the new key while `<poolId>` still holds the old one, so
+the pool will not unlock. The staging entry is the recovery path, and the error names it rather
+than leaving the owner to guess; staging *before* step 2 is what makes that window recoverable at
+all. A failure in step 2 itself removes the staging copy, since the old key is still correct.
+
+**Other nodes lose access, by one event each.** Rotation does not re-wrap the new key for the
+remaining enrolled nodes: that needs each one's prekey and the owner's approval per node, which is
+exactly 10.6.1's transfer flow, and doing it silently here would hand out a pool key without the
+confirmation step 10.6.1 exists to provide. Instead each other node gets a `pool_unenroll` acl
+event (the inverse of `pool_enroll`, sharing its HLC guard target `pool_enrollment:<pool>:<node>`,
+so an enroll and an unenroll for the same node converge on whichever carries the later HLC rather
+than on arrival order). `servePull`'s own `pool_enrollments` check then stops serving that node
+this pool's sealed events until it re-enrolls through 10.6.1. The store deliberately deletes no
+rows itself: materialized access state only ever changes through an event (ADR 0002).
+
+**Backups.** A backup taken before a rotation is ciphertext under the old key, and rotation does
+not keep the old key, so such a backup is restorable only if the owner kept that key themselves.
+The command says so on every run, and `ctxd pool rekey <pool>` without `--yes` only previews (the
+nodes that would lose access, and this warning) and changes nothing.
+
 ### 10.7 Traversal rule
 
 Implements [PRD-pools-access-v3](../prd/components/PRD-pools-access-v3.md) section 7.2. Every operation that moves from one entry to another re-evaluates `level` for the target's scope, under the session's persona:

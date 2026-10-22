@@ -255,6 +255,60 @@ function approveKeyTransferCommand(db: Database.Database, dataDir: string, confi
   }
 }
 
+/**
+ * `ctxd pool rekey <pool> [--yes]` (W7's approved follow-up to W2). Without `--yes` this only
+ * previews: re-encrypting a pool's database is the one sealed-pool operation that cannot be
+ * undone, and it costs every other enrolled node its access, so the default is to show what
+ * would happen and change nothing (the same shape as `ctxd scope rollback`'s own preview).
+ */
+function rekeyPool(
+  db: Database.Database,
+  dataDir: string,
+  config: CtxdConfig,
+  ctx: WriteContext,
+  poolId: string,
+  poolName: string,
+  confirmed: boolean,
+): number {
+  const sealed = db.prepare("SELECT 1 FROM pools WHERE pool_id = ? AND storage = 'sealed'").get(poolId);
+  if (!sealed) {
+    // Checked here too, not only inside the store: otherwise a preview would print a confident
+    // plan for a pool that has no key and no file to re-encrypt.
+    console.error(`ctxd pool rekey: "${poolName}" is not a sealed pool; there is no key to rotate.`);
+    return 1;
+  }
+  const node = db.prepare("SELECT node_id FROM nodes LIMIT 1").get() as { node_id: string };
+  const others = (db.prepare("SELECT node_id FROM pool_enrollments WHERE pool_id = ? AND node_id <> ? ORDER BY node_id").all(poolId, node.node_id) as { node_id: string }[]).map(
+    (row) => row.node_id,
+  );
+
+  if (!confirmed) {
+    console.log(`ctxd pool rekey: would rotate the key for "${poolName}" and re-encrypt its database file.`);
+    console.log(`  nodes that would lose access until they re-enroll: ${others.length ? others.join(", ") : "none"}`);
+    console.log("  backups taken before the rotation stay readable only with the OLD key, which this does not keep.");
+    console.log("Nothing was changed. Re-run with --yes to rotate.");
+    return 0;
+  }
+
+  const store = new SealedPoolStore(db, dataDir, new KeyHelperProvider(config.sealed.key_helper), new SqlCipherDatabaseProvider(), config.sealed.unlock_minutes);
+  try {
+    const dropped = store.rekey(poolId, node.node_id);
+    for (const nodeId of dropped) appendAclEvent(ctx, poolId, { action: "pool_unenroll", node_id: nodeId });
+    console.log(`ctxd pool rekey: rotated the key for "${poolName}" and re-encrypted its database.`);
+    if (dropped.length) {
+      console.log(`  un-enrolled (they hold the old key): ${dropped.join(", ")}`);
+      console.log(`  re-enroll each with: ctxd pool enroll ${poolName} <node>`);
+    }
+    console.log("  backups taken before now need the OLD key; this rotation did not keep it.");
+    return 0;
+  } catch (err) {
+    console.error(`ctxd pool rekey: ${err instanceof Error ? err.message : String(err)}`);
+    return 1;
+  } finally {
+    store.close();
+  }
+}
+
 export async function run(argv: string[]): Promise<number> {
   const [sub, ...rest] = argv;
   const { values, positionals } = parseArgs({
@@ -264,6 +318,7 @@ export async function run(argv: string[]): Promise<number> {
       level: { type: "string" },
       tag: { type: "boolean" },
       "transfer-id": { type: "string" },
+      yes: { type: "boolean" },
       "data-dir": { type: "string" },
       config: { type: "string" },
     },
@@ -379,6 +434,14 @@ export async function run(argv: string[]): Promise<number> {
         if (!transferId) { console.error("Usage: ctxd pool approve-key-transfer <transferId>"); return 1; }
         return approveKeyTransferCommand(db, dataDir, config, transferId);
       }
+      case "rekey": {
+        requireFlag(flags, "sealed_pools");
+        requireFlag(flags, "sealed_pools.rekey");
+        const name = positionals[0];
+        const pool = name ? findPool(db, name) : undefined;
+        if (!name || !pool) { console.error("Usage: ctxd pool rekey <pool> [--yes]"); return 1; }
+        return rekeyPool(db, dataDir, config, humanContext(), pool.pool_id, name, values.yes === true);
+      }
       case "lock": {
         requireFlag(flags, "sealed_pools");
         const name = positionals[0];
@@ -390,7 +453,7 @@ export async function run(argv: string[]): Promise<number> {
         return 0;
       }
       default:
-        console.error(`ctxd pool: unknown subcommand "${sub}". Use create, show, grant, revoke, add-member, remove-member, seal, enroll, approve-key-transfer or lock.`);
+        console.error(`ctxd pool: unknown subcommand "${sub}". Use create, show, grant, revoke, add-member, remove-member, seal, enroll, approve-key-transfer, rekey or lock.`);
         return 2;
     }
   } finally {
