@@ -1901,7 +1901,7 @@ A no-op, not an error, if `skills.native_sync` is off by the time the worker act
 | `ctxd mirror start\|stop\|status` | Markdown mirror (12.1) |
 | `ctxd import <dir> --scope <name> [--dry-run]` | Import Markdown files as proposed entries (12.1) |
 | `ctxd skills list\|show <name>\|sync [--client <id>]\|import --from <client>` | Skills (4.3, 12.2) |
-| `ctxd inbox pull\|status\|set-token <token>` | Mobile inbox (17) |
+| `ctxd inbox pull\|status\|set-token <token>\|schedule <install\|uninstall\|status>` | Mobile inbox (17) |
 | `ctxd remember "<text>" [--kind preference\|convention\|fact] [--scope _me]` | Record memory directly as the human client |
 | `ctxd log "<text>" [--significance <s>] [--scope <name>] [--resolves <ref>]` | Add a journal entry |
 | `ctxd journal [<scope>] [--day <date>\|--since <age>]` | Read the journal; `ctxd digest [<scope>] [--week <id>]` prints or writes a digest (11.5) |
@@ -2112,9 +2112,18 @@ for the Cloudflare transport, matching the same "report untracked rather than fa
 convention `unsynced` already uses (12, this section's own `inboxPending` would otherwise need a
 network call that violates `statusline`'s latency budget).
 
+`ctxd inbox schedule install|uninstall|status` manages a launchd agent that runs `ctxd inbox
+pull` every `[inbox] schedule_minutes`, so capture works unattended; pulling is not part of `ctxd
+server`'s own scheduled loop. It writes `~/Library/LaunchAgents/dev.ctxd.inbox-pull.plist` with
+`StartInterval` (seconds), never `RunAtLoad` or `KeepAlive` (those belong to the long-running
+server agent, 12), lints it with `plutil` and loads it with `launchctl`, reusing `src/cli/
+service.ts`'s own plist lint. The installed job inherits whichever `--config` and `--data-dir` the
+installing invocation was given. Because `ctxd inbox pull` itself exits cleanly without a network
+call when `mobile_inbox` is off, a loaded job on a machine with the flag off does nothing.
+
 **Configuration** (`[inbox]` in `config.toml`): `transport` (`local` or `cloudflare`), `dir` (for
 `local`), `endpoint` (for `cloudflare`), `pull_limit` (default 50), `publish_scopes` (default
-`[]`).
+`[]`), `schedule_minutes` (default 15, valid 1 to 1440).
 
 ## Appendix: M1 findings (condensed)
 

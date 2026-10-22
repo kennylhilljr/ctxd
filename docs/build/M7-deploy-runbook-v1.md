@@ -89,14 +89,24 @@ or `CTXD_FEATURE_MOBILE_INBOX=true` in the environment. Run `ctxd inbox pull` by
 confirm a capture round-trips, then check `ctxd review` for the new `proposed` entry attributed
 to `mobile-inbox`.
 
-## 7. Schedule it (optional, but needed for unattended use)
+## 7. Schedule it (needed for unattended use)
 
-`ctxd inbox pull` is a manual, on-demand command, the same way `ctxd sync` is: this milestone did
-not add it to `ctxd server`'s own scheduled loop. For hands-off capture, schedule it the same way
-W4 scheduled `ctxd backup`: a `launchd` agent with `StartCalendarInterval` (or a cron entry)
-running `ctxd inbox pull` every few minutes. A dedicated `ctxd inbox pull schedule` installer,
-mirroring `src/cli/backup-schedule.ts`, is a reasonable next slice if this becomes the common
-case; it was not built here because it was not in M7's own slice list.
+`ctxd inbox pull` is on-demand, the same way `ctxd sync` is: it is not part of `ctxd server`'s own
+scheduled loop. For hands-off capture, install the launchd agent:
+
+```bash
+ctxd inbox schedule install     # runs `ctxd inbox pull` every [inbox] schedule_minutes
+ctxd inbox schedule status      # installed? loaded? last exit status?
+ctxd inbox schedule uninstall   # unload and remove it
+```
+
+The cadence comes from `[inbox] schedule_minutes` (default 15, valid 1 to 1440), so set that
+before installing if 15 minutes is wrong for you; changing it later means reinstalling, since the
+interval is baked into the plist. Logs land in `~/Library/Logs/ctxd/inbox-pull.log` and
+`inbox-pull.err.log`.
+
+Safe to install before step 6: with `mobile_inbox` off, each run reports the flag is off and exits
+without a single network call.
 
 ## 8. Optional: allowlisted brief publishing
 

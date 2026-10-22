@@ -91,8 +91,10 @@ export const configSchema = z.object({
       endpoint: z.string().default(""),
       pull_limit: z.number().int().min(1).max(500).default(50),
       publish_scopes: z.array(z.string()).default([]),
+      /** Minutes between unattended `ctxd inbox pull` runs, for the launchd agent `ctxd inbox schedule install` writes. */
+      schedule_minutes: z.number().int().min(1).max(1440).default(15),
     })
-    .default({ transport: "local", dir: "~/Library/Application Support/ctxd/inbox", endpoint: "", pull_limit: 50, publish_scopes: [] }),
+    .default({ transport: "local", dir: "~/Library/Application Support/ctxd/inbox", endpoint: "", pull_limit: 50, publish_scopes: [], schedule_minutes: 15 }),
 });
 
 export type CtxdConfig = z.infer<typeof configSchema>;
