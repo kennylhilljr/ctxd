@@ -50,6 +50,7 @@ import { run as runImportCommand } from "./import.js";
 import { run as runOpenCommand } from "./open.js";
 import { run as runArchiveRequestCommand } from "./archive-request.js";
 import { run as runInboxCommand } from "./inbox.js";
+import { run as runUpgradeCommand } from "./upgrade.js";
 
 /** Each command's parsed-args entry point, added as its milestone lands. */
 const COMMAND_RUNNERS: Record<string, (argv: string[]) => number | Promise<number>> = {
@@ -102,6 +103,7 @@ const COMMAND_RUNNERS: Record<string, (argv: string[]) => number | Promise<numbe
   open: runOpenCommand,
   "archive-request": runArchiveRequestCommand,
   inbox: runInboxCommand,
+  upgrade: runUpgradeCommand,
 };
 
 const COMMANDS: Record<string, { milestone: string; summary: string }> = {
@@ -156,6 +158,7 @@ const COMMANDS: Record<string, { milestone: string; summary: string }> = {
   features: { milestone: "M3", summary: "List or set feature flags" },
   model: { milestone: "M5", summary: "Fetch or check the local embedding model" },
   inbox: { milestone: "M7", summary: "Pull the mobile inbox, or check its status" },
+  upgrade: { milestone: "M7", summary: "Rebuild a pre-v13 database into the current schema (writes a new file)" },
 };
 
 function usage(): string {
