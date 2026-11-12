@@ -132,7 +132,11 @@ export function migrateSchema(db: Database.Database): void {
   const sequenceVersion = db.pragma("user_version", { simple: true }) as number;
   if (sequenceVersion !== SCHEMA_VERSION) {
     db.close();
-    throw new Error(`Database schema version ${sequenceVersion} does not match ${SCHEMA_VERSION}; no migration is defined yet.`);
+    throw new Error(
+      sequenceVersion > 0 && sequenceVersion < 13
+        ? `Database schema version ${sequenceVersion} is older than this migration chain's first step (13), so it cannot be migrated in place. Rebuild it from its own event log: ctxd upgrade --from <database>. That writes a new file and leaves this one untouched.`
+        : `Database schema version ${sequenceVersion} does not match ${SCHEMA_VERSION}; no migration is defined yet.`,
+    );
   }
 }
 
