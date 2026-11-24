@@ -77,7 +77,15 @@ export function migratePeerOutgoingTokens(db: Database.Database, opts: KeychainO
   } finally {
     db.pragma(`secure_delete = ${secureDelete}`);
   }
+  // Flush the rewritten pages into the main file and empty the WAL, so neither keeps the old bytes.
+  if (result.migrated > 0) db.pragma("wal_checkpoint(TRUNCATE)");
   return result;
+}
+
+/** Clears every raw (unmigrated) outgoing token, zeroing its bytes. For a copy such as a backup image, never the live database. */
+export function redactRawPeerOutgoingTokens(db: Database.Database): number {
+  db.pragma("secure_delete = ON");
+  return db.prepare(`UPDATE peers SET outgoing_token = NULL WHERE outgoing_token NOT LIKE '${REF_PREFIX}%'`).run().changes;
 }
 
 /** Runs the migration and reports a failure on stderr without ever throwing, for command and server startup. */

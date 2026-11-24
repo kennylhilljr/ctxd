@@ -106,8 +106,8 @@ export function revokePeer(db: Database.Database, name: string, keychain: Keycha
     console.error(`ctxd node: peer "${name}" is already revoked.`);
     return 1;
   }
-  db.prepare("UPDATE peers SET revoked_at = ?, outgoing_token = NULL WHERE peer_id = ?").run(nowIso(), peer.peer_id);
   deletePeerOutgoingToken(peer.outgoing_token, keychain);
+  db.prepare("UPDATE peers SET revoked_at = ?, outgoing_token = NULL WHERE peer_id = ?").run(nowIso(), peer.peer_id);
   console.log(`ctxd node: peer revoked: ${name}`);
   return 0;
 }

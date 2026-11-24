@@ -16,12 +16,13 @@ import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, renameSync
 import { basename, dirname, join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { parseArgs } from "node:util";
-import type Database from "better-sqlite3";
+import Database from "better-sqlite3";
 import { resolveConfigPath, resolveDataDir } from "./common.js";
 import { loadConfig } from "../config/config.js";
 import { resolveFlags, requireFlag, isFlagOn } from "../config/flags.js";
 import { checkDatabaseIntegrity, openDatabase } from "../store/db.js";
 import { run as runBackupSchedule } from "./backup-schedule.js";
+import { migratePeerOutgoingTokensQuietly, redactRawPeerOutgoingTokens } from "../sync/peer-token.js";
 
 const KEEP = 14;
 const BACKUP_SUFFIX = ".db.age";
@@ -85,6 +86,9 @@ export function runBackup(db: Database.Database, opts: BackupOptions): BackupRes
   const destPath = join(dir, backupFilename(opts.now ?? new Date()));
   db.prepare("VACUUM INTO ?").run(tmpPath);
   try {
+    // A raw outgoing peer token the keychain migration could not move never enters a backup.
+    const copy = new Database(tmpPath);
+    try { redactRawPeerOutgoingTokens(copy); } finally { copy.close(); }
     execFileSync("age", ["-r", opts.ageRecipient, "-o", destPath, tmpPath]);
   } finally {
     rmSync(tmpPath, { force: true });
@@ -257,6 +261,7 @@ export function runBackupCommand(argv: string[]): number {
   const dataDir = resolveDataDir({ dataDir: values["data-dir"], configPath: values.config });
   const db = openDatabase(join(dataDir, "ctxd.db"));
   try {
+    migratePeerOutgoingTokensQuietly(db, "ctxd backup");
     const copyTo = isFlagOn(flags, "backups.copy") ? values["copy-to"] ?? (config.backup.copy_to || undefined) : undefined;
     const result = runBackup(db, { dataDir, ageRecipient: config.backup.age_recipient, copyTo });
     console.log(`ctxd backup: wrote ${result.path}${result.copiedTo ? `, copied to ${result.copiedTo}` : ""}.`);

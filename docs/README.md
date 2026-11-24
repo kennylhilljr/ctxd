@@ -57,7 +57,7 @@ Beside the stack:
 
 | Component | PRD (latest) | Requirement IDs | Criteria IDs | LLD (latest) |
 |---|---|---|---|---|
-| Knowledge model | [v4](prd/components/PRD-knowledge-model-v4.md) | KM-1 to KM-17 | KM-AC-n | [Data model v1](lld/LLD-data-model-v1.md), [Write path v1](lld/LLD-write-path-v1.md) |
+| Knowledge model | [v4](prd/components/PRD-knowledge-model-v4.md) | KM-1 to KM-17 | KM-AC-n | [Data model v2](lld/LLD-data-model-v2.md), [Write path v1](lld/LLD-write-path-v1.md) |
 | Persona pools and access | [v3](prd/components/PRD-pools-access-v3.md) | PA-1 to PA-19 | PA-AC-n | [Security and access v1](lld/LLD-security-access-v1.md), [MCP server v1](lld/LLD-mcp-server-v1.md) |
 | Hooks and agent lifecycle | [v6](prd/components/PRD-hooks-v6.md) | HK-1 to HK-26 | HK-AC-n | [Hooks v1](lld/LLD-hooks-v1.md) |
 | Claims and write intent | [v4](prd/components/PRD-claims-v4.md) | CL-1 to CL-14 | CL-AC-n | [Claims v1](lld/LLD-claims-v1.md) |
@@ -65,7 +65,7 @@ Beside the stack:
 | Context hygiene | [v2](prd/components/PRD-context-hygiene-v2.md) | CH-1 to CH-12 | CH-AC-n | [Context hygiene v1](lld/LLD-context-hygiene-v1.md) |
 | Replication and offline work | [v6](prd/components/PRD-replication-v6.md) | RP-1 to RP-17 | RP-AC-n | [Replication v2](lld/LLD-replication-v2.md) |
 | Briefs and search | [v5](prd/components/PRD-briefs-search-v5.md) | BS-1 to BS-20 | BS-AC-n | [Briefs and search v1](lld/LLD-briefs-search-v1.md), [MCP tools v1](contracts/mcp-tools-v1.md) |
-| Filesystem view | [v2](prd/components/PRD-filesystem-view-v2.md) | FS-1 to FS-8 | FS-AC-n | [Data model v1](lld/LLD-data-model-v1.md) 4.2, [Operations v1](lld/LLD-operations-v1.md) 12.1 |
+| Filesystem view | [v2](prd/components/PRD-filesystem-view-v2.md) | FS-1 to FS-8 | FS-AC-n | [Data model v2](lld/LLD-data-model-v2.md) 4.2, [Operations v1](lld/LLD-operations-v1.md) 12.1 |
 | Skills | [v3](prd/components/PRD-skills-v3.md) | SK-1 to SK-8 | SK-AC-n | [Operations v1](lld/LLD-operations-v1.md) 12.2 |
 | Memory and journal | [v2](prd/components/PRD-memory-journal-v2.md) | MJ-1 to MJ-10 | MJ-AC-n | [Briefs and search v1](lld/LLD-briefs-search-v1.md) |
 | Feature flags | [v2](prd/components/PRD-feature-flags-v2.md) | FF-1 to FF-8 | FF-AC-n | [Configuration v1](lld/LLD-configuration-v1.md) |

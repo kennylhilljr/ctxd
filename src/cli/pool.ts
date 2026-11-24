@@ -146,7 +146,6 @@ interface PeerForTransfer {
 interface PendingEnrollState {
   poolId: string;
   peerUrl: string;
-  outgoingToken: string;
   sourcePrekey: SignedPrekey;
 }
 
@@ -180,7 +179,7 @@ async function requestEnroll(db: Database.Database, dataDir: string, poolId: str
   const body = (await res.json()) as { transferId: string; sourcePrekey: SignedPrekey };
 
   mkdirSync(join(dataDir, "key-transfers"), { recursive: true });
-  const state: PendingEnrollState = { poolId, peerUrl: peer.url, outgoingToken: peer.outgoing_token, sourcePrekey: body.sourcePrekey };
+  const state: PendingEnrollState = { poolId, peerUrl: peer.url, sourcePrekey: body.sourcePrekey }; // never the bearer token: completion re-reads it from the keychain
   writeFileSync(pendingTransferPath(dataDir, body.transferId), JSON.stringify(state));
 
   const code = deriveConfirmationCode(encKeys.privateKey, body.sourcePrekey.publicKey);
