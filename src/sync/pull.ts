@@ -162,7 +162,7 @@ export async function pullFromPeer(
       return true;
     } catch (err) {
       if (isEnvironmentalFailure(err)) throw err;
-      recordRejection(db, peer.name, incoming, event, err);
+      recordRejection(db, peer.name, incoming, event, err, sealedStore);
       tally.rejected++;
       return false;
     }
@@ -236,7 +236,14 @@ function applyDecoded(
  * lose the event once the watermark has moved past it. Not kept when its entry is already purged
  * here, so a stored payload never outlives a purge.
  */
-function recordRejection(db: Database.Database, peerName: string, incoming: IncomingItem, event: WireEvent | undefined, err: unknown): void {
+function recordRejection(
+  db: Database.Database,
+  peerName: string,
+  incoming: IncomingItem,
+  event: WireEvent | undefined,
+  err: unknown,
+  sealedStore?: SealedPoolStore,
+): void {
   // The item is untrusted and may be malformed anywhere, so every field is type-checked before use.
   const raw = JSON.stringify(incoming) ?? "null";
   const field = (value: unknown, key: string): unknown => (value != null && typeof value === "object" ? (value as Record<string, unknown>)[key] : undefined);
@@ -245,9 +252,13 @@ function recordRejection(db: Database.Database, peerName: string, incoming: Inco
   const entryId = text(field(event, "entryId"));
   const eventId = text(field(event, "eventId")) ?? text(field(incoming, "event_id")) ?? text(field(incoming, "eventId")) ??
     `sha256:${createHash("sha256").update(raw).digest("hex")}`;
+  // A sealed entry lives (and is purged) in its pool's own database, not the main one.
+  const isPurged = (target: Database.Database) =>
+    (target.prepare("SELECT purged_at FROM entries WHERE entry_id = ?").get(entryId) as { purged_at: string | null } | undefined)?.purged_at != null;
   const purged = entryId != null &&
-    (db.prepare("SELECT purged_at FROM entries WHERE entry_id = ?").get(entryId) as { purged_at: string | null } | undefined)?.purged_at != null;
-  const reason = (err instanceof Error ? err.message : String(err)).slice(0, 500);
+    (isPurged(db) || (isSealedItem(incoming) && sealedStore !== undefined && sealedStore.withPool(incoming.pool_id, isPurged)));
+  // Peer-controlled text ends up in terminal output (ctxd doctor), so control characters go.
+  const reason = (err instanceof Error ? err.message : String(err)).replace(/[\u0000-\u001f\u007f-\u009f]/g, " ").slice(0, 500);
   const now = nowIso();
   db.prepare(
     `INSERT INTO sync_rejections (peer_node, event_id, origin_node, origin_seq, entry_id, raw, reason, first_rejected_at, last_rejected_at)
