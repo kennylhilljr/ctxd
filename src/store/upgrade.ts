@@ -39,6 +39,7 @@ const CARRY_BEFORE_REBUILD = [
   "peers",
   "peer_watermarks",
   "sync_state",
+  "sync_rejections",
   "pool_enrollments",
   "sealed_purge_queue",
   "sealed_key_transfers",

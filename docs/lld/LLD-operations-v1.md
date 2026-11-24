@@ -43,6 +43,7 @@ Section numbers are the Spec's own (for example 9.1), unchanged from Spec v9, so
   - DB integrity (`PRAGMA quick_check`);
   - review rules that are broader than allowed (should never occur);
   - peer reachability and last sync age: each peer's real age from `peers.last_synced_at` (a peer that never synced uses its `created_at`), with a warning past `sync.stale_hours` (default 24) (W3);
+  - rejected replicated events: fails while `sync_rejections` holds any row, naming each peer, its count, the last rejection time and the latest reason (#74, replication 7.1);
   - FileVault status;
   - hook installation per client;
   - backup age: the newest `*.db.age` file's modification time in `backups/`, warning past 36 hours; it fails when no backup exists yet, and is informational when `backups` is off (W4).

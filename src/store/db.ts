@@ -129,6 +129,17 @@ export function migrateSchema(db: Database.Database): void {
       db.pragma("user_version = 23");
     })();
   }
+  const rejectionVersion = db.pragma("user_version", { simple: true }) as number;
+  if (rejectionVersion === 23 && SCHEMA_VERSION >= 24) {
+    db.transaction(() => {
+      db.exec(`CREATE TABLE IF NOT EXISTS sync_rejections (
+        peer_node TEXT NOT NULL, event_id TEXT NOT NULL, origin_node TEXT, origin_seq INTEGER, entry_id TEXT, raw TEXT,
+        reason TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 1, first_rejected_at TEXT NOT NULL, last_rejected_at TEXT NOT NULL,
+        PRIMARY KEY (peer_node, event_id))`);
+      db.exec("CREATE INDEX IF NOT EXISTS sync_rejections_entry ON sync_rejections(entry_id)");
+      db.pragma("user_version = 24");
+    })();
+  }
   const sequenceVersion = db.pragma("user_version", { simple: true }) as number;
   if (sequenceVersion !== SCHEMA_VERSION) {
     db.close();

@@ -36,6 +36,7 @@ describe("gatherStatus", () => {
     const config = baseConfig();
     const info = await gatherStatus(db, config, { cwd: "/tmp/not-a-git-repo-and-not-mapped", fetchImpl: okFetch() });
     expect(info.healthOk).toBe(true);
+    expect(info.syncRejected).toBe(0);
     expect(info.scope).toBeNull();
     expect(info.briefAvailable).toBe(false);
     expect(info.openClaims).toBe(0);
@@ -146,5 +147,11 @@ describe("formatStatusDetail", () => {
     const detail = formatStatusDetail({ healthOk: true, scope: "ctxd", scopeNotice: null, briefAvailable: true, openClaims: 0, unsynced: 4, peerCount: 2, inboxPending: 0 });
     expect(detail).toContain("2 peer(s)");
     expect(detail).toContain("4 unsynced");
+  });
+
+  it("shows rejected replicated events only when there are some (#74)", () => {
+    const info = { healthOk: true, scope: "notes", scopeNotice: null, briefAvailable: true, openClaims: 0, unsynced: 0, peerCount: 1, inboxPending: 0 };
+    expect(formatStatusDetail({ ...info, syncRejected: 3 })).toContain("3 rejected (see ctxd doctor)");
+    expect(formatStatusDetail({ ...info, syncRejected: 0 })).not.toContain("rejected");
   });
 });

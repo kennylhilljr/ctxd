@@ -140,6 +140,21 @@ describe("openDatabase (SPEC v6 section 4)", () => {
     migrated.close();
   });
 
+  it("migrates a version-23 database by adding sync_rejections (#74)", () => {
+    const path = tmpDbPath();
+    const fresh = openDatabase(path, { create: true });
+    fresh.exec("DROP TABLE sync_rejections");
+    fresh.pragma("user_version = 23");
+    fresh.close();
+
+    const migrated = openDatabase(path);
+    expect(migrated.pragma("user_version", { simple: true })).toBe(SCHEMA_VERSION);
+    migrated.prepare("INSERT INTO sync_rejections (peer_node, event_id, reason, first_rejected_at, last_rejected_at) VALUES ('p', 'e', 'r', 't', 't')").run();
+    const row = migrated.prepare("SELECT attempts FROM sync_rejections WHERE peer_node = 'p'").get() as { attempts: number };
+    expect(row.attempts).toBe(1);
+    migrated.close();
+  });
+
   it("enforces foreign keys", () => {
     const path = tmpDbPath();
     const db = openDatabase(path, { create: true });

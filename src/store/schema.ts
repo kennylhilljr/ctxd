@@ -45,8 +45,10 @@
  * this node has served that peer (POST /v1/pull is otherwise stateless on the serving side), so
  * `ctxd doctor` and `ctxd status`/`statusline` can report real sync age and unsynced counts
  * instead of "not tracked yet."
+ * Bumped to 24: `sync_rejections` records replicated events a pull refused to apply, so one bad
+ * event no longer stalls replication from that peer; each is retried on later pulls (LLD 7.1).
  */
-export const SCHEMA_VERSION = 23;
+export const SCHEMA_VERSION = 24;
 
 export const SCHEMA_SQL = `
 CREATE TABLE nodes (
@@ -484,6 +486,21 @@ CREATE TABLE peer_watermarks (          -- the served-side mirror of sync_state 
   updated_at   TEXT NOT NULL,
   PRIMARY KEY (peer_id, origin_node)
 );
+
+CREATE TABLE sync_rejections (          -- local only, never replicated: events a pull refused to apply, retried on later pulls from the same peer
+  peer_node         TEXT NOT NULL,      -- peers.name, the same key sync_state uses
+  event_id          TEXT NOT NULL,      -- the wire event id, or 'sha256:<hex>' of the item when it carried none
+  origin_node       TEXT,               -- NULL when the item could not be read (e.g. a sealed envelope that failed to decrypt)
+  origin_seq        INTEGER,
+  entry_id          TEXT,               -- lets a purge delete this row, so a stored payload never outlives the purge
+  raw               TEXT,               -- the item exactly as received (a sealed item stays its encrypted envelope); NULL when not kept
+  reason            TEXT NOT NULL,
+  attempts          INTEGER NOT NULL DEFAULT 1,
+  first_rejected_at TEXT NOT NULL,
+  last_rejected_at  TEXT NOT NULL,
+  PRIMARY KEY (peer_node, event_id)
+);
+CREATE INDEX sync_rejections_entry ON sync_rejections(entry_id);
 
 CREATE VIRTUAL TABLE entries_fts USING fts5(
   title, body, tags, content='entries', content_rowid='rowid'
