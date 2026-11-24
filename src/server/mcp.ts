@@ -170,6 +170,12 @@ async function handleHttpRequest(
   );
 
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+  // Stateless mode builds one server and transport per request (the SDK's stateless pattern); close both
+  // when the response closes, whatever the outcome, so neither outlives its request (#72).
+  res.on("close", () => {
+    void transport.close();
+    void server.close();
+  });
   await server.connect(transport);
   await transport.handleRequest(req, res, body);
 }

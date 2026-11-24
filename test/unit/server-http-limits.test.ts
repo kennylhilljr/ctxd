@@ -206,7 +206,7 @@ describe("readJsonBody and server timeouts (#72)", () => {
     });
   });
 
-  it("logs an internal error through the secret redactor (TS-9)", () => {
+  it("logs an internal error through the secret redactor (TS-AC-2)", () => {
     const logged = vi.spyOn(console, "error").mockImplementation(() => {});
     const token = "ghp_" + "a".repeat(36);
     const id = logInternalError(new Error(`failed with ${token}`));

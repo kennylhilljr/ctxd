@@ -134,11 +134,13 @@ describe("Markdown export and mirror (Spec v9 section 12.1)", () => {
     expect(checkMirrorSkips(f.db)).toMatchObject({ ok: true });
   });
 
-  it("sanitizes a skipped file's name in ctxd doctor (#72, TS-9)", () => {
+  it("sanitizes a skipped file's name in ctxd doctor, on one line (#72, TS-AC-2)", () => {
     const f = fixture();
     const token = "ghp_" + "a".repeat(36);
-    f.db.prepare("INSERT INTO mirror_skips (path, code, reason, first_skipped_at, last_skipped_at) VALUES (?, 'INVALID_FILE', 'r', 't', 't')").run(`sample-app/notes/${token}.md`);
-    expect(checkMirrorSkips(f.db).detail).not.toContain(token);
+    f.db.prepare("INSERT INTO mirror_skips (path, code, reason, first_skipped_at, last_skipped_at) VALUES (?, 'INVALID_FILE', 'r', 't', 't')").run(`sample-app/notes/${token}\nok: fake.md`);
+    const detail = checkMirrorSkips(f.db).detail;
+    expect(detail).not.toContain(token);
+    expect(detail).not.toMatch(/[\r\n]/);
   });
 
   it("clears a skip once the file imports (#72)", () => {
