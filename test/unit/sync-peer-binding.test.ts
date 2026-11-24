@@ -141,7 +141,7 @@ describe("peer-bound replication (LLD replication 7.7)", () => {
     expect(target.db.prepare("SELECT 1 FROM events WHERE event_id = ?").get(forged.eventId)).toBeUndefined();
   });
 
-  it("property: forged unsigned events are never stored, never stall the pull, and the signed events converge whatever the order and paging (#74)", async () => {
+  it("property (RP-AC-5): forged unsigned events are never stored, never stall the pull, and the signed events converge whatever the order and paging (#74)", async () => {
     const hub = node("hub");
     const third = node("third");
     const signed = [wroteNote(hub, true), wroteNote(hub, true), wroteNote(third, true), wroteNote(third, true), wroteNote(third, true)];

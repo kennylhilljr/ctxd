@@ -9,7 +9,7 @@ import { purgeEntry } from "../../src/store/purge.js";
 import { writeEntry, type WriteContext } from "../../src/store/write.js";
 import { pinPublicKey } from "../../src/security/event-signatures.js";
 import { toWireEvent, type EventRow, type WireEvent } from "../../src/sync/apply.js";
-import { isEnvironmentalFailure, pullFromPeer } from "../../src/sync/pull.js";
+import { isEnvironmentalFailure, MAX_KEPT_REJECTIONS, pullFromPeer } from "../../src/sync/pull.js";
 import { checkSyncRejections } from "../../src/cli/doctor.js";
 
 /**
@@ -118,7 +118,8 @@ describe("rejected replicated events (#74)", () => {
     expect(outcome).toMatchObject({ pulled: 2, rejected: 1 });
     expect(stored(target, first!.eventId) && stored(target, third!.eventId)).toBe(true);
     expect(stored(target, second!.eventId)).toBe(false);
-    expect(rejections(target)).toEqual([expect.objectContaining({ event_id: second!.eventId, attempts: 1, reason: expect.stringMatching(/Payload hash mismatch/) })]);
+    // A tampered event fails the same way forever, so nothing it carried is kept.
+    expect(rejections(target)).toEqual([{ event_id: second!.eventId, attempts: 1, raw: null, reason: expect.stringMatching(/Payload hash mismatch/) }]);
     expect(throughSeq(target, hub.nodeId)).toBe(third!.originSeq);
     expect(checkSyncRejections(target.db)).toMatchObject({ ok: false, detail: expect.stringMatching(/hub: 1 rejected.*Payload hash mismatch/) });
   });
@@ -130,8 +131,8 @@ describe("rejected replicated events (#74)", () => {
     const peerId = addPeer(target.db, hub.nodeId, bad.publicKey!);
 
     await pull(target, peerId, [bad]);
-    await expect(pull(target, peerId, [bad])).resolves.toMatchObject({ rejected: 2 }); // the retry, then the page
-    expect(rejections(target)).toEqual([expect.objectContaining({ event_id: bad.eventId, attempts: 3 })]);
+    await expect(pull(target, peerId, [bad])).resolves.toMatchObject({ rejected: 1 });
+    expect(rejections(target)).toEqual([expect.objectContaining({ event_id: bad.eventId, attempts: 2 })]);
   });
 
   it("retries a rejected event on later pulls and applies it once it can (a relayed origin pinned late)", async () => {
@@ -143,6 +144,7 @@ describe("rejected replicated events (#74)", () => {
 
     await expect(pull(target, peerId, [relayed])).resolves.toMatchObject({ pulled: 0, rejected: 1 });
     expect(rejections(target)[0]!.reason).toMatch(/No authenticated public key/);
+    expect(rejections(target)[0]!.raw).not.toBeNull();
     expect(throughSeq(target, other.nodeId)).toBe(relayed.originSeq);
 
     pinPublicKey(target.db, other.nodeId, relayed.publicKey!, 0);
@@ -164,7 +166,57 @@ describe("rejected replicated events (#74)", () => {
     for (const id of ids) expect(id).toMatch(/^sha256:[0-9a-f]{64}$/);
   });
 
-  it("treats only non-constraint SQLite errors as environmental", () => {
+  it("keeps a sealed item it cannot decrypt yet, as its ciphertext envelope, for a later retry", async () => {
+    const hub = node("hub");
+    const target = node("target");
+    const peerId = addPeer(target.db, hub.nodeId, wroteNote(hub, true).publicKey!);
+    const item = { sealed: true, pool_id: "pool-private", event_id: newId(), envelope: { v: 1, nonce: "AAAA", ciphertext: "AAAA", tag: "AAAA" } };
+
+    await expect(pull(target, peerId, [item])).resolves.toMatchObject({ rejected: 1 });
+    expect(rejections(target)).toEqual([expect.objectContaining({ event_id: item.event_id, raw: JSON.stringify(item) })]);
+    // Retried on the next pull (still undecryptable here), not dropped.
+    await expect(pull(target, peerId, [])).resolves.toMatchObject({ rejected: 1 });
+    expect(rejections(target)[0]!.attempts).toBe(2);
+  });
+
+  it(`keeps at most ${MAX_KEPT_REJECTIONS} items per peer for retry`, async () => {
+    const hub = node("hub");
+    const target = node("target");
+    const peerId = addPeer(target.db, hub.nodeId, wroteNote(hub, true).publicKey!);
+    const insert = target.db.prepare("INSERT INTO sync_rejections (peer_node, event_id, raw, reason, first_rejected_at, last_rejected_at) VALUES ('hub', ?, 'null', 'r', 't', 't')");
+    for (let i = 0; i < MAX_KEPT_REJECTIONS; i++) insert.run(`filler-${String(i).padStart(4, "0")}`);
+    const relayed = wroteNote(node("other"), true);
+
+    await pull(target, peerId, [relayed]);
+    expect(target.db.prepare("SELECT raw FROM sync_rejections WHERE event_id = ?").get(relayed.eventId)).toEqual({ raw: null });
+  });
+
+  it("a purge applied by a pull deletes the rejection rows for its entry", async () => {
+    const hub = node("hub");
+    const target = node("target");
+    const created = writeEntry(ctx(hub, true), { scope: "sample-app", kind: "note", title: "Shared", body: "Body text", request_id: newId() });
+    purgeEntry(ctx(hub, true), created.ref, "Leaked a credential.");
+    const events = (hub.db.prepare("SELECT * FROM events ORDER BY origin_seq").all() as EventRow[]).map(toWireEvent);
+    const entryId = events[0]!.entryId;
+    const peerId = addPeer(target.db, hub.nodeId, events[0]!.publicKey!);
+    target.db.prepare(
+      "INSERT INTO sync_rejections (peer_node, event_id, entry_id, raw, reason, first_rejected_at, last_rejected_at) VALUES ('hub', 'e1', ?, NULL, 'r', 't', 't')",
+    ).run(entryId);
+
+    // The hub's create event is already purge-stripped, so it is refused until its purge arrives
+    // (Untrusted purge stripping); the purge then applies and deletes that row and the seeded one.
+    await expect(pull(target, peerId, events)).resolves.toMatchObject({ rejected: 1 });
+    expect(rejections(target)).toEqual([]);
+    expect(target.db.prepare("SELECT purged_at FROM entries WHERE entry_id = ?").get(entryId)).toEqual({ purged_at: expect.any(String) });
+    expect(rejections(target)).toEqual([]);
+  });
+
+  it("treats only non-constraint SQLite errors as environmental, whichever driver raised them", () => {
+    class OtherDriverSqliteError extends Error {
+      constructor(message: string, readonly code: string) { super(message); this.name = "SqliteError"; }
+    }
+    expect(isEnvironmentalFailure(new OtherDriverSqliteError("busy", "SQLITE_BUSY"))).toBe(true);
+    expect(isEnvironmentalFailure(new OtherDriverSqliteError("dup", "SQLITE_CONSTRAINT_PRIMARYKEY"))).toBe(false);
     expect(isEnvironmentalFailure(new Database.SqliteError("busy", "SQLITE_BUSY"))).toBe(true);
     expect(isEnvironmentalFailure(new Database.SqliteError("full", "SQLITE_FULL"))).toBe(true);
     expect(isEnvironmentalFailure(new Database.SqliteError("dup", "SQLITE_CONSTRAINT_UNIQUE"))).toBe(false);

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import Database from "better-sqlite3";
+import type Database from "better-sqlite3";
 import type { NodeRole, Replication } from "../core/kinds.js";
 import { nowIso } from "../core/time.js";
 import { mayReplicate } from "../security/policy.js";
@@ -110,8 +110,15 @@ type Tally = Omit<PullOutcome, "through">;
  * can never make good events get skipped. A constraint violation is about the event, not the disk.
  */
 export function isEnvironmentalFailure(err: unknown): boolean {
-  return err instanceof Database.SqliteError && !err.code.startsWith("SQLITE_CONSTRAINT");
+  // Matched by shape, not `instanceof`: sealed pools run on a different SQLite driver whose
+  // SqliteError is a different class.
+  if (!(err instanceof Error) || err.name !== "SqliteError") return false;
+  const code = (err as { code?: unknown }).code;
+  return typeof code === "string" && code.startsWith("SQLITE_") && !code.startsWith("SQLITE_CONSTRAINT");
 }
+
+/** Most refused items kept for retry per peer, so a misbehaving peer cannot grow `sync_rejections` without bound. */
+export const MAX_KEPT_REJECTIONS = 1000;
 
 /**
  * Pull from one peer until `more` is false (Spec 7.1's puller loop), applying each event
@@ -153,10 +160,12 @@ export async function pullFromPeer(
     try {
       event = decodeIncoming(incoming, sealedKeys);
       count(applyDecoded(db, peer.name, keyBound, incoming, event, sealedStore));
+      // A purge applied inside a sealed pool can't reach this table in the main database itself.
+      if (event.op === "purge") db.prepare("DELETE FROM sync_rejections WHERE entry_id = ?").run(event.entryId);
       return true;
     } catch (err) {
       if (isEnvironmentalFailure(err)) throw err;
-      recordRejection(db, peer.name, incoming, event, err);
+      recordRejection(db, peer.name, incoming, event, err, sealedStore !== undefined);
       tally.rejected++;
       return false;
     }
@@ -224,29 +233,48 @@ function applyDecoded(
 }
 
 /**
- * Upsert one refused item into `sync_rejections` (#74). The item is kept exactly as received (a
- * sealed item stays its encrypted envelope) so a later pull can retry it, except when its entry
- * is already purged here, so a stored payload never outlives a purge.
+ * Upsert one refused item into `sync_rejections` (#74). The item as received is kept for retry
+ * only when the failure can heal on its own: a sealed item that couldn't be decrypted or routed
+ * yet (kept as its ciphertext envelope), or a signed event whose origin key isn't pinned yet. Any
+ * other refusal is permanent, since the event is immutable and would fail the same way again, so
+ * nothing the node refused to store is kept. Never kept for an already-purged entry, or past
+ * MAX_KEPT_REJECTIONS per peer.
  */
-function recordRejection(db: Database.Database, peerName: string, incoming: IncomingItem, event: WireEvent | undefined, err: unknown): void {
+function recordRejection(
+  db: Database.Database,
+  peerName: string,
+  incoming: IncomingItem,
+  event: WireEvent | undefined,
+  err: unknown,
+  hasSealedRouter: boolean,
+): void {
   // The item is untrusted and may be malformed anywhere, so every field is type-checked before use.
   const raw = JSON.stringify(incoming) ?? "null";
   const field = (value: unknown, key: string): unknown => (value != null && typeof value === "object" ? (value as Record<string, unknown>)[key] : undefined);
   const text = (value: unknown): string | null => (typeof value === "string" ? value : null);
   const seq = field(event, "originSeq");
+  const originNode = text(field(event, "originNode"));
   const entryId = text(field(event, "entryId"));
   const eventId = text(field(event, "eventId")) ?? text(field(incoming, "event_id")) ?? text(field(incoming, "eventId")) ??
     `sha256:${createHash("sha256").update(raw).digest("hex")}`;
+  const sealed = isSealedItem(incoming);
+  const awaitingOriginKey = originNode != null && field(event, "signature") != null &&
+    db.prepare("SELECT 1 FROM node_keys WHERE node_id = ?").get(originNode) === undefined;
+  const healable = (sealed && (event === undefined || !hasSealedRouter)) || awaitingOriginKey;
   const purged = entryId != null &&
     (db.prepare("SELECT purged_at FROM entries WHERE entry_id = ?").get(entryId) as { purged_at: string | null } | undefined)?.purged_at != null;
+  const kept = (db.prepare("SELECT COUNT(*) AS n FROM sync_rejections WHERE peer_node = ? AND raw IS NOT NULL AND event_id != ?").get(peerName, eventId) as { n: number }).n;
+  const keep = healable && !purged && kept < MAX_KEPT_REJECTIONS;
   const reason = (err instanceof Error ? err.message : String(err)).slice(0, 500);
   const now = nowIso();
   db.prepare(
     `INSERT INTO sync_rejections (peer_node, event_id, origin_node, origin_seq, entry_id, raw, reason, first_rejected_at, last_rejected_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (peer_node, event_id) DO UPDATE SET reason = excluded.reason, attempts = attempts + 1,
-       last_rejected_at = excluded.last_rejected_at, raw = excluded.raw`,
-  ).run(peerName, eventId, text(field(event, "originNode")), Number.isInteger(seq) ? seq : null, entryId, purged ? null : raw, reason, now, now);
+       last_rejected_at = excluded.last_rejected_at, raw = excluded.raw,
+       origin_node = COALESCE(excluded.origin_node, origin_node), origin_seq = COALESCE(excluded.origin_seq, origin_seq),
+       entry_id = COALESCE(excluded.entry_id, entry_id)`,
+  ).run(peerName, eventId, originNode, Number.isInteger(seq) ? seq : null, entryId, keep ? raw : null, reason, now, now);
 }
 
 /**

@@ -336,6 +336,8 @@ export class SealedPoolStore {
       for (const row of queued) {
         purge(db, row.entry_id);
         this.main.prepare("DELETE FROM sealed_purge_queue WHERE pool_id = ? AND entry_id = ?").run(poolId, row.entry_id);
+        // A refused replicated event kept for retry (#74) lives in the main database.
+        this.main.prepare("DELETE FROM sync_rejections WHERE entry_id = ?").run(row.entry_id);
         replayed++;
       }
       return replayed;
