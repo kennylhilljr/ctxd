@@ -184,10 +184,10 @@ function recordConflict(db: Database.Database, dir: string, path: string, row: M
 
 /**
  * A file name is user text and may hold a secret (a rejected title falls back to it), so `mirror_skips`
- * keys on the sanitized, redacted path, never the raw one (TS-AC-2). Two names that redact alike share a row.
+ * never stores the raw path (TS-AC-2): rows are keyed by its SHA-256 and display a sanitized, redacted copy.
  */
 function skipKey(path: string): string {
-  return sanitizeCapture(path, 1000);
+  return hash(path);
 }
 
 function recordSkip(db: Database.Database, path: string, err: unknown): void {
@@ -195,13 +195,13 @@ function recordSkip(db: Database.Database, path: string, err: unknown): void {
   const reason = sanitizeCapture(err instanceof Error ? err.message : String(err), 500);
   const at = nowIso();
   db.prepare(
-    `INSERT INTO mirror_skips (path, code, reason, attempts, first_skipped_at, last_skipped_at) VALUES (?, ?, ?, 1, ?, ?)
-     ON CONFLICT(path) DO UPDATE SET code = excluded.code, reason = excluded.reason, attempts = attempts + 1, last_skipped_at = excluded.last_skipped_at`,
-  ).run(skipKey(path), code, reason, at, at);
+    `INSERT INTO mirror_skips (path_key, path, code, reason, attempts, first_skipped_at, last_skipped_at) VALUES (?, ?, ?, ?, 1, ?, ?)
+     ON CONFLICT(path_key) DO UPDATE SET path = excluded.path, code = excluded.code, reason = excluded.reason, attempts = attempts + 1, last_skipped_at = excluded.last_skipped_at`,
+  ).run(skipKey(path), sanitizeCapture(path, 1000), code, reason, at, at);
 }
 
 function clearSkip(db: Database.Database, path: string): void {
-  db.prepare("DELETE FROM mirror_skips WHERE path = ?").run(skipKey(path));
+  db.prepare("DELETE FROM mirror_skips WHERE path_key = ?").run(skipKey(path));
 }
 
 function setReviewAfter(ctx: WriteContext, row: MarkdownRow, value: string | null): void {
@@ -325,8 +325,8 @@ export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: num
     }
   }
   // A skipped file that was removed, or has since been imported, is no longer skipped.
-  for (const { path: key } of db.prepare("SELECT path FROM mirror_skips").all() as { path: string }[]) {
-    if (!untracked.has(key)) db.prepare("DELETE FROM mirror_skips WHERE path = ?").run(key);
+  for (const { path_key: key } of db.prepare("SELECT path_key FROM mirror_skips").all() as { path_key: string }[]) {
+    if (!untracked.has(key)) db.prepare("DELETE FROM mirror_skips WHERE path_key = ?").run(key);
   }
 
   let written = 0;

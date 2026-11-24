@@ -397,7 +397,8 @@ CREATE TABLE archive_requests (
 );
 
 CREATE TABLE mirror_skips (            -- local only: new mirror files that could not be imported, retried every cycle (12.1)
-  path             TEXT PRIMARY KEY,   -- relative to the mirror directory, sanitized and redacted
+  path_key         TEXT PRIMARY KEY,   -- SHA-256 of the raw path relative to the mirror directory
+  path             TEXT NOT NULL,      -- that path for display, sanitized and with secrets redacted
   code             TEXT NOT NULL,      -- a ctxd error code, or INVALID_FILE
   reason           TEXT NOT NULL,
   attempts         INTEGER NOT NULL DEFAULT 1,

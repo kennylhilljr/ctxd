@@ -144,7 +144,7 @@ export function migrateSchema(db: Database.Database): void {
   if (mirrorSkipVersion === 24 && SCHEMA_VERSION >= 25) {
     db.transaction(() => {
       db.exec(`CREATE TABLE IF NOT EXISTS mirror_skips (
-        path TEXT PRIMARY KEY, code TEXT NOT NULL, reason TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 1,
+        path_key TEXT PRIMARY KEY, path TEXT NOT NULL, code TEXT NOT NULL, reason TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 1,
         first_skipped_at TEXT NOT NULL, last_skipped_at TEXT NOT NULL)`);
       db.pragma("user_version = 25");
     })();

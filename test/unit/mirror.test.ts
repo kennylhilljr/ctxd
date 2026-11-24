@@ -137,7 +137,7 @@ describe("Markdown export and mirror (Spec v9 section 12.1)", () => {
   it("sanitizes a skipped file's name in ctxd doctor, on one line (#72, TS-AC-2)", () => {
     const f = fixture();
     const token = "ghp_" + "a".repeat(36);
-    f.db.prepare("INSERT INTO mirror_skips (path, code, reason, first_skipped_at, last_skipped_at) VALUES (?, 'INVALID_FILE', ?, 't', 't')").run(`sample-app/notes/${token}\nok: fake.md`, "a\u2028b");
+    f.db.prepare("INSERT INTO mirror_skips (path_key, path, code, reason, first_skipped_at, last_skipped_at) VALUES ('k', ?, 'INVALID_FILE', ?, 't', 't')").run(`sample-app/notes/${token}\nok: fake.md`, "a\u2028b");
     const detail = checkMirrorSkips(f.db).detail;
     expect(detail).not.toContain(token);
     expect(detail).not.toMatch(/[\r\n\u2028\u2029]/);
@@ -155,10 +155,25 @@ describe("Markdown export and mirror (Spec v9 section 12.1)", () => {
     expect(rows).toHaveLength(1);
     expect(JSON.stringify(rows)).not.toContain(token);
     syncMirror(f.ctx, f.mirror);
-    expect(f.db.prepare("SELECT attempts FROM mirror_skips").get()).toEqual({ attempts: 2 }); // same row, matched by the redacted key
+    expect(f.db.prepare("SELECT attempts FROM mirror_skips").get()).toEqual({ attempts: 2 }); // same row, matched by the path hash
     rmSync(file);
     syncMirror(f.ctx, f.mirror);
     expect((f.db.prepare("SELECT COUNT(*) AS n FROM mirror_skips").get() as { n: number }).n).toBe(0);
+  });
+
+  it("keeps one skip row per file even when their redacted names collide (#72)", () => {
+    const f = fixture();
+    const dir = join(f.mirror, "sample-app", "notes");
+    mkdirSync(dir, { recursive: true });
+    const a = join(dir, `${"ghp_" + "c".repeat(36)}.md`);
+    const b = join(dir, `${"ghp_" + "d".repeat(36)}.md`);
+    writeFileSync(a, "---\nkind: \"not-a-kind\"\n---\nBody\n");
+    writeFileSync(b, "---\nkind: \"not-a-kind\"\n---\nBody\n");
+    syncMirror(f.ctx, f.mirror);
+    expect((f.db.prepare("SELECT COUNT(*) AS n FROM mirror_skips").get() as { n: number }).n).toBe(2);
+    rmSync(a);
+    syncMirror(f.ctx, f.mirror);
+    expect((f.db.prepare("SELECT COUNT(*) AS n FROM mirror_skips").get() as { n: number }).n).toBe(1);
   });
 
   it("clears a skip once the file imports (#72)", () => {

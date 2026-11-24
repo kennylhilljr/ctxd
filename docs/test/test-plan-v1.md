@@ -34,7 +34,7 @@ Every acceptance criterion in the component PRDs has an ID (`<prefix>-AC-n`). Th
 | MI-AC-12 | Gap | ctxd shall keep inbox API tokens and encryption keys only in the macOS Keychain, never in a repository or configuration file. | No test for `ctxd inbox set-token`. |
 | PA-AC-11 | Gap | When the human runs `ctxd hold adopt`, ctxd shall move the holding scope's approved entries into the project scope and add the agent to the pool in one step. | No test for `ctxd hold adopt`. |
 | PA-AC-13 | Covered | [`sealed-rekey.test.ts`](../../test/unit/sealed-rekey.test.ts) re-encrypts under a fresh key, commits it, and leaves no staging entry behind<br>[`sealed-rekey.test.ts`](../../test/unit/sealed-rekey.test.ts) still unlocks afterwards, with the rotated key<br>[`sealed-rekey.test.ts`](../../test/unit/sealed-rekey.test.ts) reports the other enrolled nodes, never this one, and deletes no rows itself<br>[`sealed-rekey.test.ts`](../../test/unit/sealed-rekey.test.ts) deletes the enrollment a pool_enroll event created | The Touch ID prompt on a real Keychain is a manual check on a real Mac, as for PA-AC-7. |
-| TS-AC-7 | Gap | When the human exports a scope that contains a home-directory path, ctxd shall print a categorized warning and ask for confirmation before writing. | Import preflight is tested (`mirror.test.ts:212`); export warnings are not. |
+| TS-AC-7 | Gap | When the human exports a scope that contains a home-directory path, ctxd shall print a categorized warning and ask for confirmation before writing. | Import preflight is tested (`mirror.test.ts:227`); export warnings are not. |
 
 ## BS: Briefs and search
 
@@ -212,6 +212,6 @@ Criteria: [PRD-trust-safety-v5](../prd/components/PRD-trust-safety-v5.md).
 | TS-AC-4 | Covered | [`write.test.ts:220`](../../test/unit/write.test.ts#L220) holds a write to a scope outside the client's pools and opens an access request<br>[`claim.test.ts:244`](../../test/unit/claim.test.ts#L244) rejects claim/release below propose access, but allows list at read |  |
 | TS-AC-5 | Covered | [`access.test.ts:80`](../../test/unit/access.test.ts#L80) applies pool vendor defaults: local-only beats any grant for cloud agents<br>[`policy.test.ts:12`](../../test/unit/policy.test.ts#L12) hides local-only scopes from cloud vendors |  |
 | TS-AC-6 | Covered | [`policy.test.ts:19`](../../test/unit/policy.test.ts#L19) refuses non-loopback listeners<br>[`doctor.test.ts:39`](../../test/unit/doctor.test.ts#L39) fails when a listener binds to a non-loopback address |  |
-| TS-AC-7 | Gap | None | Import preflight is tested (`mirror.test.ts:212`); export warnings are not. |
+| TS-AC-7 | Gap | None | Import preflight is tested (`mirror.test.ts:227`); export warnings are not. |
 | TS-AC-8 | Covered | [`path-guard.test.ts:16`](../../test/unit/path-guard.test.ts#L16) denies a Read/Edit/Write whose file_path is under the guarded directory<br>[`path-guard.test.ts:83`](../../test/unit/path-guard.test.ts#L83) blocks a PreToolUse call targeting the resolved data directory |  |
 | TS-AC-9 | Partial | [`scope.test.ts:89`](../../test/unit/scope.test.ts#L89) honors the environment flag | Same gap as HK-AC-7. |

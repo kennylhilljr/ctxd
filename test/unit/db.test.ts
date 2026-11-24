@@ -164,7 +164,7 @@ describe("openDatabase (SPEC v6 section 4)", () => {
 
     const migrated = openDatabase(path);
     expect(migrated.pragma("user_version", { simple: true })).toBe(SCHEMA_VERSION);
-    migrated.prepare("INSERT INTO mirror_skips (path, code, reason, first_skipped_at, last_skipped_at) VALUES ('p', 'c', 'r', 't', 't')").run();
+    migrated.prepare("INSERT INTO mirror_skips (path_key, path, code, reason, first_skipped_at, last_skipped_at) VALUES ('k', 'p', 'c', 'r', 't', 't')").run();
     expect(migrated.prepare("SELECT attempts FROM mirror_skips").get()).toEqual({ attempts: 1 });
     migrated.close();
   });
