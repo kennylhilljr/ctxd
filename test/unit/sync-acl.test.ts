@@ -2,6 +2,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type Database from "better-sqlite3";
+import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { encodeHlc } from "../../src/core/hlc.js";
 import { deterministicId, makeRev, newId } from "../../src/core/ids.js";
@@ -309,4 +310,147 @@ describe("concurrent grant/revoke, membership and review-policy changes converge
 
     expect(f.db.prepare("SELECT 1 FROM pool_members WHERE pool_id = ? AND principal = 'tag:ci'").get(poolId)).toBeUndefined();
   });
+});
+
+/** A synthetic replicated content create, as if it arrived from a remote node. */
+function contentCreate(f: Fixture, scopeId: string, slug: string, extra: Record<string, unknown> = {}): WireEvent {
+  const eventId = newId();
+  return {
+    eventId, originNode: newId(), originSeq: 1,
+    hlc: encodeHlc({ physical: Date.now(), counter: defaultHlcCounter++, node: "test-node" }),
+    scopeId, entryId: newId(), op: "create", part: "content", parentRevs: [], rev: makeRev(1, eventId),
+    clientId: f.humanId, sessionRef: null, requestId: null, requestHash: null,
+    payload: { kind: "note", slug, title: "Peer note", summary: "", body: "Body", tags: [], status: "active", ...extra },
+    prev: null,
+  };
+}
+
+describe("replicated names that would escape the Markdown mirror are rejected (issue 68)", () => {
+  it("rejects a scope_create whose name contains a path separator, storing neither the scope nor the event", () => {
+    const f = setup();
+    const scopeId = deterministicId("scope", "../../escape");
+    const event = aclWireEvent(f, scopeId, { action: "scope_create", name: "../../escape", kind: "project", replication: "all", vendor_policy: "any" });
+    expect(() => applyEvent(f.db, event)).toThrow(/invalid scope name/);
+    expect(f.db.prepare("SELECT COUNT(*) AS n FROM scopes WHERE scope_id = ?").get(scopeId)).toEqual({ n: 0 });
+    expect(f.db.prepare("SELECT COUNT(*) AS n FROM events WHERE event_id = ?").get(event.eventId)).toEqual({ n: 0 });
+  });
+
+  it("rejects a replicated entry create whose slug contains ../, and accepts the same event with a valid slug", () => {
+    const f = setup();
+    const scopeId = deterministicId("scope", "sample-app");
+    applyEvent(f.db, aclWireEvent(f, scopeId, { action: "scope_create", name: "sample-app", kind: "project", replication: "all", vendor_policy: "any" }));
+    const create = (slug: string): WireEvent => {
+      const eventId = newId();
+      return {
+        eventId, originNode: newId(), originSeq: 1,
+        hlc: encodeHlc({ physical: Date.now(), counter: defaultHlcCounter++, node: "test-node" }),
+        scopeId, entryId: newId(), op: "create", part: "content", parentRevs: [], rev: makeRev(1, eventId),
+        clientId: f.humanId, sessionRef: null, requestId: null, requestHash: null,
+        payload: { kind: "note", slug, title: "Peer note", summary: "", body: "Body", tags: [], status: "active" },
+        prev: null,
+      };
+    };
+    const bad = create("../../escaped");
+    expect(() => applyEvent(f.db, bad)).toThrow(/invalid slug/);
+    expect(f.db.prepare("SELECT COUNT(*) AS n FROM entries").get()).toEqual({ n: 0 });
+    expect(f.db.prepare("SELECT COUNT(*) AS n FROM events WHERE event_id = ?").get(bad.eventId)).toEqual({ n: 0 });
+    expect(() => applyEvent(f.db, create(`${"a".repeat(70)}-abc123`))).toThrow(/invalid slug/);
+    expect(applyEvent(f.db, create("peer-note-abc123")).outcome).toBe("fast-forward");
+    expect(f.db.prepare("SELECT COUNT(*) AS n FROM entries").get()).toEqual({ n: 1 });
+  });
+
+  it("rejects a replicated skill create with a missing or traversing skill name", () => {
+    const f = setup();
+    const scopeId = deterministicId("scope", "sample-app");
+    applyEvent(f.db, aclWireEvent(f, scopeId, { action: "scope_create", name: "sample-app", kind: "project", replication: "all", vendor_policy: "any" }));
+    for (const skill_name of [null, "../../escape"]) {
+      expect(() => applyEvent(f.db, contentCreate(f, scopeId, "skill-note-abc123", { kind: "skill", skill_name }))).toThrow(/invalid skill name/);
+    }
+    expect(applyEvent(f.db, contentCreate(f, scopeId, "skill-note-abc123", { kind: "skill", skill_name: "sample-skill" })).outcome).toBe("fast-forward");
+  });
+
+  it("property: any mix of valid and invalid content and skill creates, applied in any order, materializes the same state of exactly the valid ones, and a rebuild agrees", () => {
+    // [slug, extra payload, valid?]
+    const cases: [string, Record<string, unknown>, boolean][] = [
+      ["peer-note-aaa111", {}, true],
+      ["peer-note-bbb222", {}, true],
+      ["peer-skill-fff666", { kind: "skill", skill_name: "sample-skill" }, true],
+      ["../../escaped", {}, false],
+      ["a/b-ccc333", {}, false],
+      ["Upper-ddd444", {}, false],
+      [`${"a".repeat(70)}-eee555`, {}, false],
+      ["peer-skill-ggg777", { kind: "skill", skill_name: null }, false],
+      ["peer-skill-hhh888", { kind: "skill", skill_name: "../escape" }, false],
+    ];
+    fc.assert(
+      fc.property(fc.uniqueArray(fc.integer({ min: 0, max: cases.length - 1 }), { minLength: 1, maxLength: cases.length }), fc.boolean(), (picks, reverse) => {
+        const builder = setup();
+        const scopeId = deterministicId("scope", "sample-app");
+        const scopeEvent = aclWireEvent(builder, scopeId, { action: "scope_create", name: "sample-app", kind: "project", replication: "all", vendor_policy: "any" });
+        const events = picks.map((i) => ({ event: contentCreate(builder, scopeId, cases[i]![0], cases[i]![1]), valid: cases[i]![2] }));
+        const run = (order: typeof events) => {
+          const f = setup();
+          // Register the client that signed the shared events in this fresh database too.
+          const nodeId = (f.db.prepare("SELECT node_id FROM nodes").get() as { node_id: string }).node_id;
+          f.db.prepare("INSERT INTO clients (client_id, name, vendor, node_id, token_hash, created_at) VALUES (?, 'peer-human', 'human', ?, ?, ?)").run(builder.humanId, nodeId, newId(), now());
+          applyEvent(f.db, scopeEvent);
+          for (const { event, valid } of order) {
+            if (valid) expect(applyEvent(f.db, event).outcome).toBe("fast-forward");
+            else expect(() => applyEvent(f.db, event)).toThrow(/invalid (slug|skill name)/);
+          }
+          return f.db;
+        };
+        const state = (db: Database.Database) =>
+          db.prepare("SELECT entry_id, scope_id, kind, slug, skill_name, title, body, content_rev FROM entries ORDER BY entry_id").all();
+        const a = run(events);
+        const b = run(reverse ? [...events].reverse() : events);
+        const expected = events.filter((e) => e.valid).map((e) => e.event.entryId).sort();
+        expect((state(a) as { entry_id: string }[]).map((r) => r.entry_id)).toEqual(expected);
+        expect(state(b)).toEqual(state(a));
+        const before = state(a);
+        rebuild(a);
+        expect(state(a)).toEqual(before);
+      }),
+      { numRuns: 15 },
+    );
+  }, 60_000);
+
+  it("rejects a scope_create whose name is path-safe but outside the scope grammar", () => {
+    const f = setup();
+    for (const name of ["Sample-App", "-private", "has space", "."]) {
+      const event = aclWireEvent(f, deterministicId("scope", name), { action: "scope_create", name, kind: "project", replication: "all", vendor_policy: "any" });
+      expect(() => applyEvent(f.db, event)).toThrow(/invalid scope name/);
+    }
+    expect(f.db.prepare("SELECT COUNT(*) AS n FROM scopes WHERE kind = 'project'").get()).toEqual({ n: 0 });
+  });
+
+  it("property: any mix of valid and invalid scope_create events, in any order, converges on exactly the valid scopes, and a rebuild agrees", () => {
+    const names = ["sample-app", "project-b", "notes", "../escape", "a/b", "Sample-App", "..", "x\\y"];
+    const valid = new Set(["sample-app", "project-b", "notes"]);
+    fc.assert(
+      fc.property(fc.array(fc.integer({ min: 0, max: names.length - 1 }), { minLength: 1, maxLength: 10 }), fc.integer(), (picks, seed) => {
+        const f = setup();
+        const events = picks.map((i) => aclWireEvent(f, deterministicId("scope", names[i]!), {
+          action: "scope_create", name: names[i]!, kind: "project", replication: "all", vendor_policy: "any",
+        }));
+        const order = [...events].sort((a, b) => ((a.eventId.charCodeAt(25) * 31 + seed) % 7) - ((b.eventId.charCodeAt(25) * 31 + seed) % 7));
+        const g = setup();
+        const applyAll = (db: Database.Database, list: WireEvent[]) => {
+          for (const event of list) {
+            try { applyEvent(db, event); } catch (err) { expect(String(err)).toMatch(/invalid scope name/); }
+          }
+        };
+        applyAll(f.db, events);
+        applyAll(g.db, order);
+        const scopeNames = (db: Database.Database) =>
+          (db.prepare("SELECT name FROM scopes WHERE kind = 'project' ORDER BY name").all() as { name: string }[]).map((r) => r.name);
+        const expected = [...new Set(picks.map((i) => names[i]!).filter((n) => valid.has(n)))].sort();
+        expect(scopeNames(f.db)).toEqual(expected);
+        expect(scopeNames(g.db)).toEqual(expected);
+        rebuild(f.db);
+        expect(scopeNames(f.db)).toEqual(expected);
+      }),
+      { numRuns: 15 },
+    );
+  }, 60_000);
 });

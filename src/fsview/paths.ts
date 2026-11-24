@@ -40,6 +40,26 @@ export const SCOPE_RE = /^[a-z0-9_][a-z0-9._@-]{0,99}$/;
 const SLUG_RE = SKILL_NAME_RE; // same grammar: lowercase words joined by single hyphens
 const SLUG_MAX = 48;
 
+/** Longest stored slug accepted: `slugify` produces at most SLUG_MAX + 7 characters. */
+const STORED_SLUG_MAX = 64;
+/** Longest skill name (the same bound `parsePath` enforces). */
+export const SKILL_NAME_PATH_MAX = 64;
+
+/** True when `slug` matches the grammar `slugify` produces, so it is safe as a path segment. */
+export function isValidSlug(slug: unknown): slug is string {
+  return typeof slug === "string" && slug.length <= STORED_SLUG_MAX && SLUG_RE.test(slug);
+}
+
+/** True when `name` is a valid skill name, so it is safe as a path segment. */
+export function isValidSkillName(name: unknown): name is string {
+  return typeof name === "string" && name.length <= SKILL_NAME_PATH_MAX && SKILL_NAME_RE.test(name);
+}
+
+/** True when `name` is a valid scope name (SCOPE_RE), so it is safe as a path segment. */
+export function isValidScopeName(name: unknown): name is string {
+  return typeof name === "string" && SCOPE_RE.test(name);
+}
+
 /** Compute an entry's slug at create time (SPEC v6 4.2). */
 export function slugify(title: string, entryId: string, kind: Kind): string {
   let base = title
@@ -147,7 +167,7 @@ export function parsePath(path: string): ParsedPath {
   const parsed = parseSegments(path, seg);
   if (fragment !== undefined) {
     if (parsed.type !== "journalDay") throw invalid(path, "fragments are only for journal day files");
-    if (!SLUG_RE.test(fragment)) throw invalid(path, "bad slug");
+    if (!isValidSlug(fragment)) throw invalid(path, "bad slug");
     return { ...parsed, slug: fragment };
   }
   return parsed;
@@ -177,7 +197,7 @@ function parseSegments(path: string, seg: string[]): ParsedPath {
   if (a === "skills") {
     if (b === undefined) return { type: "skills", scope };
     if (isSummary(b)) throw invalid(path, "the skills folder has no summary files");
-    if (!SKILL_NAME_RE.test(b) || b.length > 64) throw invalid(path, "bad skill name");
+    if (!isValidSkillName(b)) throw invalid(path, "bad skill name");
     if (c === undefined) return { type: "skill", scope, name: b, file: false };
     end(4);
     if (c === "SKILL.md") return { type: "skill", scope, name: b, file: true };
@@ -212,7 +232,7 @@ function parseSegments(path: string, seg: string[]): ParsedPath {
   if (isSummary(b)) return { type: "summary", of: { at: "kind", scope, folder: a, kind }, file: b };
   if (!b.endsWith(".md")) throw invalid(path, "entry files are <slug>.md");
   const slug = b.slice(0, -3);
-  if (!SLUG_RE.test(slug)) throw invalid(path, "bad slug");
+  if (!isValidSlug(slug)) throw invalid(path, "bad slug");
   return { type: "entry", scope, folder: a, kind, slug };
 }
 
