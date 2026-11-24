@@ -12,7 +12,16 @@ export interface KeychainOptions {
   exec?: (args: readonly string[]) => string;
 }
 
+/**
+ * Test seam for tests that drive real `ctxd` subprocesses and so cannot inject `exec`: a preload
+ * module (test/fixtures/test-keychain.mjs, loaded with `node --import`) installs this global. Only
+ * code already running inside the process can set it, so it adds no way to redirect secrets.
+ */
+const TEST_EXEC = Symbol.for("ctxd.testKeychainExec");
+
 function runSecurity(args: readonly string[]): string {
+  const testExec = (globalThis as Record<symbol, unknown>)[TEST_EXEC];
+  if (typeof testExec === "function") return (testExec as (a: readonly string[]) => string)(args);
   // stderr is suppressed: a "not found" result is an expected, already-handled outcome (readSecret
   // and deleteSecret both catch it), and letting the system security(1) binary print its own
   // diagnostic straight to this process's stderr would look like an unhandled error to the user.

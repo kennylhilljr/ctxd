@@ -1,7 +1,8 @@
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { parse, stringify } from "smol-toml";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import Database from "better-sqlite3";
@@ -17,6 +18,12 @@ import Database from "better-sqlite3";
 const REPO_ROOT = join(import.meta.dirname, "..", "..");
 const MCP_PORT = 18411;
 const SYNC_PORT = 18412;
+// Outgoing peer tokens live in the keychain; real subprocesses cannot take an injected fake, so they
+// use a file-backed test keychain preloaded into each one, never the developer's real Keychain.
+const KEYCHAIN_ENV = {
+  CTXD_TEST_KEYCHAIN_DIR: mkdtempSync(join(tmpdir(), "ctxd-sync-keychain-")),
+  NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --import ${pathToFileURL(join(REPO_ROOT, "test", "fixtures", "test-keychain.mjs")).href}`.trim(),
+};
 
 interface Node {
   name: string;
@@ -30,7 +37,7 @@ function run(args: string[], env: Record<string, string> = {}): { stdout: string
     cwd: REPO_ROOT,
     encoding: "utf8",
     timeout: 15_000,
-    env: { ...process.env, CTXD_BYPASS: "", ...env },
+    env: { ...process.env, CTXD_BYPASS: "", ...KEYCHAIN_ENV, ...env },
   });
   return { stdout: result.stdout ?? "", stderr: result.stderr ?? "", status: result.status ?? -1 };
 }
@@ -105,7 +112,7 @@ describe("sync: two real nodes converge over a real HTTP listener", () => {
     // with no peer to pull from just never has anything for its own interval loop to do).
     serverA = spawn("npx", ["tsx", "src/cli/index.ts", "server", "--config", a.configPath, "--data-dir", a.dataDir], {
       cwd: REPO_ROOT,
-      env: { ...process.env, CTXD_BYPASS: "", CTXD_FEATURE_SYNC: "1" },
+      env: { ...process.env, CTXD_BYPASS: "", ...KEYCHAIN_ENV, CTXD_FEATURE_SYNC: "1" },
     });
     serverA.stdout?.on("data", (d: Buffer) => (serverAOutput += d.toString()));
     serverA.stderr?.on("data", (d: Buffer) => (serverAOutput += d.toString()));
@@ -145,6 +152,19 @@ describe("sync: two real nodes converge over a real HTTP listener", () => {
     const doctorA = run(["doctor", "--config", a.configPath, "--data-dir", a.dataDir]);
     expect(doctorA.stdout).toContain("sync-test-node-b: unreachable (never synced)");
     expect(doctorA.stdout).not.toContain("not tracked yet");
+  });
+
+  it("B's database holds only a keychain reference, never the raw token it presents to A (regression)", () => {
+    const db = new Database(join(b.dataDir, "ctxd.db"), { readonly: true });
+    try {
+      const row = db.prepare("SELECT outgoing_token FROM peers WHERE name = 'sync-test-node-a'").get() as { outgoing_token: string };
+      expect(row.outgoing_token).toMatch(/^keychain:/);
+    } finally {
+      db.close();
+    }
+    for (const file of [join(b.dataDir, "ctxd.db"), join(b.dataDir, "ctxd.db-wal")]) {
+      if (existsSync(file)) expect(readFileSync(file).toString("latin1")).not.toContain(validTokenForA);
+    }
   });
 
   it("a second sync with nothing new applies zero events", () => {

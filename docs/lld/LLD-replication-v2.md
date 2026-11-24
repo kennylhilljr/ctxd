@@ -35,7 +35,7 @@ Claim semantics (7.5) are in [LLD: Claims](LLD-claims-v1.md); cleanup operations
   - **Scheduled:** every `interval_seconds`.
   - **On reconnect:** when a peer becomes reachable again.
   - **On demand:** when a peer sends `POST /v1/notify` after local writes (debounced to 5 seconds).
-- **Authentication:** each node holds a peer token for every peer, sent as a bearer token and stored as a hash. Optionally (verify), the server also requires the Tailscale identity header that `tailscale serve` adds, and checks it against an allowlist.
+- **Authentication:** each node holds a peer token for every peer, sent as a bearer token. The token a peer presents to us is stored as a hash (`incoming_token_hash`); the token we present to a peer lives only in the macOS Keychain, and `peers.outgoing_token` holds a reference to it (`keychain:<account>`), so the database and its backups carry no working credential. Raw values left by earlier versions move into the Keychain when `ctxd server`, `ctxd sync`, `ctxd node`, `ctxd pool enroll` or `ctxd backup` starts, and the same step drops the copy earlier versions wrote into pending `key-transfers/*.json` state files (a file it cannot rewrite is reported on stderr); a backup image never carries one that could not be moved. A database restored on another machine needs `ctxd node add-peer <peer> <url> --role <role> --token <token>` again before it can pull. Optionally (verify), the server also requires the Tailscale identity header that `tailscale serve` adds, and checks it against an allowlist.
 
 ### 7.2 Replication policy filter
 

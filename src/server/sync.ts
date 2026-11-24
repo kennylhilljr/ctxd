@@ -11,6 +11,7 @@ import { FileEventKeyProvider } from "../security/event-signatures.js";
 import { FileEncryptionKeyProvider } from "../sealed/encryptionKeys.js";
 import { fetchWrappedKey, requestKeyTransfer, type SignedPrekey } from "../sealed/keyTransfer.js";
 import { CtxdError } from "../core/errors.js";
+import { readPeerOutgoingToken } from "../sync/peer-token.js";
 
 /**
  * The sync listener (Spec v8 7.1): a second HTTP server on `sync.listen` (127.0.0.1:7412 by
@@ -170,8 +171,9 @@ function scheduleNotifyPull(db: Database.Database, selfNodeId: string, peerId: s
     const peer = db.prepare("SELECT url, outgoing_token FROM peers WHERE peer_id = ? AND revoked_at IS NULL").get(peerId) as
       | { url: string; outgoing_token: string | null }
       | undefined;
-    if (!peer?.outgoing_token) return; // no outgoing token yet: can't pull from this peer
-    void pullFromPeer(db, selfNodeId, { peerId, name: peerName, url: peer.url, outgoingToken: peer.outgoing_token }, fetch, sealedKeys, sealedStore).catch(() => {
+    const outgoingToken = readPeerOutgoingToken(peer?.outgoing_token ?? null);
+    if (!peer || !outgoingToken) return; // no outgoing token yet: can't pull from this peer
+    void pullFromPeer(db, selfNodeId, { peerId, name: peerName, url: peer.url, outgoingToken }, fetch, sealedKeys, sealedStore).catch(() => {
       // A failed notify-triggered pull is not fatal: the scheduled interval loop (src/cli/server.ts) retries it.
     });
   }, NOTIFY_DEBOUNCE_MS);

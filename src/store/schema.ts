@@ -75,7 +75,7 @@ CREATE TABLE peers (                   -- a machine we sync with (Spec 7.1); nev
   url                 TEXT NOT NULL,     -- e.g. https://laptop.TAILNET.ts.net/ctxd-sync
   role                TEXT NOT NULL CHECK (role IN ('home','roaming')), -- the peer's own role, for the 7.2 filter when it pulls from us
   incoming_token_hash TEXT NOT NULL,     -- hash of the token this peer must present to pull from us
-  outgoing_token      TEXT,              -- the token we present when pulling from this peer; NULL until supplied
+  outgoing_token      TEXT,              -- keychain reference ('keychain:<account>') to the token we present when pulling from this peer; NULL until supplied
   revoked_at          TEXT,
   created_at          TEXT NOT NULL,
   last_synced_at      TEXT                -- set when a pull from this peer last completed successfully (Spec 7.4's tentative-claim check)

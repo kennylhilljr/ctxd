@@ -17,6 +17,7 @@ import { FileEventKeyProvider } from "../security/event-signatures.js";
 import { FileEncryptionKeyProvider, deriveConfirmationCode, signEncryptionPrekey } from "../sealed/encryptionKeys.js";
 import { approveKeyTransfer, completeKeyTransfer, type SignedPrekey } from "../sealed/keyTransfer.js";
 import type { CiphertextEnvelope } from "../sealed/crypto.js";
+import { migratePeerOutgoingTokensQuietly, readPeerOutgoingToken } from "../sync/peer-token.js";
 
 function findPool(db: Database.Database, name: string): { pool_id: string } | undefined {
   return db.prepare("SELECT pool_id FROM pools WHERE name = ?").get(name) as { pool_id: string } | undefined;
@@ -145,7 +146,6 @@ interface PeerForTransfer {
 interface PendingEnrollState {
   poolId: string;
   peerUrl: string;
-  outgoingToken: string;
   sourcePrekey: SignedPrekey;
 }
 
@@ -179,7 +179,7 @@ async function requestEnroll(db: Database.Database, dataDir: string, poolId: str
   const body = (await res.json()) as { transferId: string; sourcePrekey: SignedPrekey };
 
   mkdirSync(join(dataDir, "key-transfers"), { recursive: true });
-  const state: PendingEnrollState = { poolId, peerUrl: peer.url, outgoingToken: peer.outgoing_token, sourcePrekey: body.sourcePrekey };
+  const state: PendingEnrollState = { poolId, peerUrl: peer.url, sourcePrekey: body.sourcePrekey }; // never the bearer token: completion re-reads it from the keychain
   writeFileSync(pendingTransferPath(dataDir, body.transferId), JSON.stringify(state));
 
   const code = deriveConfirmationCode(encKeys.privateKey, body.sourcePrekey.publicKey);
@@ -405,6 +405,7 @@ export async function run(argv: string[]): Promise<number> {
       case "enroll": {
         requireFlag(flags, "sealed_pools");
         requireFlag(flags, "sealed_pools.key_transfer");
+        migratePeerOutgoingTokensQuietly(db, "ctxd pool enroll", dataDir);
         const [name, nodeName] = positionals;
         const pool = name ? findPool(db, name) : undefined;
         const peer = nodeName
@@ -418,9 +419,9 @@ export async function run(argv: string[]): Promise<number> {
           console.error("Usage: ctxd pool enroll <pool> <node>  (run again with --transfer-id once approved on <node>)");
           return 1;
         }
-        const outgoingToken = peer.outgoing_token;
+        const outgoingToken = readPeerOutgoingToken(peer.outgoing_token);
         if (!outgoingToken) {
-          console.error(`ctxd pool enroll: no outgoing token for peer "${nodeName}" yet; run "ctxd node add-peer" first.`);
+          console.error(`ctxd pool enroll: no outgoing token for peer "${nodeName}" (none supplied, or missing from the keychain); run "ctxd node add-peer ... --token" first.`);
           return 1;
         }
         const peerForTransfer: PeerForTransfer = { url: peer.url, outgoing_token: outgoingToken, node_id: peer.node_id };
