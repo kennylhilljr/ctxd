@@ -267,7 +267,7 @@ function recordRejection(
   const purged = entryId != null &&
     (isPurged(db) || (isSealedItem(incoming) && sealedStore !== undefined && purgedInPool(incoming.pool_id)));
   // Peer-controlled text ends up in terminal output (ctxd doctor): sanitize it like any stored text, on one line.
-  const reason = redactSecrets(sanitize(err instanceof Error ? err.message : String(err))).replace(/[\t\n]/g, " ").slice(0, 500);
+  const reason = redactSecrets(sanitize(err instanceof Error ? err.message : String(err))).replace(/[\t\n\u2028\u2029]/g, " ").slice(0, 500);
   const now = nowIso();
   db.prepare(
     `INSERT INTO sync_rejections (peer_node, event_id, origin_node, origin_seq, entry_id, raw, reason, first_rejected_at, last_rejected_at)
