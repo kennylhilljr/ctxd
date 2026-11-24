@@ -8,7 +8,7 @@ import { openDatabase } from "../../src/store/db.js";
 import { startSyncServer, type RunningSyncServer } from "../../src/server/sync.js";
 import { FileEventKeyProvider } from "../../src/security/event-signatures.js";
 import { FileEncryptionKeyProvider, signEncryptionPrekey, type EncryptionKeyPair } from "../../src/sealed/encryptionKeys.js";
-import { MAX_PENDING_TRANSFERS_PER_PEER, approveKeyTransfer, type SignedPrekey } from "../../src/sealed/keyTransfer.js";
+import { approveKeyTransfer, type SignedPrekey } from "../../src/sealed/keyTransfer.js";
 import { TestKeyProvider } from "../../src/sealed/key-provider.js";
 
 /**
@@ -38,7 +38,8 @@ function freshDb() {
 async function post(path: string, token: string, body: unknown): Promise<Response> {
   return fetch(`http://127.0.0.1:${PORT}${path}`, {
     method: "POST",
-    headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+    // No keep-alive: each test restarts the listener on the same port, and a pooled socket from the previous server would be reset.
+    headers: { "content-type": "application/json", authorization: `Bearer ${token}`, connection: "close" },
     body: JSON.stringify(body),
   });
 }
@@ -173,9 +174,9 @@ describe("key transfer is bound to the authenticated peer", () => {
     expect((await post("/v1/key-transfer/fetch", legacyToken, { transferId: newId() })).status).toBe(403);
   });
 
-  it("caps pending transfers per peer and drops expired pending rows", async () => {
+  it("caps pending transfers per peer at five and drops expired pending rows", async () => {
     const { db, poolId, requester, other } = await sourceWithTwoPeers();
-    for (let i = 0; i < MAX_PENDING_TRANSFERS_PER_PEER; i++) {
+    for (let i = 0; i < 5; i++) {
       expect((await post("/v1/key-transfer/request", requester.token, { poolId, requesterPrekey: requester.prekey })).status).toBe(200);
     }
     expect((await post("/v1/key-transfer/request", requester.token, { poolId, requesterPrekey: requester.prekey })).status).toBe(429);
