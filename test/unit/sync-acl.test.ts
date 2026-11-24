@@ -369,28 +369,47 @@ describe("replicated names that would escape the Markdown mirror are rejected (i
     expect(applyEvent(f.db, contentCreate(f, scopeId, "skill-note-abc123", { kind: "skill", skill_name: "sample-skill" })).outcome).toBe("fast-forward");
   });
 
-  it("property: any mix of valid and invalid content creates, in any order, materializes exactly the valid ones, and a rebuild agrees", () => {
-    const slugs = ["peer-note-aaa111", "peer-note-bbb222", "../../escaped", "a/b-ccc333", "Upper-ddd444", `${"a".repeat(70)}-eee555`];
+  it("property: any mix of valid and invalid content and skill creates, applied in any order, materializes the same state of exactly the valid ones, and a rebuild agrees", () => {
+    // [slug, extra payload, valid?]
+    const cases: [string, Record<string, unknown>, boolean][] = [
+      ["peer-note-aaa111", {}, true],
+      ["peer-note-bbb222", {}, true],
+      ["peer-skill-fff666", { kind: "skill", skill_name: "sample-skill" }, true],
+      ["../../escaped", {}, false],
+      ["a/b-ccc333", {}, false],
+      ["Upper-ddd444", {}, false],
+      [`${"a".repeat(70)}-eee555`, {}, false],
+      ["peer-skill-ggg777", { kind: "skill", skill_name: null }, false],
+      ["peer-skill-hhh888", { kind: "skill", skill_name: "../escape" }, false],
+    ];
     fc.assert(
-      fc.property(fc.uniqueArray(fc.integer({ min: 0, max: slugs.length - 1 }), { minLength: 1, maxLength: slugs.length }), fc.boolean(), (picks, reverse) => {
-        const run = (order: number[]) => {
+      fc.property(fc.uniqueArray(fc.integer({ min: 0, max: cases.length - 1 }), { minLength: 1, maxLength: cases.length }), fc.boolean(), (picks, reverse) => {
+        const builder = setup();
+        const scopeId = deterministicId("scope", "sample-app");
+        const scopeEvent = aclWireEvent(builder, scopeId, { action: "scope_create", name: "sample-app", kind: "project", replication: "all", vendor_policy: "any" });
+        const events = picks.map((i) => ({ event: contentCreate(builder, scopeId, cases[i]![0], cases[i]![1]), valid: cases[i]![2] }));
+        const run = (order: typeof events) => {
           const f = setup();
-          const scopeId = deterministicId("scope", "sample-app");
-          applyEvent(f.db, aclWireEvent(f, scopeId, { action: "scope_create", name: "sample-app", kind: "project", replication: "all", vendor_policy: "any" }));
-          for (const i of order) {
-            try { applyEvent(f.db, contentCreate(f, scopeId, slugs[i]!)); } catch (err) { expect(String(err)).toMatch(/invalid slug/); }
+          // Register the client that signed the shared events in this fresh database too.
+          const nodeId = (f.db.prepare("SELECT node_id FROM nodes").get() as { node_id: string }).node_id;
+          f.db.prepare("INSERT INTO clients (client_id, name, vendor, node_id, token_hash, created_at) VALUES (?, 'peer-human', 'human', ?, ?, ?)").run(builder.humanId, nodeId, newId(), now());
+          applyEvent(f.db, scopeEvent);
+          for (const { event, valid } of order) {
+            if (valid) expect(applyEvent(f.db, event).outcome).toBe("fast-forward");
+            else expect(() => applyEvent(f.db, event)).toThrow(/invalid (slug|skill name)/);
           }
           return f.db;
         };
-        const slugsIn = (db: Database.Database) =>
-          (db.prepare("SELECT slug FROM entries ORDER BY slug").all() as { slug: string }[]).map((r) => r.slug);
-        const expected = picks.filter((i) => i < 2).map((i) => slugs[i]!).sort();
-        const a = run(picks);
-        const b = run(reverse ? [...picks].reverse() : picks);
-        expect(slugsIn(a)).toEqual(expected);
-        expect(slugsIn(b)).toEqual(expected);
+        const state = (db: Database.Database) =>
+          db.prepare("SELECT entry_id, scope_id, kind, slug, skill_name, title, body, content_rev FROM entries ORDER BY entry_id").all();
+        const a = run(events);
+        const b = run(reverse ? [...events].reverse() : events);
+        const expected = events.filter((e) => e.valid).map((e) => e.event.entryId).sort();
+        expect((state(a) as { entry_id: string }[]).map((r) => r.entry_id)).toEqual(expected);
+        expect(state(b)).toEqual(state(a));
+        const before = state(a);
         rebuild(a);
-        expect(slugsIn(a)).toEqual(expected);
+        expect(state(a)).toEqual(before);
       }),
       { numRuns: 15 },
     );
