@@ -112,6 +112,11 @@ export async function pullFromPeer(
   sealedStore?: SealedPoolStore,
 ): Promise<PullOutcome> {
   const vector = currentVector(db, peer.name);
+  // A row with only one of the two identity columns set still counts as key-bound (fail closed).
+  const peerIdentity = db.prepare("SELECT remote_node_id, remote_public_key FROM peers WHERE peer_id = ?").get(peer.peerId) as
+    | { remote_node_id: string | null; remote_public_key: string | null }
+    | undefined;
+  const keyBound = peerIdentity?.remote_node_id != null || peerIdentity?.remote_public_key != null;
   let pulled = 0;
   let conflicts = 0;
   let purged = 0;
@@ -134,7 +139,11 @@ export async function pullFromPeer(
         ? JSON.parse(decryptSealed(incoming.envelope, sealedKeys?.get(incoming.pool_id) ?? Buffer.alloc(0), incoming.event_id).toString("utf8")) as WireEvent
         : incoming as WireEvent;
       if (isSealed && !sealedStore) throw new Error(`sealed event ${incoming.event_id} has no attached-store router`);
-      const result = isSealed ? sealedStore!.withPool(incoming.pool_id, (poolDb) => applyEvent(poolDb, event)) : applyEvent(db, event);
+      const apply = (target: Database.Database) => {
+        assertPeerMayDeliver(target, peer.name, keyBound, event);
+        return applyEvent(target, event);
+      };
+      const result = isSealed ? sealedStore!.withPool(incoming.pool_id, apply) : apply(db);
       if (result.outcome === "fast-forward") pulled++;
       else if (result.outcome === "conflict-resolved") conflicts++;
       else if (result.outcome === "purge-stripped") purged++;
@@ -150,6 +159,22 @@ export async function pullFromPeer(
   // keeps claims on this node out of tentative state.
   db.prepare("UPDATE peers SET last_synced_at = ? WHERE peer_id = ?").run(nowIso(), peer.peerId);
   return { pulled, conflicts, purged, deferred, through: lastThrough };
+}
+
+/**
+ * Peer binding (LLD replication 7.7): a peer paired with `--node-id` and `--public-key` is an
+ * authenticated identity, so everything it delivers must be signed; `applyEvent` then verifies the
+ * signature against the origin's pinned key, which also authorizes relaying signed events from
+ * other pinned origins. An unsigned event from such a peer is refused whatever origin it claims,
+ * since nothing ties it to that origin (a forged `originNode`, an unsigned acl or purge event). An
+ * event already stored here is let through to `applyEvent`'s dedup, so this node's own older
+ * unsigned events echoed back by the peer never stall the pull. A peer with neither a bound node
+ * id nor a bound key is the legacy unauthenticated mode and is not checked here.
+ */
+export function assertPeerMayDeliver(db: Database.Database, peerName: string, keyBound: boolean, event: WireEvent): void {
+  if (!keyBound || event.signature != null) return;
+  if (db.prepare("SELECT 1 FROM events WHERE event_id = ?").get(event.eventId)) return;
+  throw new Error(`pull from ${peerName}: refused unsigned event ${event.eventId} claiming origin ${event.originNode}; a key-bound peer may only deliver signed events`);
 }
 
 function currentVector(db: Database.Database, peerName: string): Record<string, number> {
