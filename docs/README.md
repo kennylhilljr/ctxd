@@ -63,7 +63,7 @@ Beside the stack:
 | Claims and write intent | [v4](prd/components/PRD-claims-v4.md) | CL-1 to CL-14 | CL-AC-n | [Claims v1](lld/LLD-claims-v1.md) |
 | Trust and safety | [v5](prd/components/PRD-trust-safety-v5.md) | TS-1 to TS-17 | TS-AC-n | [Write path v1](lld/LLD-write-path-v1.md), [Security and access v1](lld/LLD-security-access-v1.md) |
 | Context hygiene | [v2](prd/components/PRD-context-hygiene-v2.md) | CH-1 to CH-12 | CH-AC-n | [Context hygiene v1](lld/LLD-context-hygiene-v1.md) |
-| Replication and offline work | [v6](prd/components/PRD-replication-v6.md) | RP-1 to RP-17 | RP-AC-n | [Replication v1](lld/LLD-replication-v1.md) |
+| Replication and offline work | [v6](prd/components/PRD-replication-v6.md) | RP-1 to RP-17 | RP-AC-n | [Replication v2](lld/LLD-replication-v2.md) |
 | Briefs and search | [v5](prd/components/PRD-briefs-search-v5.md) | BS-1 to BS-20 | BS-AC-n | [Briefs and search v1](lld/LLD-briefs-search-v1.md), [MCP tools v1](contracts/mcp-tools-v1.md) |
 | Filesystem view | [v2](prd/components/PRD-filesystem-view-v2.md) | FS-1 to FS-8 | FS-AC-n | [Data model v1](lld/LLD-data-model-v1.md) 4.2, [Operations v1](lld/LLD-operations-v1.md) 12.1 |
 | Skills | [v3](prd/components/PRD-skills-v3.md) | SK-1 to SK-8 | SK-AC-n | [Operations v1](lld/LLD-operations-v1.md) 12.2 |
