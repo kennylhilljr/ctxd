@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type Database from "better-sqlite3";
 import { entryPath } from "../fsview/paths.js";
 import { formatRef, parseRef } from "../model/refs.js";
@@ -122,6 +122,21 @@ function relativePath(row: MarkdownRow): string {
   return uri.slice("ctxd://".length).replace("#", "--");
 }
 
+/**
+ * Join a mirror-relative path onto the mirror root, refusing any result outside it (issue 68).
+ * Defence in depth: scope names and slugs are validated when events materialize, but every
+ * filesystem write, rename and unlink in the mirror goes through this check as well.
+ */
+function insideRoot(root: string, path: string): string {
+  const base = resolve(root);
+  const target = resolve(base, path);
+  const rel = relative(base, target);
+  if (rel === "" || rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+    throw new CtxdError("NOT_ALLOWED", `Mirror path escapes the mirror directory: ${path.slice(0, 120)}`);
+  }
+  return target;
+}
+
 function atomicWrite(path: string, content: string): void {
   mkdirSync(dirname(path), { recursive: true });
   const temp = `${path}.tmp-${process.pid}-${Date.now()}`;
@@ -132,7 +147,7 @@ function atomicWrite(path: string, content: string): void {
 export function exportMarkdown(db: Database.Database, outputDir: string, scopeName?: string): { written: number } {
   let written = 0;
   for (const row of rows(db, scopeName)) {
-    atomicWrite(join(outputDir, relativePath(row)), renderMarkdown(row));
+    atomicWrite(insideRoot(outputDir, relativePath(row)), renderMarkdown(row));
     written++;
   }
   return { written };
@@ -153,7 +168,7 @@ export function confirmArchiveRequest(ctx: WriteContext, ref: string): void {
 
 function recordConflict(db: Database.Database, dir: string, path: string, row: MarkdownRow, fileRev: string | undefined, reason: string, text: string): void {
   const conflictPath = path.replace(/\.md$/, ".conflict.md");
-  atomicWrite(join(dir, conflictPath), `<!-- ${reason} -->\n${text}`);
+  atomicWrite(insideRoot(dir, conflictPath), `<!-- ${reason} -->\n${text}`);
   db.prepare(
     "INSERT INTO mirror_conflicts (path, entry_id, file_rev, current_rev, reason, created_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(path) DO UPDATE SET file_rev=excluded.file_rev, current_rev=excluded.current_rev, reason=excluded.reason, created_at=excluded.created_at",
   ).run(path, row.entry_id, fileRev ?? null, row.content_rev, reason, nowIso());
@@ -189,7 +204,7 @@ export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: num
   const trackedPaths = new Set(tracked.map((state) => state.path));
   for (const state of tracked) {
     const row = byId.get(state.entry_id);
-    const file = join(mirrorDir, state.path);
+    const file = insideRoot(mirrorDir, state.path);
     if (!row) {
       if (existsSync(file)) unlinkSync(file);
       const conflict = file.replace(/\.md$/, ".conflict.md");
@@ -261,7 +276,7 @@ export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: num
       if (!("held" in result)) {
         const created = rows(db).find((row) => row.entry_id === result.id);
         if (created) {
-          const target = join(mirrorDir, relativePath(created));
+          const target = insideRoot(mirrorDir, relativePath(created));
           mkdirSync(dirname(target), { recursive: true });
           if (resolve(file) !== resolve(target)) renameSync(file, target);
         }
@@ -276,7 +291,7 @@ export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: num
   for (const row of rows(db)) {
     const path = relativePath(row);
     const content = renderMarkdown(row);
-    atomicWrite(join(mirrorDir, path), content);
+    atomicWrite(insideRoot(mirrorDir, path), content);
     db.prepare(
       "INSERT INTO mirror_files (path, entry_id, content_rev, file_hash, written_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(path) DO UPDATE SET entry_id=excluded.entry_id, content_rev=excluded.content_rev, file_hash=excluded.file_hash, written_at=excluded.written_at",
     ).run(path, row.entry_id, row.content_rev, hash(content), nowIso());

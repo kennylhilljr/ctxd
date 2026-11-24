@@ -209,3 +209,14 @@ describe("ctxd scope bind/unbind (SPEC v6 sections 3, 13)", () => {
     db.close();
   });
 });
+
+describe("ctxd scope add validates the name (issue 68)", () => {
+  it("rejects a name that is not a valid scope name and records no event", () => {
+    const db = freshDb();
+    expect(addScope(resolveHumanWriteContext(db), "../escape", "all", "any")).toBe(1);
+    expect(addScope(resolveHumanWriteContext(db), "Sample-App", "all", "any")).toBe(1);
+    expect(db.prepare("SELECT COUNT(*) AS n FROM scopes WHERE name IN ('../escape', 'Sample-App')").get()).toEqual({ n: 0 });
+    expect(db.prepare("SELECT COUNT(*) AS n FROM events WHERE op = 'acl'").get()).toEqual({ n: 0 });
+    expect(addScope(resolveHumanWriteContext(db), "sample-app", "all", "any")).toBe(0);
+  });
+});

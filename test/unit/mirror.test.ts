@@ -156,3 +156,29 @@ describe("Markdown export and mirror (Spec v9 section 12.1)", () => {
     expect(importMarkdown(f.ctx, input, "sample-app", false, true)).toMatchObject({ imported: 1, confirmationRequired: false });
   });
 });
+
+describe("mirror paths stay inside the mirror directory (issue 68)", () => {
+  it("refuses to export an entry whose stored scope name would escape the output directory", () => {
+    const f = fixture(); createNote(f);
+    // A row stored before scope names were validated, or by a peer before materialize checked them.
+    f.db.prepare("UPDATE scopes SET name = '../escape' WHERE name = 'sample-app'").run();
+    expect(() => exportMarkdown(f.db, join(f.root, "export"))).toThrow(/escapes the mirror directory/);
+    expect(existsSync(join(f.root, "escape"))).toBe(false);
+  });
+
+  it("refuses to write a mirror file for a slug containing ../", () => {
+    const f = fixture(); createNote(f);
+    f.db.prepare("UPDATE entries SET slug = '../../../escaped'").run();
+    expect(() => syncMirror(f.ctx, f.mirror)).toThrow(/escapes the mirror directory/);
+    expect(existsSync(join(f.root, "escaped.md"))).toBe(false);
+  });
+
+  it("refuses to unlink a tracked path outside the mirror directory", () => {
+    const f = fixture(); const { id } = createNote(f) as { id: string };
+    const victim = join(f.root, "victim.md"); writeFileSync(victim, "keep me\n");
+    f.db.prepare("UPDATE entries SET status = 'deleted' WHERE entry_id = ?").run(id);
+    f.db.prepare("INSERT INTO mirror_files (path, entry_id, content_rev, file_hash, written_at) VALUES ('../victim.md', ?, 'r', 'h', ?)").run(id, new Date().toISOString());
+    expect(() => syncMirror(f.ctx, f.mirror)).toThrow(/escapes the mirror directory/);
+    expect(readFileSync(victim, "utf8")).toBe("keep me\n");
+  });
+});

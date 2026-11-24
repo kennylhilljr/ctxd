@@ -40,6 +40,21 @@ export const SCOPE_RE = /^[a-z0-9_][a-z0-9._@-]{0,99}$/;
 const SLUG_RE = SKILL_NAME_RE; // same grammar: lowercase words joined by single hyphens
 const SLUG_MAX = 48;
 
+/** True when `slug` matches the grammar `slugify` produces, so it is safe as a path segment. */
+export function isValidSlug(slug: unknown): slug is string {
+  return typeof slug === "string" && SLUG_RE.test(slug);
+}
+
+/**
+ * True when a stored scope name can be used as one path segment without escaping its parent
+ * (issue 68). Looser than SCOPE_RE on purpose: names created before `ctxd scope add` enforced
+ * SCOPE_RE (for example with uppercase letters) must still replay on rebuild.
+ */
+export function isPathSafeScopeName(name: unknown): name is string {
+  return typeof name === "string" && name.length > 0 && name.length <= 100 && name !== "." && name !== ".." &&
+    !/[/\\\0]/.test(name);
+}
+
 /** Compute an entry's slug at create time (SPEC v6 4.2). */
 export function slugify(title: string, entryId: string, kind: Kind): string {
   let base = title

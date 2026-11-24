@@ -310,3 +310,37 @@ describe("concurrent grant/revoke, membership and review-policy changes converge
     expect(f.db.prepare("SELECT 1 FROM pool_members WHERE pool_id = ? AND principal = 'tag:ci'").get(poolId)).toBeUndefined();
   });
 });
+
+describe("replicated names that would escape the Markdown mirror are rejected (issue 68)", () => {
+  it("rejects a scope_create whose name contains a path separator, storing neither the scope nor the event", () => {
+    const f = setup();
+    const scopeId = deterministicId("scope", "../../escape");
+    const event = aclWireEvent(f, scopeId, { action: "scope_create", name: "../../escape", kind: "project", replication: "all", vendor_policy: "any" });
+    expect(() => applyEvent(f.db, event)).toThrow(/invalid scope name/);
+    expect(f.db.prepare("SELECT COUNT(*) AS n FROM scopes WHERE scope_id = ?").get(scopeId)).toEqual({ n: 0 });
+    expect(f.db.prepare("SELECT COUNT(*) AS n FROM events WHERE event_id = ?").get(event.eventId)).toEqual({ n: 0 });
+  });
+
+  it("rejects a replicated entry create whose slug contains ../, and accepts the same event with a valid slug", () => {
+    const f = setup();
+    const scopeId = deterministicId("scope", "sample-app");
+    applyEvent(f.db, aclWireEvent(f, scopeId, { action: "scope_create", name: "sample-app", kind: "project", replication: "all", vendor_policy: "any" }));
+    const create = (slug: string): WireEvent => {
+      const eventId = newId();
+      return {
+        eventId, originNode: newId(), originSeq: 1,
+        hlc: encodeHlc({ physical: Date.now(), counter: defaultHlcCounter++, node: "test-node" }),
+        scopeId, entryId: newId(), op: "create", part: "content", parentRevs: [], rev: makeRev(1, eventId),
+        clientId: f.humanId, sessionRef: null, requestId: null, requestHash: null,
+        payload: { kind: "note", slug, title: "Peer note", summary: "", body: "Body", tags: [], status: "active" },
+        prev: null,
+      };
+    };
+    const bad = create("../../escaped");
+    expect(() => applyEvent(f.db, bad)).toThrow(/invalid slug/);
+    expect(f.db.prepare("SELECT COUNT(*) AS n FROM entries").get()).toEqual({ n: 0 });
+    expect(f.db.prepare("SELECT COUNT(*) AS n FROM events WHERE event_id = ?").get(bad.eventId)).toEqual({ n: 0 });
+    expect(applyEvent(f.db, create("peer-note-abc123")).outcome).toBe("fast-forward");
+    expect(f.db.prepare("SELECT COUNT(*) AS n FROM entries").get()).toEqual({ n: 1 });
+  });
+});

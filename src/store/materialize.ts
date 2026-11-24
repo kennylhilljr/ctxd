@@ -6,6 +6,9 @@ import { persistOverlaps, scanOverlappingLeases } from "../claims/overlap.js";
 import { canonicalJson } from "./idempotency.js";
 import { loadClient } from "./snapshot.js";
 import { removeFromVecIndex, upsertVecIndex } from "../embed/vec.js";
+import { isPathSafeScopeName, isValidSlug } from "../fsview/paths.js";
+import { SKILL_NAME_RE } from "../skills/skillmd.js";
+import { CtxdError } from "../core/errors.js";
 
 /**
  * Turns one already-appended event into its effect on `entries` and `relations` (SPEC v6
@@ -391,6 +394,13 @@ function isPurgedNoOp(e: EventForMaterialize): boolean {
 function applyEventCore(db: Database.Database, e: EventForMaterialize, skipFts: boolean): void {
   if (e.part === "content" && e.op === "create") {
     const p = e.payload as unknown as CreatePayload;
+    // Slugs and skill names become path segments in the ctxd:// view and the Markdown mirror, so
+    // a replicated create carrying "../" is rejected, not stored (issue 68). Throwing rolls back
+    // the whole apply transaction, so the event is never recorded.
+    if (!isValidSlug(p.slug)) throw new CtxdError("VALIDATION", `materialize: invalid slug on create for entry ${e.entryId}`);
+    if (p.skill_name != null && !SKILL_NAME_RE.test(p.skill_name)) {
+      throw new CtxdError("VALIDATION", `materialize: invalid skill name on create for entry ${e.entryId}`);
+    }
     db.prepare(
       `INSERT INTO entries (
          entry_id, scope_id, kind, slug, significance, skill_name, title, summary, body, tags,
@@ -780,6 +790,9 @@ function applyAclEvent(db: Database.Database, e: EventForMaterialize): void {
   const createdAt = new Date(decodeHlc(e.hlc).physical).toISOString();
   switch (p.action) {
     case "scope_create":
+      // A scope name is a path segment in the Markdown mirror; reject one that could escape it
+      // (issue 68) before the HLC guard records anything.
+      if (!isPathSafeScopeName(p.name)) throw new CtxdError("VALIDATION", `materialize: invalid scope name in scope_create for ${e.entryId}`);
       // Deterministic, name-derived scope_id (core/ids.ts) means two nodes creating the same
       // name while partitioned already agree on the id, so there is nothing to guard about
       // *which* create wins; the declared fields (replication, vendor_policy) still need one,
