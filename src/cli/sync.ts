@@ -5,6 +5,7 @@ import type Database from "better-sqlite3";
 import { resolveConfigPath, resolveDataDir } from "./common.js";
 import { openDatabase } from "../store/db.js";
 import { pullFromPeer } from "../sync/pull.js";
+import { migratePeerOutgoingTokensQuietly, readPeerOutgoingToken } from "../sync/peer-token.js";
 import type { SealedKeyProvider } from "../sealed/key-provider.js";
 import { KeyHelperProvider } from "../sealed/key-provider.js";
 import { loadConfig } from "../config/config.js";
@@ -37,13 +38,15 @@ export async function runSync(db: Database.Database, selfNodeId: string, only: s
 
   let failed = 0;
   for (const peer of peers) {
-    if (!peer.outgoing_token) {
-      console.error(`ctxd sync: ${peer.name}: no outgoing token yet (run ctxd node add-peer ${peer.name} ... --token <...>).`);
+    const outgoingToken = readPeerOutgoingToken(peer.outgoing_token);
+    if (!outgoingToken) {
+      const why = peer.outgoing_token ? "outgoing token not found in the keychain" : "no outgoing token yet";
+      console.error(`ctxd sync: ${peer.name}: ${why} (run ctxd node add-peer ${peer.name} ... --token <...>).`);
       failed++;
       continue;
     }
     try {
-      const outcome = await pullFromPeer(db, selfNodeId, { peerId: peer.peer_id, name: peer.name, url: peer.url, outgoingToken: peer.outgoing_token }, fetch, sealedKeys, sealedStore);
+      const outcome = await pullFromPeer(db, selfNodeId, { peerId: peer.peer_id, name: peer.name, url: peer.url, outgoingToken }, fetch, sealedKeys, sealedStore);
       console.log(
         `ctxd sync: ${peer.name}: ${outcome.pulled} applied, ${outcome.conflicts} resolved by conflict policy, ${outcome.purged} purge-stripped, ${outcome.deferred} deferred`,
       );
@@ -72,6 +75,7 @@ export async function run(argv: string[]): Promise<number> {
       console.error("ctxd sync: no node identity found; run ctxd init first.");
       return 1;
     }
+    migratePeerOutgoingTokensQuietly(db, "ctxd sync");
     const sealedStore = sealedKeys && human
       ? new SealedPoolStore(db, dataDir, sealedKeys, new SqlCipherDatabaseProvider(), config.sealed.unlock_minutes, createSealedPurgeReplay(node.node_id, human.client_id, resolveFlags(config)))
       : undefined;

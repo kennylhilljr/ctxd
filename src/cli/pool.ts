@@ -17,6 +17,7 @@ import { FileEventKeyProvider } from "../security/event-signatures.js";
 import { FileEncryptionKeyProvider, deriveConfirmationCode, signEncryptionPrekey } from "../sealed/encryptionKeys.js";
 import { approveKeyTransfer, completeKeyTransfer, type SignedPrekey } from "../sealed/keyTransfer.js";
 import type { CiphertextEnvelope } from "../sealed/crypto.js";
+import { readPeerOutgoingToken } from "../sync/peer-token.js";
 
 function findPool(db: Database.Database, name: string): { pool_id: string } | undefined {
   return db.prepare("SELECT pool_id FROM pools WHERE name = ?").get(name) as { pool_id: string } | undefined;
@@ -418,9 +419,9 @@ export async function run(argv: string[]): Promise<number> {
           console.error("Usage: ctxd pool enroll <pool> <node>  (run again with --transfer-id once approved on <node>)");
           return 1;
         }
-        const outgoingToken = peer.outgoing_token;
+        const outgoingToken = readPeerOutgoingToken(peer.outgoing_token);
         if (!outgoingToken) {
-          console.error(`ctxd pool enroll: no outgoing token for peer "${nodeName}" yet; run "ctxd node add-peer" first.`);
+          console.error(`ctxd pool enroll: no outgoing token for peer "${nodeName}" (none supplied, or missing from the keychain); run "ctxd node add-peer ... --token" first.`);
           return 1;
         }
         const peerForTransfer: PeerForTransfer = { url: peer.url, outgoing_token: outgoingToken, node_id: peer.node_id };

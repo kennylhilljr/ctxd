@@ -9,6 +9,7 @@ import { checkDatabaseIntegrity, openDatabase } from "../store/db.js";
 import { startServer } from "../server/mcp.js";
 import { startSyncServer } from "../server/sync.js";
 import { runSync } from "./sync.js";
+import { migratePeerOutgoingTokensQuietly } from "../sync/peer-token.js";
 import { HlcClock } from "../core/hlc.js";
 import type { WriteContext } from "../store/write.js";
 import { runDueDigests } from "../journal/digest.js";
@@ -79,6 +80,7 @@ export async function run(argv: string[]): Promise<number> {
     db.close();
     return 1;
   }
+  migratePeerOutgoingTokensQuietly(db, "ctxd server");
 
   // Flags are resolved once here, at server startup, unlike the per-request live reload in
   // server/mcp.ts: starting or stopping the sync listener or the puller interval mid-process

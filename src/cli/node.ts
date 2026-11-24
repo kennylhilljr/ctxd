@@ -12,18 +12,23 @@ import { configSchema, loadConfig } from "../config/config.js";
 import { parse, stringify } from "smol-toml";
 import { probeServer } from "./mcp.js";
 import { pinPublicKey } from "../security/event-signatures.js";
+import type { KeychainOptions } from "../access/keychain.js";
+import { deletePeerOutgoingToken, migratePeerOutgoingTokensQuietly, storePeerOutgoingToken } from "../sync/peer-token.js";
 
 export interface AddPeerOptions {
   role: "home" | "roaming";
   token?: string;
   nodeId?: string;
   publicKey?: string;
+  /** Injected in tests so they never touch the real keychain. */
+  keychain?: KeychainOptions;
 }
 
 /**
  * Registers a machine to sync with: generates the token this peer must present to pull from us
  * (hash stored, raw token written to a local file to copy onto the peer's machine), and stores
- * `token` (the token we present when pulling from the peer) if already known. A peer added
+ * `token` (the token we present when pulling from the peer) if already known: the raw token goes
+ * to the keychain and the row keeps only a reference (src/sync/peer-token.ts). A peer added
  * without `token` has `outgoing_token` NULL until a later call supplies it (SPEC v8 7.1):
  * pulling from it fails until then, but it can already pull from us.
  *
@@ -58,18 +63,21 @@ export function addPeer(db: Database.Database, name: string, url: string, opts: 
       console.error(`ctxd node: peer "${name}" is already bound to a different public key.`);
       return 1;
     }
+    const ref = storePeerOutgoingToken(existing.peer_id, opts.token, opts.keychain);
     db.transaction(() => {
       db.prepare("UPDATE peers SET outgoing_token = ?, remote_node_id = COALESCE(remote_node_id, ?), remote_public_key = COALESCE(remote_public_key, ?) WHERE peer_id = ?")
-        .run(opts.token, opts.nodeId ?? null, opts.publicKey ?? null, existing.peer_id);
+        .run(ref, opts.nodeId ?? null, opts.publicKey ?? null, existing.peer_id);
       if (opts.nodeId && opts.publicKey) pinPublicKey(db, opts.nodeId, opts.publicKey, 0);
     })();
     console.log(`ctxd node: peer ${name}: outgoing token updated.`);
     return 0;
   }
   const { raw, hash } = newToken();
+  const peerId = newId();
+  const ref = opts.token ? storePeerOutgoingToken(peerId, opts.token, opts.keychain) : null;
   db.prepare(
     "INSERT INTO peers (peer_id, name, url, role, incoming_token_hash, outgoing_token, created_at, remote_node_id, remote_public_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-  ).run(newId(), name, url, opts.role, hash, opts.token ?? null, nowIso(), opts.nodeId ?? null, opts.publicKey ?? null);
+  ).run(peerId, name, url, opts.role, hash, ref, nowIso(), opts.nodeId ?? null, opts.publicKey ?? null);
   if (opts.nodeId && opts.publicKey) pinPublicKey(db, opts.nodeId, opts.publicKey, 0);
 
   const dir = tokensDir(configPath);
@@ -88,8 +96,8 @@ export function addPeer(db: Database.Database, name: string, url: string, opts: 
   return 0;
 }
 
-export function revokePeer(db: Database.Database, name: string): number {
-  const peer = db.prepare("SELECT peer_id, revoked_at FROM peers WHERE name = ?").get(name) as { peer_id: string; revoked_at: string | null } | undefined;
+export function revokePeer(db: Database.Database, name: string, keychain: KeychainOptions = {}): number {
+  const peer = db.prepare("SELECT peer_id, revoked_at, outgoing_token FROM peers WHERE name = ?").get(name) as { peer_id: string; revoked_at: string | null; outgoing_token: string | null } | undefined;
   if (!peer) {
     console.error(`ctxd node: peer "${name}" not found.`);
     return 1;
@@ -98,7 +106,8 @@ export function revokePeer(db: Database.Database, name: string): number {
     console.error(`ctxd node: peer "${name}" is already revoked.`);
     return 1;
   }
-  db.prepare("UPDATE peers SET revoked_at = ? WHERE peer_id = ?").run(nowIso(), peer.peer_id);
+  db.prepare("UPDATE peers SET revoked_at = ?, outgoing_token = NULL WHERE peer_id = ?").run(nowIso(), peer.peer_id);
+  deletePeerOutgoingToken(peer.outgoing_token, keychain);
   console.log(`ctxd node: peer revoked: ${name}`);
   return 0;
 }
@@ -164,6 +173,7 @@ export async function run(argv: string[]): Promise<number> {
   const configPath = resolveConfigPath({ configPath: values.config });
   const db = openDatabase(join(dataDir, "ctxd.db"));
   try {
+    migratePeerOutgoingTokensQuietly(db, "ctxd node");
     if (sub === "add-peer") {
       const [name, url] = positionals;
       if (!name || !url) {
