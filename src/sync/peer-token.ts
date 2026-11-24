@@ -1,5 +1,6 @@
 import type Database from "better-sqlite3";
 import { deleteSecret, readSecret, storeSecret, type KeychainOptions } from "../access/keychain.js";
+import { newId } from "../core/ids.js";
 
 /**
  * The token this node presents when pulling from a peer lives only in the macOS Keychain, the
@@ -12,20 +13,36 @@ import { deleteSecret, readSecret, storeSecret, type KeychainOptions } from "../
 const SERVICE = "ctxd";
 const REF_PREFIX = "keychain:";
 
-function accountFor(peerId: string): string {
-  return `peer-outgoing/${peerId}`;
-}
-
 /** True when the stored column value is a keychain reference rather than a legacy raw token. */
 export function isKeychainRef(stored: string): boolean {
   return stored.startsWith(REF_PREFIX);
 }
 
-/** Stores the raw token in the keychain and returns the reference to keep in `peers.outgoing_token`. */
+/**
+ * Stores the raw token under a fresh keychain account and returns its reference. Every write gets
+ * its own account, so a reference already in the database keeps pointing at an intact secret until
+ * the caller has committed the new one (see `commitPeerOutgoingToken`).
+ */
 export function storePeerOutgoingToken(peerId: string, token: string, opts: KeychainOptions = {}): string {
-  const account = accountFor(peerId);
+  const account = `peer-outgoing/${peerId}/${newId()}`;
   storeSecret(SERVICE, account, token, opts);
   return `${REF_PREFIX}${account}`;
+}
+
+/**
+ * Stores `token` in the keychain, then runs `commit` with its reference to write it to the database.
+ * If `commit` throws or returns false (nothing was written), the new secret is deleted again; if it
+ * succeeds, the secret `previous` pointed to is deleted. Returns whether the commit happened.
+ */
+export function commitPeerOutgoingToken(peerId: string, token: string, previous: string | null, commit: (ref: string) => boolean, opts: KeychainOptions = {}): boolean {
+  const ref = storePeerOutgoingToken(peerId, token, opts);
+  let committed = false;
+  try {
+    committed = commit(ref);
+  } finally {
+    deletePeerOutgoingToken(committed ? previous : ref, opts);
+  }
+  return committed;
 }
 
 /**
@@ -47,6 +64,8 @@ export function deletePeerOutgoingToken(stored: string | null, opts: KeychainOpt
 export interface PeerTokenMigration {
   migrated: number;
   failed: string[];
+  /** A reader blocked the WAL checkpoint; SQLite's next automatic checkpoint overwrites the old pages. */
+  checkpointBusy?: boolean;
 }
 
 /**
@@ -67,9 +86,9 @@ export function migratePeerOutgoingTokens(db: Database.Database, opts: KeychainO
   try {
     for (const row of rows) {
       try {
-        const ref = storePeerOutgoingToken(row.peer_id, row.outgoing_token, opts);
-        update.run(ref, row.peer_id, row.outgoing_token);
-        result.migrated++;
+        // The conditional update changes nothing if the row was rotated meanwhile; the new secret is then dropped.
+        const moved = commitPeerOutgoingToken(row.peer_id, row.outgoing_token, null, (ref) => update.run(ref, row.peer_id, row.outgoing_token).changes === 1, opts);
+        if (moved) result.migrated++;
       } catch {
         result.failed.push(row.name);
       }
@@ -78,9 +97,13 @@ export function migratePeerOutgoingTokens(db: Database.Database, opts: KeychainO
     db.pragma(`secure_delete = ${secureDelete}`);
   }
   // Flush the rewritten pages into the main file and empty the WAL, so neither keeps the old bytes.
-  // If a reader blocks it (busy), nothing is lost: the new page images are already zeroed by
-  // secure_delete, and SQLite's automatic checkpoint copies them over the old pages later.
-  if (result.migrated > 0) db.pragma("wal_checkpoint(TRUNCATE)");
+  // A reader can block it (busy): the new page images are already zeroed by secure_delete, and the
+  // next checkpoint SQLite runs (automatically, or when the last connection closes) copies them over
+  // the old pages. Reported so the caller can say so.
+  if (result.migrated > 0) {
+    const [status] = db.pragma("wal_checkpoint(TRUNCATE)") as { busy: number }[];
+    if (status?.busy) result.checkpointBusy = true;
+  }
   return result;
 }
 
@@ -93,7 +116,10 @@ export function redactRawPeerOutgoingTokens(db: Database.Database): number {
 /** Runs the migration and reports a failure on stderr without ever throwing, for command and server startup. */
 export function migratePeerOutgoingTokensQuietly(db: Database.Database, prefix: string, opts: KeychainOptions = {}): void {
   try {
-    const { failed } = migratePeerOutgoingTokens(db, opts);
+    const { failed, checkpointBusy } = migratePeerOutgoingTokens(db, opts);
+    if (checkpointBusy) {
+      console.error(`${prefix}: outgoing peer tokens moved to the keychain; the database file is cleaned at SQLite's next checkpoint (another process held it open).`);
+    }
     if (failed.length > 0) {
       console.error(`${prefix}: could not move the outgoing token for peer(s) ${failed.join(", ")} into the keychain; it stays in the database until a later run succeeds.`);
     }

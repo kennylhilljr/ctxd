@@ -13,7 +13,7 @@ import { parse, stringify } from "smol-toml";
 import { probeServer } from "./mcp.js";
 import { pinPublicKey } from "../security/event-signatures.js";
 import type { KeychainOptions } from "../access/keychain.js";
-import { deletePeerOutgoingToken, migratePeerOutgoingTokensQuietly, storePeerOutgoingToken } from "../sync/peer-token.js";
+import { commitPeerOutgoingToken, deletePeerOutgoingToken, migratePeerOutgoingTokensQuietly } from "../sync/peer-token.js";
 
 export interface AddPeerOptions {
   role: "home" | "roaming";
@@ -45,7 +45,7 @@ export function addPeer(db: Database.Database, name: string, url: string, opts: 
     console.error("ctxd node: --node-id and --public-key must be supplied together.");
     return 1;
   }
-  const existing = db.prepare("SELECT peer_id, role, remote_node_id, remote_public_key FROM peers WHERE name = ?").get(name) as { peer_id: string; role: string; remote_node_id: string | null; remote_public_key: string | null } | undefined;
+  const existing = db.prepare("SELECT peer_id, role, remote_node_id, remote_public_key, outgoing_token FROM peers WHERE name = ?").get(name) as { peer_id: string; role: string; remote_node_id: string | null; remote_public_key: string | null; outgoing_token: string | null } | undefined;
   if (existing) {
     if (!opts.token) {
       console.error(`ctxd node: peer "${name}" already exists. Pass --token to update its outgoing token.`);
@@ -63,22 +63,30 @@ export function addPeer(db: Database.Database, name: string, url: string, opts: 
       console.error(`ctxd node: peer "${name}" is already bound to a different public key.`);
       return 1;
     }
-    const ref = storePeerOutgoingToken(existing.peer_id, opts.token, opts.keychain);
-    db.transaction(() => {
-      db.prepare("UPDATE peers SET outgoing_token = ?, remote_node_id = COALESCE(remote_node_id, ?), remote_public_key = COALESCE(remote_public_key, ?) WHERE peer_id = ?")
-        .run(ref, opts.nodeId ?? null, opts.publicKey ?? null, existing.peer_id);
-      if (opts.nodeId && opts.publicKey) pinPublicKey(db, opts.nodeId, opts.publicKey, 0);
-    })();
+    commitPeerOutgoingToken(existing.peer_id, opts.token, existing.outgoing_token, (ref) => {
+      db.transaction(() => {
+        db.prepare("UPDATE peers SET outgoing_token = ?, remote_node_id = COALESCE(remote_node_id, ?), remote_public_key = COALESCE(remote_public_key, ?) WHERE peer_id = ?")
+          .run(ref, opts.nodeId ?? null, opts.publicKey ?? null, existing.peer_id);
+        if (opts.nodeId && opts.publicKey) pinPublicKey(db, opts.nodeId, opts.publicKey, 0);
+      })();
+      return true;
+    }, opts.keychain);
     console.log(`ctxd node: peer ${name}: outgoing token updated.`);
     return 0;
   }
   const { raw, hash } = newToken();
   const peerId = newId();
-  const ref = opts.token ? storePeerOutgoingToken(peerId, opts.token, opts.keychain) : null;
-  db.prepare(
-    "INSERT INTO peers (peer_id, name, url, role, incoming_token_hash, outgoing_token, created_at, remote_node_id, remote_public_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-  ).run(peerId, name, url, opts.role, hash, ref, nowIso(), opts.nodeId ?? null, opts.publicKey ?? null);
-  if (opts.nodeId && opts.publicKey) pinPublicKey(db, opts.nodeId, opts.publicKey, 0);
+  const insert = (ref: string | null): boolean => {
+    db.transaction(() => {
+      db.prepare(
+        "INSERT INTO peers (peer_id, name, url, role, incoming_token_hash, outgoing_token, created_at, remote_node_id, remote_public_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      ).run(peerId, name, url, opts.role, hash, ref, nowIso(), opts.nodeId ?? null, opts.publicKey ?? null);
+      if (opts.nodeId && opts.publicKey) pinPublicKey(db, opts.nodeId, opts.publicKey, 0);
+    })();
+    return true;
+  };
+  if (opts.token) commitPeerOutgoingToken(peerId, opts.token, null, insert, opts.keychain);
+  else insert(null);
 
   const dir = tokensDir(configPath);
   mkdirSync(dir, { recursive: true });
@@ -106,8 +114,9 @@ export function revokePeer(db: Database.Database, name: string, keychain: Keycha
     console.error(`ctxd node: peer "${name}" is already revoked.`);
     return 1;
   }
-  deletePeerOutgoingToken(peer.outgoing_token, keychain);
+  // Revocation commits first; deleting the now-unreferenced secret afterwards is best effort.
   db.prepare("UPDATE peers SET revoked_at = ?, outgoing_token = NULL WHERE peer_id = ?").run(nowIso(), peer.peer_id);
+  deletePeerOutgoingToken(peer.outgoing_token, keychain);
   console.log(`ctxd node: peer revoked: ${name}`);
   return 0;
 }

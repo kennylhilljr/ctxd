@@ -93,6 +93,22 @@ describe("outgoing peer tokens are kept out of the database", () => {
     expect(databaseBytes(f.dbPath)).not.toContain(TOKEN);
   });
 
+  it("rotating the token replaces the secret, and a rejected update leaves the old one intact", () => {
+    const f = fixture();
+    const keychain = fakeKeychain();
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    addPeer(f.db, "node-b", "http://127.0.0.1:9", { role: "home", token: TOKEN, keychain: keychain.opts }, f.configPath);
+    expect(addPeer(f.db, "node-b", "http://127.0.0.1:9", { role: "home", token: "rotated-token-value", keychain: keychain.opts }, f.configPath)).toBe(0);
+    expect(readPeerOutgoingToken(storedToken(f.db, "node-b"), keychain.opts)).toBe("rotated-token-value");
+    expect([...keychain.store.values()]).toEqual(["rotated-token-value"]);
+
+    // A pinned key that conflicts with --public-key makes the database transaction throw.
+    f.db.prepare("INSERT INTO node_keys (node_id, public_key, first_seen_at, first_signed_seq) VALUES ('node-x', 'key-1', '2026-01-01T00:00:00Z', 0)").run();
+    expect(() => addPeer(f.db, "node-b", "http://127.0.0.1:9", { role: "home", token: "third-token-value", nodeId: "node-x", publicKey: "key-2", keychain: keychain.opts }, f.configPath)).toThrow();
+    expect(readPeerOutgoingToken(storedToken(f.db, "node-b"), keychain.opts)).toBe("rotated-token-value");
+    expect([...keychain.store.values()]).toEqual(["rotated-token-value"]);
+  });
+
   it("revoking a peer deletes its keychain secret and clears the reference", () => {
     const f = fixture();
     const keychain = fakeKeychain();
@@ -123,8 +139,8 @@ describe("migrating raw outgoing tokens stored by earlier versions", () => {
     insertLegacyPeer(f.db, "peer-3", "node-d", null);
 
     expect(migratePeerOutgoingTokens(f.db, keychain.opts)).toEqual({ migrated: 2, failed: [] });
-    expect(storedToken(f.db, "node-b")).toBe("keychain:peer-outgoing/peer-1");
-    expect(storedToken(f.db, "node-c")).toBe("keychain:peer-outgoing/peer-2");
+    expect(storedToken(f.db, "node-b")).toMatch(/^keychain:peer-outgoing\/peer-1\//);
+    expect(storedToken(f.db, "node-c")).toMatch(/^keychain:peer-outgoing\/peer-2\//);
     expect(storedToken(f.db, "node-d")).toBeNull();
     expect(readPeerOutgoingToken(storedToken(f.db, "node-b"), keychain.opts)).toBe(TOKEN);
     expect(readPeerOutgoingToken(storedToken(f.db, "node-c"), keychain.opts)).toBe("second-token-value");
@@ -132,6 +148,23 @@ describe("migrating raw outgoing tokens stored by earlier versions", () => {
     expect(migratePeerOutgoingTokens(f.db, keychain.opts)).toEqual({ migrated: 0, failed: [] });
     f.db.close();
     expect(databaseBytes(f.dbPath)).not.toContain(TOKEN);
+  });
+
+  it("does not overwrite a token rotated while the migration ran", () => {
+    const f = fixture();
+    insertLegacyPeer(f.db, "peer-1", "node-b", TOKEN);
+    const inner = fakeKeychain();
+    const opts: KeychainOptions = {
+      exec: (args) => {
+        const out = inner.opts.exec!(args);
+        // Simulates another process rotating the row between the keychain write and the update.
+        if (args[0] === "add-generic-password") f.db.prepare("UPDATE peers SET outgoing_token = 'keychain:peer-outgoing/peer-1/rotated' WHERE peer_id = 'peer-1'").run();
+        return out;
+      },
+    };
+    expect(migratePeerOutgoingTokens(f.db, opts)).toEqual({ migrated: 0, failed: [] });
+    expect(storedToken(f.db, "node-b")).toBe("keychain:peer-outgoing/peer-1/rotated");
+    expect(inner.store.size).toBe(0);
   });
 
   it("keeps the raw token (sync still works) and reports the peer when the keychain write fails", () => {
@@ -163,10 +196,12 @@ describe("migration property: any mix of legacy rows and keychain failures conve
             tokens.forEach((token, i) => expect(readPeerOutgoingToken(storedToken(f.db, `node-${i}`), keychain.opts)).toBe(token));
             if (failed.length === 0) break;
           }
+          // Failed attempts leave no orphan secret behind: exactly one per migrated peer.
+          expect(keychain.store.size).toBe(tokens.filter((t) => t !== null).length);
           tokens.forEach((token, i) => {
             const stored = storedToken(f.db, `node-${i}`);
             if (token === null) expect(stored).toBeNull();
-            else expect(stored).toBe(`keychain:peer-outgoing/peer-${i}`);
+            else expect(stored).toMatch(new RegExp(`^keychain:peer-outgoing/peer-${i}/`));
           });
         },
       ),
