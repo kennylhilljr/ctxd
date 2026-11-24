@@ -210,6 +210,15 @@ export function checkSyncRejections(db: Database.Database): DoctorCheck {
   };
 }
 
+/** New Markdown mirror files the mirror refused to import and keeps retrying (#72): each is a note the user expects in ctxd that is not there. */
+export function checkMirrorSkips(db: Database.Database): DoctorCheck {
+  const rows = db.prepare("SELECT path, code, reason, last_skipped_at FROM mirror_skips ORDER BY path").all() as { path: string; code: string; reason: string; last_skipped_at: string }[];
+  if (rows.length === 0) return { name: "mirror skips", ok: true, detail: "no skipped mirror files" };
+  const shown = rows.slice(0, 10).map((r) => `${r.path}: ${r.code} (${r.reason}; last ${r.last_skipped_at})`);
+  if (rows.length > shown.length) shown.push(`and ${rows.length - shown.length} more`);
+  return { name: "mirror skips", ok: false, detail: `${rows.length} file(s) not imported: ${shown.join(", ")}` };
+}
+
 export async function runDoctor(db: Database.Database, config: CtxdConfig, opts: DoctorOptions): Promise<DoctorCheck[]> {
   return [
     checkBindAddresses(config),
@@ -218,6 +227,7 @@ export async function runDoctor(db: Database.Database, config: CtxdConfig, opts:
     checkReviewRuleNarrowness(db),
     await checkPeers(db, opts.fetchImpl, config.sync.stale_hours),
     checkSyncRejections(db),
+    checkMirrorSkips(db),
     checkFileVault(opts.execFile),
     checkHookInstallation(opts.home),
     checkSemanticSearch(config, opts.dataDir),

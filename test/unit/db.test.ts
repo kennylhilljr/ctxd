@@ -155,6 +155,20 @@ describe("openDatabase (SPEC v6 section 4)", () => {
     migrated.close();
   });
 
+  it("migrates a version-24 database by adding mirror_skips (#72)", () => {
+    const path = tmpDbPath();
+    const fresh = openDatabase(path, { create: true });
+    fresh.exec("DROP TABLE mirror_skips");
+    fresh.pragma("user_version = 24");
+    fresh.close();
+
+    const migrated = openDatabase(path);
+    expect(migrated.pragma("user_version", { simple: true })).toBe(SCHEMA_VERSION);
+    migrated.prepare("INSERT INTO mirror_skips (path, code, reason, first_skipped_at, last_skipped_at) VALUES ('p', 'c', 'r', 't', 't')").run();
+    expect(migrated.prepare("SELECT attempts FROM mirror_skips").get()).toEqual({ attempts: 1 });
+    migrated.close();
+  });
+
   it("enforces foreign keys", () => {
     const path = tmpDbPath();
     const db = openDatabase(path, { create: true });

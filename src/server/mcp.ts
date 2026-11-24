@@ -7,7 +7,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprot
 import { assertLoopback } from "../security/policy.js";
 import { expandHome, loadConfig } from "../config/config.js";
 import { isFlagOn, resolveFlags } from "../config/flags.js";
-import { extractBearerToken, parseListen, readJsonBody } from "./http.js";
+import { applyServerTimeouts, extractBearerToken, HttpBodyError, logInternalError, parseListen, readJsonBody } from "./http.js";
 import { toolDefinitions } from "../tools/list.js";
 import { TOOLS } from "../tools/schemas.js";
 import { coerceInput } from "../tools/coerce.js";
@@ -55,10 +55,17 @@ export async function startServer(opts: StartServerOptions): Promise<RunningServ
 
   const httpServer = createHttpServer((req, res) => {
     handleHttpRequest(req, res, opts.db, opts.nodeId, clock, opts.configPath, opts.sealedStore).catch((err) => {
-      if (!res.headersSent) res.writeHead(500, { "content-type": "application/json" });
-      res.end(JSON.stringify({ error: { code: "VALIDATION", message: (err as Error).message } }));
+      if (res.headersSent) {
+        res.end();
+        return;
+      }
+      // Unexpected failure (#72): the detail is logged locally under a request id; the caller gets only the id.
+      // The code stays VALIDATION, as before, since the error code set is part of the tool contract (8.5).
+      const requestId = logInternalError(err);
+      res.writeHead(500, { "content-type": "application/json" }).end(JSON.stringify({ error: { code: "VALIDATION", message: `Internal error (request ${requestId})`, requestId } }));
     });
   });
+  applyServerTimeouts(httpServer);
 
   await new Promise<void>((resolve, reject) => {
     httpServer.once("error", reject);
@@ -150,8 +157,9 @@ async function handleHttpRequest(
   let body: unknown;
   try {
     body = await readJsonBody(req);
-  } catch {
-    res.writeHead(400, { "content-type": "application/json" }).end(JSON.stringify({ error: { code: "VALIDATION", message: "Invalid JSON body" } }));
+  } catch (err) {
+    if (!(err instanceof HttpBodyError)) throw err;
+    res.writeHead(err.status, { "content-type": "application/json" }).end(JSON.stringify({ error: { code: "VALIDATION", message: err.message } }));
     return;
   }
 

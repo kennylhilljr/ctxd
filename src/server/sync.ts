@@ -2,7 +2,7 @@ import { createServer as createHttpServer, type IncomingMessage, type ServerResp
 import type Database from "better-sqlite3";
 import { assertLoopback } from "../security/policy.js";
 import { resolvePeerAuth } from "./auth.js";
-import { extractBearerToken, parseListen, readJsonBody } from "./http.js";
+import { applyServerTimeouts, extractBearerToken, HttpBodyError, logInternalError, parseListen, readJsonBody } from "./http.js";
 import { servePull, pullFromPeer, recordServedThrough, type PullRequest } from "../sync/pull.js";
 import type { SealedKeyProvider } from "../sealed/key-provider.js";
 import type { SealedPoolStore } from "../sealed/store.js";
@@ -46,11 +46,9 @@ export async function startSyncServer(opts: StartSyncServerOptions): Promise<Run
   const notifyTimers = new Map<string, NodeJS.Timeout>();
 
   const httpServer = createHttpServer((req, res) => {
-    handleRequest(req, res, opts.db, opts.nodeId, notifyTimers, opts.sealedKeys, opts.sealedStore, opts.flags).catch((err) => {
-      if (!res.headersSent) res.writeHead(500, { "content-type": "application/json" });
-      res.end(JSON.stringify({ error: (err as Error).message }));
-    });
+    handleRequest(req, res, opts.db, opts.nodeId, notifyTimers, opts.sealedKeys, opts.sealedStore, opts.flags).catch((err) => sendError(res, err));
   });
+  applyServerTimeouts(httpServer);
 
   await new Promise<void>((resolve, reject) => {
     httpServer.once("error", reject);
@@ -159,9 +157,28 @@ async function handleKeyTransferRequest(
     const wrappedKey = fetchWrappedKey(db, body.transferId, callerNodeId);
     res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ wrappedKey }));
   } catch (err) {
-    const status = err instanceof CtxdError ? (err.code === "NOT_FOUND" ? 404 : err.code === "UNAUTHORIZED" ? 401 : err.code === "BUDGET_EXCEEDED" ? 429 : 400) : 500;
-    res.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+    if (!(err instanceof CtxdError)) throw err; // anything else is unexpected: sendError answers it generically
+    const status = err.code === "NOT_FOUND" ? 404 : err.code === "UNAUTHORIZED" ? 401 : err.code === "BUDGET_EXCEEDED" ? 429 : 400;
+    res.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify({ error: err.message }));
   }
+}
+
+/**
+ * The listener's one error exit (#72): a body over the cap is 413 and bad JSON is 400; anything
+ * else is a 500 that names only a request id, with the detail logged locally, so a peer never sees
+ * SQLite or filesystem internals.
+ */
+function sendError(res: ServerResponse, err: unknown): void {
+  if (res.headersSent) {
+    res.end();
+    return;
+  }
+  if (err instanceof HttpBodyError) {
+    res.writeHead(err.status, { "content-type": "application/json" }).end(JSON.stringify({ error: err.message }));
+    return;
+  }
+  const requestId = logInternalError(err);
+  res.writeHead(500, { "content-type": "application/json" }).end(JSON.stringify({ error: "internal error", requestId }));
 }
 
 function scheduleNotifyPull(db: Database.Database, selfNodeId: string, peerId: string, peerName: string, notifyTimers: Map<string, NodeJS.Timeout>, sealedKeys?: SealedKeyProvider, sealedStore?: SealedPoolStore): void {

@@ -52,6 +52,7 @@ const CARRY_BEFORE_REBUILD = [
   "skill_syncs",
   "mirror_files",
   "mirror_conflicts",
+  "mirror_skips",
   "archive_requests",
   "embeddings",
   "batches",

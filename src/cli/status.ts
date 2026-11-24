@@ -37,6 +37,8 @@ export interface StatusInfo {
   peerCount: number;
   /** Replicated events refused by pulls and kept in sync_rejections for retry (#74). Omitted counts as 0. */
   syncRejected?: number;
+  /** New Markdown mirror files the mirror could not import, kept in mirror_skips (#72). Omitted counts as 0. */
+  mirrorSkipped?: number;
   /** null: mobile_inbox is on but the configured transport (cloudflare) needs a network call to answer, which statusline's budget forbids (MI-11). 0 when the flag is off. */
   inboxPending: number | null;
 }
@@ -89,6 +91,7 @@ export async function gatherStatus(db: Database.Database, config: CtxdConfig, op
   const syncOn = isFlagOn(flags, "sync");
   const unsynced = !syncOn || peerCount === 0 ? 0 : countUnsynced(db);
   const syncRejected = (db.prepare("SELECT COUNT(*) AS n FROM sync_rejections").get() as { n: number }).n;
+  const mirrorSkipped = (db.prepare("SELECT COUNT(*) AS n FROM mirror_skips").get() as { n: number }).n;
 
   let inboxPending: number | null = 0;
   if (isFlagOn(flags, "mobile_inbox")) {
@@ -103,7 +106,7 @@ export async function gatherStatus(db: Database.Database, config: CtxdConfig, op
     }
   }
 
-  return { healthOk, scope, scopeNotice, briefAvailable, openClaims, unsynced, peerCount, syncRejected, inboxPending };
+  return { healthOk, scope, scopeNotice, briefAvailable, openClaims, unsynced, peerCount, syncRejected, mirrorSkipped, inboxPending };
 }
 
 export function formatStatusLine(info: StatusInfo): string {
@@ -123,6 +126,7 @@ export function formatStatusDetail(info: StatusInfo): string {
     `brief: ${info.briefAvailable ? "available" : "not available (no scope, or hooks/hooks.session_start is off)"}`,
     `claims: ${info.openClaims} open`,
     `sync: ${info.peerCount} peer(s); ${info.unsynced} unsynced${(info.syncRejected ?? 0) > 0 ? `; ${info.syncRejected} rejected (see ctxd doctor)` : ""}`,
+    ...((info.mirrorSkipped ?? 0) > 0 ? [`mirror: ${info.mirrorSkipped} file(s) not imported (see ctxd doctor)`] : []),
     info.inboxPending === null ? "mobile inbox: pending count not tracked locally (cloudflare transport; run ctxd inbox status)" : `mobile inbox: ${info.inboxPending} pending`,
   ];
   return lines.join("\n");
