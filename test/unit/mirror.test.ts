@@ -137,10 +137,28 @@ describe("Markdown export and mirror (Spec v9 section 12.1)", () => {
   it("sanitizes a skipped file's name in ctxd doctor, on one line (#72, TS-AC-2)", () => {
     const f = fixture();
     const token = "ghp_" + "a".repeat(36);
-    f.db.prepare("INSERT INTO mirror_skips (path, code, reason, first_skipped_at, last_skipped_at) VALUES (?, 'INVALID_FILE', 'r', 't', 't')").run(`sample-app/notes/${token}\nok: fake.md`);
+    f.db.prepare("INSERT INTO mirror_skips (path, code, reason, first_skipped_at, last_skipped_at) VALUES (?, 'INVALID_FILE', ?, 't', 't')").run(`sample-app/notes/${token}\nok: fake.md`, "a\u2028b");
     const detail = checkMirrorSkips(f.db).detail;
     expect(detail).not.toContain(token);
-    expect(detail).not.toMatch(/[\r\n]/);
+    expect(detail).not.toMatch(/[\r\n\u2028\u2029]/);
+  });
+
+  it("never stores a secret from a skipped file's name (#72, TS-AC-2)", () => {
+    const f = fixture();
+    const token = "ghp_" + "b".repeat(36);
+    const dir = join(f.mirror, "sample-app", "notes");
+    mkdirSync(dir, { recursive: true });
+    const file = join(dir, `${token}.md`);
+    writeFileSync(file, "---\nkind: \"not-a-kind\"\n---\nBody\n");
+    syncMirror(f.ctx, f.mirror);
+    const rows = f.db.prepare("SELECT path, reason FROM mirror_skips").all() as { path: string; reason: string }[];
+    expect(rows).toHaveLength(1);
+    expect(JSON.stringify(rows)).not.toContain(token);
+    syncMirror(f.ctx, f.mirror);
+    expect(f.db.prepare("SELECT attempts FROM mirror_skips").get()).toEqual({ attempts: 2 }); // same row, matched by the redacted key
+    rmSync(file);
+    syncMirror(f.ctx, f.mirror);
+    expect((f.db.prepare("SELECT COUNT(*) AS n FROM mirror_skips").get() as { n: number }).n).toBe(0);
   });
 
   it("clears a skip once the file imports (#72)", () => {

@@ -216,7 +216,7 @@ export function checkMirrorSkips(db: Database.Database): DoctorCheck {
   const rows = db.prepare("SELECT path, code, reason, last_skipped_at FROM mirror_skips ORDER BY path").all() as { path: string; code: string; reason: string; last_skipped_at: string }[];
   if (rows.length === 0) return { name: "mirror skips", ok: true, detail: "no skipped mirror files" };
   // A file name is user text: sanitized on the way out like the stored reason, on one line (TS-9).
-  const oneLine = (text: string, max: number) => sanitizeCapture(text, max).replace(/[\u0000-\u001f\u007f]+/g, " ");
+  const oneLine = (text: string, max: number) => sanitizeCapture(text, max).replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, " ");
   const shown = rows.slice(0, 10).map((r) => `${oneLine(r.path, 200)}: ${r.code} (${oneLine(r.reason, 500)}; last ${r.last_skipped_at})`);
   if (rows.length > shown.length) shown.push(`and ${rows.length - shown.length} more`);
   return { name: "mirror skips", ok: false, detail: `${rows.length} file(s) not imported: ${shown.join(", ")}` };

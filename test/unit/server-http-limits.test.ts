@@ -156,6 +156,23 @@ describe("MCP listener request handling (#72)", () => {
   });
 });
 
+describe("MCP tool call failures (#72)", () => {
+  it("answers an unexpected tool failure with a generic JSON-RPC error, never the internal message", async () => {
+    const { db, token } = await mcpFixture();
+    db.exec("DROP TABLE tool_metrics"); // the tool succeeds, then recording its metrics fails inside SQLite
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const res = await fetch(`http://127.0.0.1:${MCP_PORT}/mcp`, {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/json, text/event-stream", authorization: `Bearer ${token}`, connection: "close" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 7, method: "tools/call", params: { name: "context_search", arguments: { query: "anything" } } }),
+    });
+    const text = await res.text();
+    expect(text).toMatch(/Internal error \(request [0-9a-f-]{36}\)/);
+    expect(text).not.toMatch(/tool_metrics|no such table|sqlite/i);
+    expect(logged).toHaveBeenCalledWith(expect.stringMatching(/tool_metrics/));
+  });
+});
+
 describe("readJsonBody and server timeouts (#72)", () => {
   async function withEchoServer(maxBytes: number, run: (port: number) => Promise<void>): Promise<void> {
     const server: Server = createServer((req, res) => {

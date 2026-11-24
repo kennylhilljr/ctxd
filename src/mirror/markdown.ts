@@ -182,6 +182,14 @@ function recordConflict(db: Database.Database, dir: string, path: string, row: M
   ).run(path, row.entry_id, fileRev ?? null, row.content_rev, reason, nowIso());
 }
 
+/**
+ * A file name is user text and may hold a secret (a rejected title falls back to it), so `mirror_skips`
+ * keys on the sanitized, redacted path, never the raw one (TS-AC-2). Two names that redact alike share a row.
+ */
+function skipKey(path: string): string {
+  return sanitizeCapture(path, 1000);
+}
+
 function recordSkip(db: Database.Database, path: string, err: unknown): void {
   const code = err instanceof CtxdError ? err.code : "INVALID_FILE";
   const reason = sanitizeCapture(err instanceof Error ? err.message : String(err), 500);
@@ -189,11 +197,11 @@ function recordSkip(db: Database.Database, path: string, err: unknown): void {
   db.prepare(
     `INSERT INTO mirror_skips (path, code, reason, attempts, first_skipped_at, last_skipped_at) VALUES (?, ?, ?, 1, ?, ?)
      ON CONFLICT(path) DO UPDATE SET code = excluded.code, reason = excluded.reason, attempts = attempts + 1, last_skipped_at = excluded.last_skipped_at`,
-  ).run(path, code, reason, at, at);
+  ).run(skipKey(path), code, reason, at, at);
 }
 
 function clearSkip(db: Database.Database, path: string): void {
-  db.prepare("DELETE FROM mirror_skips WHERE path = ?").run(path);
+  db.prepare("DELETE FROM mirror_skips WHERE path = ?").run(skipKey(path));
 }
 
 function setReviewAfter(ctx: WriteContext, row: MarkdownRow, value: string | null): void {
@@ -282,7 +290,7 @@ export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: num
   for (const file of walkMarkdown(mirrorDir)) {
     const path = relative(resolve(mirrorDir), file);
     if (trackedPaths.has(path)) continue;
-    untracked.add(path);
+    untracked.add(skipKey(path));
     try {
       const parsed = parseMarkdown(readFileSync(file, "utf8"), path.replace(/\.md$/, "").split(/[\\/]/).pop() ?? "New note");
       if (parsed.meta.ref) {
@@ -317,8 +325,8 @@ export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: num
     }
   }
   // A skipped file that was removed, or has since been imported, is no longer skipped.
-  for (const { path } of db.prepare("SELECT path FROM mirror_skips").all() as { path: string }[]) {
-    if (!untracked.has(path)) clearSkip(db, path);
+  for (const { path: key } of db.prepare("SELECT path FROM mirror_skips").all() as { path: string }[]) {
+    if (!untracked.has(key)) db.prepare("DELETE FROM mirror_skips WHERE path = ?").run(key);
   }
 
   let written = 0;

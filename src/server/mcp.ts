@@ -165,9 +165,16 @@ async function handleHttpRequest(
 
   const server = new Server({ name: "ctxd", version: "0.0.1" }, { capabilities: { tools: {} }, instructions: SERVER_INSTRUCTIONS });
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: toolDefinitions() }));
-  server.setRequestHandler(CallToolRequestSchema, async (request) =>
-    handleToolCall(ctx, request.params.name, (request.params.arguments ?? {}) as Record<string, unknown>),
-  );
+  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    try {
+      return await handleToolCall(ctx, request.params.name, (request.params.arguments ?? {}) as Record<string, unknown>);
+    } catch (err) {
+      // The SDK turns a thrown error into a JSON-RPC error carrying its message, so an unexpected failure
+      // is replaced here by a generic one; the detail is logged locally under the request id (#72).
+      const requestId = logInternalError(err);
+      throw new Error(`Internal error (request ${requestId})`);
+    }
+  });
 
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
   // Stateless mode builds one server and transport per request (the SDK's stateless pattern); close both
