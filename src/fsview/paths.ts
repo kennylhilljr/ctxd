@@ -167,7 +167,7 @@ export function parsePath(path: string): ParsedPath {
   const parsed = parseSegments(path, seg);
   if (fragment !== undefined) {
     if (parsed.type !== "journalDay") throw invalid(path, "fragments are only for journal day files");
-    if (!SLUG_RE.test(fragment)) throw invalid(path, "bad slug");
+    if (!isValidSlug(fragment)) throw invalid(path, "bad slug");
     return { ...parsed, slug: fragment };
   }
   return parsed;
@@ -232,7 +232,7 @@ function parseSegments(path: string, seg: string[]): ParsedPath {
   if (isSummary(b)) return { type: "summary", of: { at: "kind", scope, folder: a, kind }, file: b };
   if (!b.endsWith(".md")) throw invalid(path, "entry files are <slug>.md");
   const slug = b.slice(0, -3);
-  if (!SLUG_RE.test(slug)) throw invalid(path, "bad slug");
+  if (!isValidSlug(slug)) throw invalid(path, "bad slug");
   return { type: "entry", scope, folder: a, kind, slug };
 }
 

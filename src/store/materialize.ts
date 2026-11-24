@@ -397,7 +397,7 @@ function applyEventCore(db: Database.Database, e: EventForMaterialize, skipFts: 
     // a replicated create carrying "../" is rejected, not stored (issue 68). Throwing rolls back
     // the whole apply transaction, so the event is never recorded.
     if (!isValidSlug(p.slug)) throw new CtxdError("VALIDATION", `materialize: invalid slug on create for entry ${e.entryId}`);
-    if (p.skill_name != null && !isValidSkillName(p.skill_name)) {
+    if ((p.kind === "skill" || p.skill_name != null) && !isValidSkillName(p.skill_name)) {
       throw new CtxdError("VALIDATION", `materialize: invalid skill name on create for entry ${e.entryId}`);
     }
     db.prepare(

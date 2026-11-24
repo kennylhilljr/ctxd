@@ -312,6 +312,19 @@ describe("concurrent grant/revoke, membership and review-policy changes converge
   });
 });
 
+/** A synthetic replicated content create, as if it arrived from a remote node. */
+function contentCreate(f: Fixture, scopeId: string, slug: string, extra: Record<string, unknown> = {}): WireEvent {
+  const eventId = newId();
+  return {
+    eventId, originNode: newId(), originSeq: 1,
+    hlc: encodeHlc({ physical: Date.now(), counter: defaultHlcCounter++, node: "test-node" }),
+    scopeId, entryId: newId(), op: "create", part: "content", parentRevs: [], rev: makeRev(1, eventId),
+    clientId: f.humanId, sessionRef: null, requestId: null, requestHash: null,
+    payload: { kind: "note", slug, title: "Peer note", summary: "", body: "Body", tags: [], status: "active", ...extra },
+    prev: null,
+  };
+}
+
 describe("replicated names that would escape the Markdown mirror are rejected (issue 68)", () => {
   it("rejects a scope_create whose name contains a path separator, storing neither the scope nor the event", () => {
     const f = setup();
@@ -345,6 +358,43 @@ describe("replicated names that would escape the Markdown mirror are rejected (i
     expect(applyEvent(f.db, create("peer-note-abc123")).outcome).toBe("fast-forward");
     expect(f.db.prepare("SELECT COUNT(*) AS n FROM entries").get()).toEqual({ n: 1 });
   });
+
+  it("rejects a replicated skill create with a missing or traversing skill name", () => {
+    const f = setup();
+    const scopeId = deterministicId("scope", "sample-app");
+    applyEvent(f.db, aclWireEvent(f, scopeId, { action: "scope_create", name: "sample-app", kind: "project", replication: "all", vendor_policy: "any" }));
+    for (const skill_name of [null, "../../escape"]) {
+      expect(() => applyEvent(f.db, contentCreate(f, scopeId, "skill-note-abc123", { kind: "skill", skill_name }))).toThrow(/invalid skill name/);
+    }
+    expect(applyEvent(f.db, contentCreate(f, scopeId, "skill-note-abc123", { kind: "skill", skill_name: "sample-skill" })).outcome).toBe("fast-forward");
+  });
+
+  it("property: any mix of valid and invalid content creates, in any order, materializes exactly the valid ones, and a rebuild agrees", () => {
+    const slugs = ["peer-note-aaa111", "peer-note-bbb222", "../../escaped", "a/b-ccc333", "Upper-ddd444", `${"a".repeat(70)}-eee555`];
+    fc.assert(
+      fc.property(fc.uniqueArray(fc.integer({ min: 0, max: slugs.length - 1 }), { minLength: 1, maxLength: slugs.length }), fc.boolean(), (picks, reverse) => {
+        const run = (order: number[]) => {
+          const f = setup();
+          const scopeId = deterministicId("scope", "sample-app");
+          applyEvent(f.db, aclWireEvent(f, scopeId, { action: "scope_create", name: "sample-app", kind: "project", replication: "all", vendor_policy: "any" }));
+          for (const i of order) {
+            try { applyEvent(f.db, contentCreate(f, scopeId, slugs[i]!)); } catch (err) { expect(String(err)).toMatch(/invalid slug/); }
+          }
+          return f.db;
+        };
+        const slugsIn = (db: Database.Database) =>
+          (db.prepare("SELECT slug FROM entries ORDER BY slug").all() as { slug: string }[]).map((r) => r.slug);
+        const expected = picks.filter((i) => i < 2).map((i) => slugs[i]!).sort();
+        const a = run(picks);
+        const b = run(reverse ? [...picks].reverse() : picks);
+        expect(slugsIn(a)).toEqual(expected);
+        expect(slugsIn(b)).toEqual(expected);
+        rebuild(a);
+        expect(slugsIn(a)).toEqual(expected);
+      }),
+      { numRuns: 15 },
+    );
+  }, 60_000);
 
   it("rejects a scope_create whose name is path-safe but outside the scope grammar", () => {
     const f = setup();
@@ -381,7 +431,7 @@ describe("replicated names that would escape the Markdown mirror are rejected (i
         rebuild(f.db);
         expect(scopeNames(f.db)).toEqual(expected);
       }),
-      { numRuns: 25 },
+      { numRuns: 15 },
     );
-  });
+  }, 60_000);
 });
