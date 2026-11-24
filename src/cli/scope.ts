@@ -15,7 +15,7 @@ import { isValidScopeName } from "../fsview/paths.js";
 
 export function addScope(ctx: WriteContext, name: string, replication: Replication, vendorPolicy: VendorPolicy): number {
   if (!isValidScopeName(name)) {
-    console.error(`ctxd scope: "${name}" is not a valid scope name (lowercase letters, digits, "_", ".", "@" and "-"; must not start with "." or "-").`);
+    console.error(`ctxd scope: "${name}" is not a valid scope name (1 to 100 lowercase letters, digits, "_", ".", "@" and "-"; must not start with "." or "-").`);
     return 1;
   }
   if (ctx.db.prepare("SELECT 1 FROM scopes WHERE name = ?").get(name)) {

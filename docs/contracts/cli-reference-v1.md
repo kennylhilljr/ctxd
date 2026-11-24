@@ -20,7 +20,7 @@ Commands marked human only are refused for agent clients (access evaluation, [LL
 | `ctxd server` | Run the server (used by launchd) |
 | `ctxd stdio --client <name>` | MCP stdio proxy for Desktop |
 | `ctxd hook <event> --client <name>` | Hook entry point |
-| `ctxd scope add <name> [--replication ...] [--vendor-policy ...]` | Manage scopes; `<name>` uses lowercase letters, digits, `_`, `.`, `@` and `-`, and must not start with `.` or `-` |
+| `ctxd scope add <name> [--replication ...] [--vendor-policy ...]` | Manage scopes; `<name>` is 1 to 100 lowercase letters, digits, `_`, `.`, `@` and `-`, and must not start with `.` or `-` |
 | `ctxd client add <name> --vendor <v> [--scopes a,b] [--access read\|write]` / `revoke` | Manage client tokens |
 | `ctxd node add-peer <name> <url>` / `revoke` | Manage peers |
 | `ctxd sync [--peer <name>]` | Pull now |
