@@ -11,10 +11,10 @@ import { bindScope, unbindScope } from "../store/scopeRepos.js";
 import { previewRollback, executeRollback } from "../store/rollback.js";
 import { CtxdError } from "../core/errors.js";
 import type { WriteContext } from "../store/write.js";
-import { SCOPE_RE } from "../fsview/paths.js";
+import { isValidScopeName } from "../fsview/paths.js";
 
 export function addScope(ctx: WriteContext, name: string, replication: Replication, vendorPolicy: VendorPolicy): number {
-  if (!SCOPE_RE.test(name)) {
+  if (!isValidScopeName(name)) {
     console.error(`ctxd scope: "${name}" is not a valid scope name (lowercase letters, digits, "_", ".", "@" and "-"; must not start with "." or "-").`);
     return 1;
   }

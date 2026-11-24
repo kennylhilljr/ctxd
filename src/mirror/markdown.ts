@@ -125,7 +125,8 @@ function relativePath(row: MarkdownRow): string {
 /**
  * Join a mirror-relative path onto the mirror root, refusing any result outside it (issue 68).
  * Defence in depth: scope names and slugs are validated when events materialize, but every
- * filesystem write, rename and unlink in the mirror goes through this check as well.
+ * filesystem write, rename and unlink in the mirror goes through this check as well. A symbolic
+ * link at any existing component below the root is refused too, since it could point outside.
  */
 function insideRoot(root: string, path: string): string {
   const base = resolve(root);
@@ -133,6 +134,13 @@ function insideRoot(root: string, path: string): string {
   const rel = relative(base, target);
   if (rel === "" || rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
     throw new CtxdError("NOT_ALLOWED", `Mirror path escapes the mirror directory: ${path.slice(0, 120)}`);
+  }
+  let current = base;
+  for (const part of rel.split(sep)) {
+    current = join(current, part);
+    let isLink: boolean;
+    try { isLink = lstatSync(current).isSymbolicLink(); } catch { break; } // the rest does not exist yet
+    if (isLink) throw new CtxdError("NOT_ALLOWED", `Symbolic links are not allowed in the mirror: ${path.slice(0, 120)}`);
   }
   return target;
 }

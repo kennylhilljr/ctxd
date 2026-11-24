@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, writeFileSync, existsSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, writeFileSync, existsSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -179,6 +179,28 @@ describe("mirror paths stay inside the mirror directory (issue 68)", () => {
     f.db.prepare("UPDATE entries SET status = 'deleted' WHERE entry_id = ?").run(id);
     f.db.prepare("INSERT INTO mirror_files (path, entry_id, content_rev, file_hash, written_at) VALUES ('../victim.md', ?, 'r', 'h', ?)").run(id, new Date().toISOString());
     expect(() => syncMirror(f.ctx, f.mirror)).toThrow(/escapes the mirror directory/);
+    expect(readFileSync(victim, "utf8")).toBe("keep me\n");
+  });
+
+  it("refuses to write through a symlinked folder inside the output directory", () => {
+    const f = fixture(); createNote(f);
+    const outside = join(f.root, "outside"); mkdirSync(outside);
+    const out = join(f.root, "export");
+    mkdirSync(join(out, "sample-app"), { recursive: true });
+    symlinkSync(outside, join(out, "sample-app", "notes"));
+    expect(() => exportMarkdown(f.db, out)).toThrow(/Symbolic links are not allowed in the mirror/);
+    expect(readdirSync(outside)).toEqual([]);
+  });
+
+  it("refuses to unlink a tracked file through a symlinked folder inside the mirror", () => {
+    const f = fixture(); const { id } = createNote(f) as { id: string }; syncMirror(f.ctx, f.mirror);
+    const state = f.db.prepare("SELECT path FROM mirror_files").get() as { path: string };
+    const outside = join(f.root, "outside"); mkdirSync(outside);
+    const victim = join(outside, state.path.split("/").pop()!); writeFileSync(victim, "keep me\n");
+    rmSync(join(f.mirror, "sample-app", "notes"), { recursive: true });
+    symlinkSync(outside, join(f.mirror, "sample-app", "notes"));
+    f.db.prepare("UPDATE entries SET status = 'deleted' WHERE entry_id = ?").run(id);
+    expect(() => syncMirror(f.ctx, f.mirror)).toThrow(/Symbolic links are not allowed in the mirror/);
     expect(readFileSync(victim, "utf8")).toBe("keep me\n");
   });
 });
