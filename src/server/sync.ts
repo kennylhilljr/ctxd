@@ -169,15 +169,15 @@ async function handleKeyTransferRequest(
  * SQLite or filesystem internals.
  */
 function sendError(res: ServerResponse, err: unknown): void {
-  if (res.headersSent) {
-    res.end();
-    return;
-  }
-  if (err instanceof HttpBodyError) {
+  if (err instanceof HttpBodyError && !res.headersSent) {
     res.writeHead(err.status, { "content-type": "application/json" }).end(JSON.stringify({ error: err.message }));
     return;
   }
   const requestId = logInternalError(err);
+  if (res.headersSent) {
+    res.end();
+    return;
+  }
   res.writeHead(500, { "content-type": "application/json" }).end(JSON.stringify({ error: "internal error", requestId }));
 }
 

@@ -1,4 +1,4 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { createServer, request, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -19,8 +19,12 @@ import { applyServerTimeouts, HttpBodyError, MAX_BODY_BYTES, readJsonBody } from
 const SYNC_PORT = 18430;
 const MCP_PORT = 18431;
 const closers: (() => Promise<void>)[] = [];
+const dbs: Database.Database[] = [];
+const dirs: string[] = [];
 afterEach(async () => {
   for (const close of closers.splice(0)) await close();
+  for (const db of dbs.splice(0)) if (db.open) db.close();
+  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
   vi.restoreAllMocks();
 });
 
@@ -29,7 +33,11 @@ function now(): string {
 }
 
 function freshDb(): Database.Database {
-  return openDatabase(join(mkdtempSync(join(tmpdir(), "ctxd-http-limits-")), "ctxd.db"), { create: true });
+  const dir = mkdtempSync(join(tmpdir(), "ctxd-http-limits-"));
+  dirs.push(dir);
+  const db = openDatabase(join(dir, "ctxd.db"), { create: true });
+  dbs.push(db);
+  return db;
 }
 
 /**

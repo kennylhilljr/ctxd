@@ -55,13 +55,13 @@ export async function startServer(opts: StartServerOptions): Promise<RunningServ
 
   const httpServer = createHttpServer((req, res) => {
     handleHttpRequest(req, res, opts.db, opts.nodeId, clock, opts.configPath, opts.sealedStore).catch((err) => {
+      // Unexpected failure (#72): the detail is logged locally under a request id; the caller gets only the id.
+      const requestId = logInternalError(err);
       if (res.headersSent) {
         res.end();
         return;
       }
-      // Unexpected failure (#72): the detail is logged locally under a request id; the caller gets only the id.
       // The code stays VALIDATION, as before, since the error code set is part of the tool contract (8.5).
-      const requestId = logInternalError(err);
       res.writeHead(500, { "content-type": "application/json" }).end(JSON.stringify({ error: { code: "VALIDATION", message: `Internal error (request ${requestId})`, requestId } }));
     });
   });
