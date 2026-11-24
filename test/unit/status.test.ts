@@ -37,6 +37,7 @@ describe("gatherStatus", () => {
     const info = await gatherStatus(db, config, { cwd: "/tmp/not-a-git-repo-and-not-mapped", fetchImpl: okFetch() });
     expect(info.healthOk).toBe(true);
     expect(info.syncRejected).toBe(0);
+    expect(info.mirrorSkipped).toBe(0);
     expect(info.scope).toBeNull();
     expect(info.briefAvailable).toBe(false);
     expect(info.openClaims).toBe(0);
@@ -153,5 +154,7 @@ describe("formatStatusDetail", () => {
     const info = { healthOk: true, scope: "notes", scopeNotice: null, briefAvailable: true, openClaims: 0, unsynced: 0, peerCount: 1, inboxPending: 0 };
     expect(formatStatusDetail({ ...info, syncRejected: 3 })).toContain("3 rejected (see ctxd doctor)");
     expect(formatStatusDetail({ ...info, syncRejected: 0 })).not.toContain("rejected");
+    expect(formatStatusDetail({ ...info, mirrorSkipped: 2 })).toContain("mirror: 2 file(s) not imported (see ctxd doctor)");
+    expect(formatStatusDetail({ ...info, mirrorSkipped: 0 })).not.toContain("mirror:");
   });
 });

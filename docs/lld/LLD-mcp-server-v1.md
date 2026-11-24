@@ -50,6 +50,15 @@ write comes back held, tell the user it needs their permission; do not retry it 
 
 The server exposes `/internal/*` routes on the MCP listener, authenticated by client token, for the hook CLI and admin CLI: `brief`, `session-event`, `nudge-check`, `checkpoint`, `review`, `rebuild`, `backup`. These are not MCP tools, so they cost agents no tokens.
 
+### 8.3.1 HTTP request limits
+
+Both loopback listeners (MCP and sync, [LLD: Replication](LLD-replication-v2.md) 7.1) share one body reader and one error rule (#72):
+
+- **Body cap:** every route that reads a body refuses one over 4 MiB with `413` (`/v1/notify` ignores its body and never buffers it), from `Content-Length` when the client declares one, otherwise as soon as the streamed body passes the cap; nothing past the cap is kept in memory.
+- **Bad JSON** is `400` on both listeners (the sync listener used to answer `500`).
+- **Timeouts:** headers must arrive within 10 seconds and the whole request within 30 seconds (`headersTimeout`, `requestTimeout`); responses are not limited.
+- **Internal errors:** an unexpected failure is logged locally, through the sanitizer, with a random request id and answered `500` with only that id, never the underlying message, so SQLite or filesystem details do not reach a caller. The same applies inside a tool call: a failure that is not a `CtxdError` becomes a JSON-RPC error reading only `Internal error (request <id>)`. Expected errors (`CtxdError`, auth, validation) keep their specific status and message.
+
 ### 8.4 The `ctxd mcp` launcher
 
 Implements [PRD-pools-access-v3](../prd/components/PRD-pools-access-v3.md) section 6.2. `ctxd mcp --client <id>` is a stdio MCP server that each client starts from its single, user-level MCP entry.

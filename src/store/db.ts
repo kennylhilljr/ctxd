@@ -140,6 +140,15 @@ export function migrateSchema(db: Database.Database): void {
       db.pragma("user_version = 24");
     })();
   }
+  const mirrorSkipVersion = db.pragma("user_version", { simple: true }) as number;
+  if (mirrorSkipVersion === 24 && SCHEMA_VERSION >= 25) {
+    db.transaction(() => {
+      db.exec(`CREATE TABLE IF NOT EXISTS mirror_skips (
+        path_key TEXT PRIMARY KEY, path TEXT NOT NULL, code TEXT NOT NULL, reason TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 1,
+        first_skipped_at TEXT NOT NULL, last_skipped_at TEXT NOT NULL)`);
+      db.pragma("user_version = 25");
+    })();
+  }
   const sequenceVersion = db.pragma("user_version", { simple: true }) as number;
   if (sequenceVersion !== SCHEMA_VERSION) {
     db.close();

@@ -7,7 +7,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprot
 import { assertLoopback } from "../security/policy.js";
 import { expandHome, loadConfig } from "../config/config.js";
 import { isFlagOn, resolveFlags } from "../config/flags.js";
-import { extractBearerToken, parseListen, readJsonBody } from "./http.js";
+import { applyServerTimeouts, extractBearerToken, HttpBodyError, logInternalError, parseListen, readJsonBody } from "./http.js";
 import { toolDefinitions } from "../tools/list.js";
 import { TOOLS } from "../tools/schemas.js";
 import { coerceInput } from "../tools/coerce.js";
@@ -55,10 +55,17 @@ export async function startServer(opts: StartServerOptions): Promise<RunningServ
 
   const httpServer = createHttpServer((req, res) => {
     handleHttpRequest(req, res, opts.db, opts.nodeId, clock, opts.configPath, opts.sealedStore).catch((err) => {
-      if (!res.headersSent) res.writeHead(500, { "content-type": "application/json" });
-      res.end(JSON.stringify({ error: { code: "VALIDATION", message: (err as Error).message } }));
+      // Unexpected failure (#72): the detail is logged locally under a request id; the caller gets only the id.
+      const requestId = logInternalError(err);
+      if (res.headersSent) {
+        res.end();
+        return;
+      }
+      // The code stays VALIDATION, as before, since the error code set is part of the tool contract (8.5).
+      res.writeHead(500, { "content-type": "application/json" }).end(JSON.stringify({ error: { code: "VALIDATION", message: `Internal error (request ${requestId})`, requestId } }));
     });
   });
+  applyServerTimeouts(httpServer);
 
   await new Promise<void>((resolve, reject) => {
     httpServer.once("error", reject);
@@ -150,18 +157,32 @@ async function handleHttpRequest(
   let body: unknown;
   try {
     body = await readJsonBody(req);
-  } catch {
-    res.writeHead(400, { "content-type": "application/json" }).end(JSON.stringify({ error: { code: "VALIDATION", message: "Invalid JSON body" } }));
+  } catch (err) {
+    if (!(err instanceof HttpBodyError)) throw err;
+    res.writeHead(err.status, { "content-type": "application/json" }).end(JSON.stringify({ error: { code: "VALIDATION", message: err.message } }));
     return;
   }
 
   const server = new Server({ name: "ctxd", version: "0.0.1" }, { capabilities: { tools: {} }, instructions: SERVER_INSTRUCTIONS });
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: toolDefinitions() }));
-  server.setRequestHandler(CallToolRequestSchema, async (request) =>
-    handleToolCall(ctx, request.params.name, (request.params.arguments ?? {}) as Record<string, unknown>),
-  );
+  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    try {
+      return await handleToolCall(ctx, request.params.name, (request.params.arguments ?? {}) as Record<string, unknown>);
+    } catch (err) {
+      // The SDK turns a thrown error into a JSON-RPC error carrying its message, so an unexpected failure
+      // is replaced here by a generic one; the detail is logged locally under the request id (#72).
+      const requestId = logInternalError(err);
+      throw new Error(`Internal error (request ${requestId})`);
+    }
+  });
 
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+  // Stateless mode builds one server and transport per request (the SDK's stateless pattern); close both
+  // when the response closes, whatever the outcome, so neither outlives its request (#72).
+  res.on("close", () => {
+    void transport.close();
+    void server.close();
+  });
   await server.connect(transport);
   await transport.handleRequest(req, res, body);
 }

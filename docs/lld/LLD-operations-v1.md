@@ -44,6 +44,7 @@ Section numbers are the Spec's own (for example 9.1), unchanged from Spec v9, so
   - review rules that are broader than allowed (should never occur);
   - peer reachability and last sync age: each peer's real age from `peers.last_synced_at` (a peer that never synced uses its `created_at`), with a warning past `sync.stale_hours` (default 24) (W3);
   - rejected replicated events: fails while `sync_rejections` holds any row, naming each peer, its count, the last rejection time and the latest reason (#74, replication 7.1);
+  - skipped mirror files: fails while `mirror_skips` holds any row, naming up to ten paths with their error code, reason and last attempt (#72, 12.1);
   - FileVault status;
   - hook installation per client;
   - backup age: the newest `*.db.age` file's modification time in `backups/`, warning past 36 hours; it fails when no backup exists yet, and is informational when `backups` is off (W4).
@@ -89,7 +90,7 @@ links: ["[[supersedes::ctxd:ctxd/01JAB...]]"]
   - **Unchanged hash:** ignore, so ctxd's own writes do not loop.
   - **Edited file:** compare the frontmatter `rev` with the current content revision. If it matches, apply the edit as a human-client update through the write path (6). If not, write `<name>.conflict.md` beside the file with my version and add a review item; nothing is applied.
   - **Changed frontmatter fields:** only `status` (as a review action) and `review_after` are honored; edits to `ref`, `kind`, `rev`, `by` and `updated` are ignored and restored on the next write.
-  - **New file with frontmatter `kind` in a kind folder:** creates an entry in that scope.
+  - **New file with frontmatter `kind` in a kind folder:** creates an entry in that scope. A new file that cannot be imported (a sealed scope refuses mirror writes, an unknown kind, a partial save) stays in place and is retried every cycle; its path, error code and reason are recorded in `mirror_skips` so `ctxd status` and `ctxd doctor` show why it never arrived, and the record is cleared once the file imports or is removed (#72).
   - **Deleted file:** opens an archive request in `ctxd review`; the file is restored until I confirm.
   - **Immutable kinds:** body edits are refused with a `.conflict.md` that explains how to supersede.
 - **Import.** `ctxd import <dir> --scope <name>` reads Markdown files with optional frontmatter (`kind`, `title`, `tags`); files without a kind become `note`. Everything is passed through the 6.1 pipeline in agent mode and arrives `proposed`, as the client `import`, for review. A dry run (`--dry-run`) prints what would be created.

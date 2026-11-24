@@ -47,8 +47,10 @@
  * instead of "not tracked yet."
  * Bumped to 24: `sync_rejections` records replicated events a pull refused to apply, so one bad
  * event no longer stalls replication from that peer; each is retried on later pulls (LLD 7.1).
+ * Bumped to 25: `mirror_skips` records new Markdown mirror files that could not be imported (a
+ * sealed scope, an invalid file), so `ctxd status` and `ctxd doctor` can say why (#72, LLD 12.1).
  */
-export const SCHEMA_VERSION = 24;
+export const SCHEMA_VERSION = 25;
 
 export const SCHEMA_SQL = `
 CREATE TABLE nodes (
@@ -392,6 +394,16 @@ CREATE TABLE archive_requests (
   entry_id     TEXT PRIMARY KEY,
   path         TEXT NOT NULL,
   created_at   TEXT NOT NULL
+);
+
+CREATE TABLE mirror_skips (            -- local only: new mirror files that could not be imported, retried every cycle (12.1)
+  path_key         TEXT PRIMARY KEY,   -- SHA-256 of the raw path relative to the mirror directory
+  path             TEXT NOT NULL,      -- that path for display, sanitized and with secrets redacted
+  code             TEXT NOT NULL,      -- a ctxd error code, or INVALID_FILE
+  reason           TEXT NOT NULL,
+  attempts         INTEGER NOT NULL DEFAULT 1,
+  first_skipped_at TEXT NOT NULL,
+  last_skipped_at  TEXT NOT NULL
 );
 
 CREATE TABLE tool_metrics (            -- local only: response metering (8.5)

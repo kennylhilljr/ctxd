@@ -7,6 +7,7 @@ import { newId } from "../../src/core/ids.js";
 import { openDatabase } from "../../src/store/db.js";
 import { writeEntry, type WriteContext } from "../../src/store/write.js";
 import { confirmArchiveRequest, exportMarkdown, importMarkdown, parseMarkdown, syncMirror } from "../../src/mirror/markdown.js";
+import { checkMirrorSkips } from "../../src/cli/doctor.js";
 
 const scratch: string[] = [];
 afterEach(() => { for (const dir of scratch.splice(0)) rmSync(dir, { recursive: true, force: true }); });
@@ -107,6 +108,85 @@ describe("Markdown export and mirror (Spec v9 section 12.1)", () => {
     expect(f.db.prepare("SELECT title, body FROM entries").get()).toEqual({ title: "New mirror note", body: "Created in an editor" });
     expect(syncMirror(f.ctx, f.mirror).applied).toBe(0);
     expect((f.db.prepare("SELECT COUNT(*) AS n FROM entries").get() as { n: number }).n).toBe(1);
+  });
+
+  it("records a new file refused for a sealed scope in mirror_skips instead of dropping it silently (#72)", () => {
+    const f = fixture();
+    const poolId = newId();
+    const scopeId = (f.db.prepare("SELECT scope_id FROM scopes WHERE name = 'sample-app'").get() as { scope_id: string }).scope_id;
+    f.db.prepare("INSERT INTO pools (pool_id, name, storage, sealed_file, created_at) VALUES (?, 'pool-private', 'sealed', ?, ?)").run(poolId, `sealed/${poolId}.db`, new Date().toISOString());
+    f.db.prepare("INSERT INTO pool_grants (pool_id, scope_id, level) VALUES (?, ?, 'write')").run(poolId, scopeId);
+    const dir = join(f.mirror, "sample-app", "notes");
+    mkdirSync(dir, { recursive: true });
+    const file = join(dir, "new-note.md");
+    writeFileSync(file, "---\nkind: \"note\"\n---\n# Sealed note\n\nBody\n");
+
+    expect(syncMirror(f.ctx, f.mirror).applied).toBe(0);
+    expect(f.db.prepare("SELECT path, code, attempts FROM mirror_skips").all()).toEqual([{ path: join("sample-app", "notes", "new-note.md"), code: "SCOPE_FORBIDDEN", attempts: 1 }]);
+    syncMirror(f.ctx, f.mirror);
+    expect(f.db.prepare("SELECT attempts FROM mirror_skips").get()).toEqual({ attempts: 2 });
+    expect(checkMirrorSkips(f.db)).toMatchObject({ ok: false, detail: expect.stringMatching(/1 file\(s\) not imported: .*new-note\.md: SCOPE_FORBIDDEN/) });
+    expect(existsSync(file)).toBe(true);
+
+    rmSync(file);
+    syncMirror(f.ctx, f.mirror);
+    expect((f.db.prepare("SELECT COUNT(*) AS n FROM mirror_skips").get() as { n: number }).n).toBe(0);
+    expect(checkMirrorSkips(f.db)).toMatchObject({ ok: true });
+  });
+
+  it("sanitizes a skipped file's name in ctxd doctor, on one line (#72, TS-AC-2)", () => {
+    const f = fixture();
+    const token = "ghp_" + "a".repeat(36);
+    f.db.prepare("INSERT INTO mirror_skips (path_key, path, code, reason, first_skipped_at, last_skipped_at) VALUES ('k', ?, 'INVALID_FILE', ?, 't', 't')").run(`sample-app/notes/${token}\nok: fake.md`, "a\u2028b");
+    const detail = checkMirrorSkips(f.db).detail;
+    expect(detail).not.toContain(token);
+    expect(detail).not.toMatch(/[\r\n\u2028\u2029]/);
+  });
+
+  it("never stores a secret from a skipped file's name (#72, TS-AC-2)", () => {
+    const f = fixture();
+    const token = "ghp_" + "b".repeat(36);
+    const dir = join(f.mirror, "sample-app", "notes");
+    mkdirSync(dir, { recursive: true });
+    const file = join(dir, `${token}.md`);
+    writeFileSync(file, "---\nkind: \"not-a-kind\"\n---\nBody\n");
+    syncMirror(f.ctx, f.mirror);
+    const rows = f.db.prepare("SELECT path, reason FROM mirror_skips").all() as { path: string; reason: string }[];
+    expect(rows).toHaveLength(1);
+    expect(JSON.stringify(rows)).not.toContain(token);
+    syncMirror(f.ctx, f.mirror);
+    expect(f.db.prepare("SELECT attempts FROM mirror_skips").get()).toEqual({ attempts: 2 }); // same row, matched by the path hash
+    rmSync(file);
+    syncMirror(f.ctx, f.mirror);
+    expect((f.db.prepare("SELECT COUNT(*) AS n FROM mirror_skips").get() as { n: number }).n).toBe(0);
+  });
+
+  it("keeps one skip row per file even when their redacted names collide (#72)", () => {
+    const f = fixture();
+    const dir = join(f.mirror, "sample-app", "notes");
+    mkdirSync(dir, { recursive: true });
+    const a = join(dir, `${"ghp_" + "c".repeat(36)}.md`);
+    const b = join(dir, `${"ghp_" + "d".repeat(36)}.md`);
+    writeFileSync(a, "---\nkind: \"not-a-kind\"\n---\nBody\n");
+    writeFileSync(b, "---\nkind: \"not-a-kind\"\n---\nBody\n");
+    syncMirror(f.ctx, f.mirror);
+    expect((f.db.prepare("SELECT COUNT(*) AS n FROM mirror_skips").get() as { n: number }).n).toBe(2);
+    rmSync(a);
+    syncMirror(f.ctx, f.mirror);
+    expect((f.db.prepare("SELECT COUNT(*) AS n FROM mirror_skips").get() as { n: number }).n).toBe(1);
+  });
+
+  it("clears a skip once the file imports (#72)", () => {
+    const f = fixture();
+    const dir = join(f.mirror, "sample-app", "notes");
+    mkdirSync(dir, { recursive: true });
+    const file = join(dir, "new-note.md");
+    writeFileSync(file, "---\nkind: \"not-a-kind\"\n---\n# Bad kind\n\nBody\n");
+    syncMirror(f.ctx, f.mirror);
+    expect(f.db.prepare("SELECT code FROM mirror_skips").get()).toEqual({ code: "INVALID_FILE" });
+    writeFileSync(file, "---\nkind: \"note\"\n---\n# Good kind\n\nBody\n");
+    expect(syncMirror(f.ctx, f.mirror).applied).toBe(1);
+    expect((f.db.prepare("SELECT COUNT(*) AS n FROM mirror_skips").get() as { n: number }).n).toBe(0);
   });
 
   it("never exports or mirrors plaintext from a sealed scope", () => {

@@ -18,7 +18,7 @@ import { applyEvent } from "../store/materialize.js";
 import { signStoredEvent } from "../security/event-signatures.js";
 import { setEntryStatus } from "../store/tidy.js";
 import { isFlagOn } from "../config/flags.js";
-import { detectSecrets, sanitize } from "../security/redact.js";
+import { detectSecrets, sanitize, sanitizeCapture } from "../security/redact.js";
 
 interface MarkdownRow extends EntryRow {
   scope_name: string;
@@ -182,6 +182,28 @@ function recordConflict(db: Database.Database, dir: string, path: string, row: M
   ).run(path, row.entry_id, fileRev ?? null, row.content_rev, reason, nowIso());
 }
 
+/**
+ * A file name is user text and may hold a secret (a rejected title falls back to it), so `mirror_skips`
+ * never stores the raw path (TS-AC-2): rows are keyed by its SHA-256 and display a sanitized, redacted copy.
+ */
+function skipKey(path: string): string {
+  return hash(path);
+}
+
+function recordSkip(db: Database.Database, path: string, err: unknown): void {
+  const code = err instanceof CtxdError ? err.code : "INVALID_FILE";
+  const reason = sanitizeCapture(err instanceof Error ? err.message : String(err), 500);
+  const at = nowIso();
+  db.prepare(
+    `INSERT INTO mirror_skips (path_key, path, code, reason, attempts, first_skipped_at, last_skipped_at) VALUES (?, ?, ?, ?, 1, ?, ?)
+     ON CONFLICT(path_key) DO UPDATE SET path = excluded.path, code = excluded.code, reason = excluded.reason, attempts = attempts + 1, last_skipped_at = excluded.last_skipped_at`,
+  ).run(skipKey(path), sanitizeCapture(path, 1000), code, reason, at, at);
+}
+
+function clearSkip(db: Database.Database, path: string): void {
+  db.prepare("DELETE FROM mirror_skips WHERE path_key = ?").run(skipKey(path));
+}
+
 function setReviewAfter(ctx: WriteContext, row: MarkdownRow, value: string | null): void {
   const current = ctx.db.prepare("SELECT status_rev, review_after FROM entries WHERE entry_id = ?").get(row.entry_id) as { status_rev: string; review_after: string | null };
   const eventId = newId();
@@ -264,12 +286,17 @@ export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: num
     applied++;
   }
 
+  const untracked = new Set<string>();
   for (const file of walkMarkdown(mirrorDir)) {
     const path = relative(resolve(mirrorDir), file);
     if (trackedPaths.has(path)) continue;
+    untracked.add(skipKey(path));
     try {
       const parsed = parseMarkdown(readFileSync(file, "utf8"), path.replace(/\.md$/, "").split(/[\\/]/).pop() ?? "New note");
-      if (parsed.meta.ref) continue;
+      if (parsed.meta.ref) {
+        clearSkip(db, path);
+        continue;
+      }
       const [scope] = path.split(/[\\/]/);
       if (!scope) continue;
       const sealed = db.prepare(
@@ -290,9 +317,16 @@ export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: num
         }
         applied++;
       }
-    } catch {
-      // A partial or invalid editor save is left in place for the next polling cycle.
+      clearSkip(db, path);
+    } catch (err) {
+      // The file is left in place and retried next cycle (a partial editor save heals on its own), but
+      // the refusal is recorded so `ctxd status` and `ctxd doctor` can say why the note never imported (#72).
+      recordSkip(db, path, err);
     }
+  }
+  // A skipped file that was removed, or has since been imported, is no longer skipped.
+  for (const { path_key: key } of db.prepare("SELECT path_key FROM mirror_skips").all() as { path_key: string }[]) {
+    if (!untracked.has(key)) db.prepare("DELETE FROM mirror_skips WHERE path_key = ?").run(key);
   }
 
   let written = 0;
