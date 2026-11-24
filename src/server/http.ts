@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { IncomingMessage, Server } from "node:http";
+import { sanitizeCapture } from "../security/redact.js";
 
 /** Shared by every loopback HTTP listener (MCP on 7411, sync on 7412): one body reader, one bearer-token rule, one "host:port" parse. */
 
@@ -73,7 +74,9 @@ export function applyServerTimeouts(server: Server): void {
  */
 export function logInternalError(err: unknown): string {
   const requestId = randomUUID();
-  console.error(`ctxd server: internal error ${requestId}: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`);
+  // Through the sanitizer like every other log line (TS-9): an error message can quote content or a credential.
+  const detail = sanitizeCapture(err instanceof Error ? (err.stack ?? err.message) : String(err), 4000);
+  console.error(`ctxd server: internal error ${requestId}: ${detail}`);
   return requestId;
 }
 

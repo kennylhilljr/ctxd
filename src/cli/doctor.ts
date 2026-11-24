@@ -17,6 +17,7 @@ import { resolveConfigPath, resolveDataDir, tokensDir } from "./common.js";
 import { type CtxdConfig, loadConfig } from "../config/config.js";
 import { isFlagOn, resolveFlags } from "../config/flags.js";
 import { checkDatabaseIntegrity, openDatabase } from "../store/db.js";
+import { sanitizeCapture } from "../security/redact.js";
 import { isModelCached, modelCacheDir } from "../embed/model.js";
 import { peerSyncAges } from "../sync/freshness.js";
 import {
@@ -214,7 +215,8 @@ export function checkSyncRejections(db: Database.Database): DoctorCheck {
 export function checkMirrorSkips(db: Database.Database): DoctorCheck {
   const rows = db.prepare("SELECT path, code, reason, last_skipped_at FROM mirror_skips ORDER BY path").all() as { path: string; code: string; reason: string; last_skipped_at: string }[];
   if (rows.length === 0) return { name: "mirror skips", ok: true, detail: "no skipped mirror files" };
-  const shown = rows.slice(0, 10).map((r) => `${r.path}: ${r.code} (${r.reason}; last ${r.last_skipped_at})`);
+  // A file name is user text: sanitized on the way out like the stored reason (TS-9).
+  const shown = rows.slice(0, 10).map((r) => `${sanitizeCapture(r.path, 200)}: ${r.code} (${r.reason}; last ${r.last_skipped_at})`);
   if (rows.length > shown.length) shown.push(`and ${rows.length - shown.length} more`);
   return { name: "mirror skips", ok: false, detail: `${rows.length} file(s) not imported: ${shown.join(", ")}` };
 }

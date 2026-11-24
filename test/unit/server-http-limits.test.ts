@@ -9,7 +9,7 @@ import { newId } from "../../src/core/ids.js";
 import { openDatabase } from "../../src/store/db.js";
 import { startSyncServer } from "../../src/server/sync.js";
 import { startServer } from "../../src/server/mcp.js";
-import { applyServerTimeouts, HttpBodyError, MAX_BODY_BYTES, readJsonBody } from "../../src/server/http.js";
+import { applyServerTimeouts, HttpBodyError, logInternalError, MAX_BODY_BYTES, readJsonBody } from "../../src/server/http.js";
 
 /**
  * #72: both loopback listeners cap the request body (413), answer bad JSON with 400, and never put
@@ -204,6 +204,15 @@ describe("readJsonBody and server timeouts (#72)", () => {
       });
       expect(status).toBe(413);
     });
+  });
+
+  it("logs an internal error through the secret redactor (TS-9)", () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const token = "ghp_" + "a".repeat(36);
+    const id = logInternalError(new Error(`failed with ${token}`));
+    const line = logged.mock.calls[0]![0] as string;
+    expect(line).toContain(id);
+    expect(line).not.toContain(token);
   });
 
   it("sets header and request timeouts", () => {
