@@ -9,7 +9,7 @@ import { purgeEntry } from "../../src/store/purge.js";
 import { writeEntry, type WriteContext } from "../../src/store/write.js";
 import { pinPublicKey } from "../../src/security/event-signatures.js";
 import { toWireEvent, type EventRow, type WireEvent } from "../../src/sync/apply.js";
-import { isEnvironmentalFailure, MAX_KEPT_REJECTIONS, pullFromPeer } from "../../src/sync/pull.js";
+import { isEnvironmentalFailure, pullFromPeer } from "../../src/sync/pull.js";
 import { checkSyncRejections } from "../../src/cli/doctor.js";
 
 /**
@@ -118,8 +118,7 @@ describe("rejected replicated events (#74)", () => {
     expect(outcome).toMatchObject({ pulled: 2, rejected: 1 });
     expect(stored(target, first!.eventId) && stored(target, third!.eventId)).toBe(true);
     expect(stored(target, second!.eventId)).toBe(false);
-    // A tampered event fails the same way forever, so nothing it carried is kept.
-    expect(rejections(target)).toEqual([{ event_id: second!.eventId, attempts: 1, raw: null, reason: expect.stringMatching(/Payload hash mismatch/) }]);
+    expect(rejections(target)).toEqual([{ event_id: second!.eventId, attempts: 1, raw: expect.any(String), reason: expect.stringMatching(/Payload hash mismatch/) }]);
     expect(throughSeq(target, hub.nodeId)).toBe(third!.originSeq);
     expect(checkSyncRejections(target.db)).toMatchObject({ ok: false, detail: expect.stringMatching(/hub: 1 rejected.*Payload hash mismatch/) });
   });
@@ -131,8 +130,8 @@ describe("rejected replicated events (#74)", () => {
     const peerId = addPeer(target.db, hub.nodeId, bad.publicKey!);
 
     await pull(target, peerId, [bad]);
-    await expect(pull(target, peerId, [bad])).resolves.toMatchObject({ rejected: 1 });
-    expect(rejections(target)).toEqual([expect.objectContaining({ event_id: bad.eventId, attempts: 2 })]);
+    await expect(pull(target, peerId, [bad])).resolves.toMatchObject({ rejected: 2 }); // the retry, then the page
+    expect(rejections(target)).toEqual([expect.objectContaining({ event_id: bad.eventId, attempts: 3 })]);
   });
 
   it("retries a rejected event on later pulls and applies it once it can (a relayed origin pinned late)", async () => {
@@ -177,18 +176,6 @@ describe("rejected replicated events (#74)", () => {
     // Retried on the next pull (still undecryptable here), not dropped.
     await expect(pull(target, peerId, [])).resolves.toMatchObject({ rejected: 1 });
     expect(rejections(target)[0]!.attempts).toBe(2);
-  });
-
-  it(`keeps at most ${MAX_KEPT_REJECTIONS} items per peer for retry`, async () => {
-    const hub = node("hub");
-    const target = node("target");
-    const peerId = addPeer(target.db, hub.nodeId, wroteNote(hub, true).publicKey!);
-    const insert = target.db.prepare("INSERT INTO sync_rejections (peer_node, event_id, raw, reason, first_rejected_at, last_rejected_at) VALUES ('hub', ?, 'null', 'r', 't', 't')");
-    for (let i = 0; i < MAX_KEPT_REJECTIONS; i++) insert.run(`filler-${String(i).padStart(4, "0")}`);
-    const relayed = wroteNote(node("other"), true);
-
-    await pull(target, peerId, [relayed]);
-    expect(target.db.prepare("SELECT raw FROM sync_rejections WHERE event_id = ?").get(relayed.eventId)).toEqual({ raw: null });
   });
 
   it("a purge applied by a pull deletes the rejection rows for its entry", async () => {
@@ -239,6 +226,19 @@ describe("rejected replicated events (#74)", () => {
     target.db.prepare = realPrepare;
     expect(throughSeq(target, hub.nodeId)).toBeUndefined();
     expect(rejections(target)).toEqual([]);
+  });
+
+  it("does not keep an item for an entry already purged here", async () => {
+    const hub = node("hub");
+    const target = node("target");
+    const peerId = addPeer(target.db, hub.nodeId, wroteNote(hub, true).publicKey!);
+    const local = writeEntry(ctx(target, false), { scope: "sample-app", kind: "note", title: "Local", body: "Body text", request_id: newId() });
+    const entryId = (target.db.prepare("SELECT entry_id FROM entries LIMIT 1").get() as { entry_id: string }).entry_id;
+    purgeEntry(ctx(target, false), local.ref, "Leaked a credential.");
+    const forged = { ...wroteNote(hub, true, "Late edit"), entryId, payload: { body: "Leaked again" } };
+
+    await expect(pull(target, peerId, [forged])).resolves.toMatchObject({ rejected: 1 });
+    expect(rejections(target)).toEqual([expect.objectContaining({ event_id: forged.eventId, raw: null })]);
   });
 
   it("purging an entry deletes its rejection rows, so a stored payload never outlives the purge", () => {

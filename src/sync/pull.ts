@@ -117,9 +117,6 @@ export function isEnvironmentalFailure(err: unknown): boolean {
   return typeof code === "string" && code.startsWith("SQLITE_") && !code.startsWith("SQLITE_CONSTRAINT");
 }
 
-/** Most refused items kept for retry per peer, so a misbehaving peer cannot grow `sync_rejections` without bound. */
-export const MAX_KEPT_REJECTIONS = 1000;
-
 /**
  * Pull from one peer until `more` is false (Spec 7.1's puller loop), applying each event
  * idempotently and persisting `through` into `sync_state` after every page (not just at the
@@ -165,7 +162,7 @@ export async function pullFromPeer(
       return true;
     } catch (err) {
       if (isEnvironmentalFailure(err)) throw err;
-      recordRejection(db, peer.name, incoming, event, err, sealedStore !== undefined);
+      recordRejection(db, peer.name, incoming, event, err);
       tally.rejected++;
       return false;
     }
@@ -233,38 +230,23 @@ function applyDecoded(
 }
 
 /**
- * Upsert one refused item into `sync_rejections` (#74). The item as received is kept for retry
- * only when the failure can heal on its own: a sealed item that couldn't be decrypted or routed
- * yet (kept as its ciphertext envelope), or a signed event whose origin key isn't pinned yet. Any
- * other refusal is permanent, since the event is immutable and would fail the same way again, so
- * nothing the node refused to store is kept. Never kept for an already-purged entry, or past
- * MAX_KEPT_REJECTIONS per peer.
+ * Upsert one refused item into `sync_rejections` (#74). The item is kept exactly as received (a
+ * sealed item stays its ciphertext envelope) so every later pull can retry it: failures that heal
+ * on their own (an origin key pinned later, a sealed pool key or store that arrives later) must not
+ * lose the event once the watermark has moved past it. Not kept when its entry is already purged
+ * here, so a stored payload never outlives a purge.
  */
-function recordRejection(
-  db: Database.Database,
-  peerName: string,
-  incoming: IncomingItem,
-  event: WireEvent | undefined,
-  err: unknown,
-  hasSealedRouter: boolean,
-): void {
+function recordRejection(db: Database.Database, peerName: string, incoming: IncomingItem, event: WireEvent | undefined, err: unknown): void {
   // The item is untrusted and may be malformed anywhere, so every field is type-checked before use.
   const raw = JSON.stringify(incoming) ?? "null";
   const field = (value: unknown, key: string): unknown => (value != null && typeof value === "object" ? (value as Record<string, unknown>)[key] : undefined);
   const text = (value: unknown): string | null => (typeof value === "string" ? value : null);
   const seq = field(event, "originSeq");
-  const originNode = text(field(event, "originNode"));
   const entryId = text(field(event, "entryId"));
   const eventId = text(field(event, "eventId")) ?? text(field(incoming, "event_id")) ?? text(field(incoming, "eventId")) ??
     `sha256:${createHash("sha256").update(raw).digest("hex")}`;
-  const sealed = isSealedItem(incoming);
-  const awaitingOriginKey = originNode != null && field(event, "signature") != null &&
-    db.prepare("SELECT 1 FROM node_keys WHERE node_id = ?").get(originNode) === undefined;
-  const healable = (sealed && (event === undefined || !hasSealedRouter)) || awaitingOriginKey;
   const purged = entryId != null &&
     (db.prepare("SELECT purged_at FROM entries WHERE entry_id = ?").get(entryId) as { purged_at: string | null } | undefined)?.purged_at != null;
-  const kept = (db.prepare("SELECT COUNT(*) AS n FROM sync_rejections WHERE peer_node = ? AND raw IS NOT NULL AND event_id != ?").get(peerName, eventId) as { n: number }).n;
-  const keep = healable && !purged && kept < MAX_KEPT_REJECTIONS;
   const reason = (err instanceof Error ? err.message : String(err)).slice(0, 500);
   const now = nowIso();
   db.prepare(
@@ -274,7 +256,7 @@ function recordRejection(
        last_rejected_at = excluded.last_rejected_at, raw = excluded.raw,
        origin_node = COALESCE(excluded.origin_node, origin_node), origin_seq = COALESCE(excluded.origin_seq, origin_seq),
        entry_id = COALESCE(excluded.entry_id, entry_id)`,
-  ).run(peerName, eventId, originNode, Number.isInteger(seq) ? seq : null, entryId, keep ? raw : null, reason, now, now);
+  ).run(peerName, eventId, text(field(event, "originNode")), Number.isInteger(seq) ? seq : null, entryId, purged ? null : raw, reason, now, now);
 }
 
 /**
