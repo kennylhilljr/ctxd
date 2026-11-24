@@ -2,6 +2,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { parse, stringify } from "smol-toml";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import Database from "better-sqlite3";
@@ -18,8 +19,11 @@ const REPO_ROOT = join(import.meta.dirname, "..", "..");
 const MCP_PORT = 18411;
 const SYNC_PORT = 18412;
 // Outgoing peer tokens live in the keychain; real subprocesses cannot take an injected fake, so they
-// use the file-backed test keychain (src/access/keychain.ts), never the developer's real one.
-const KEYCHAIN_ENV = { VITEST: "true", CTXD_TEST_KEYCHAIN_DIR: mkdtempSync(join(tmpdir(), "ctxd-sync-keychain-")) };
+// use a file-backed test keychain preloaded into each one, never the developer's real Keychain.
+const KEYCHAIN_ENV = {
+  CTXD_TEST_KEYCHAIN_DIR: mkdtempSync(join(tmpdir(), "ctxd-sync-keychain-")),
+  NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --import ${pathToFileURL(join(REPO_ROOT, "test", "fixtures", "test-keychain.mjs")).href}`.trim(),
+};
 
 interface Node {
   name: string;

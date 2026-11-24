@@ -78,6 +78,8 @@ export function migratePeerOutgoingTokens(db: Database.Database, opts: KeychainO
     db.pragma(`secure_delete = ${secureDelete}`);
   }
   // Flush the rewritten pages into the main file and empty the WAL, so neither keeps the old bytes.
+  // If a reader blocks it (busy), nothing is lost: the new page images are already zeroed by
+  // secure_delete, and SQLite's automatic checkpoint copies them over the old pages later.
   if (result.migrated > 0) db.pragma("wal_checkpoint(TRUNCATE)");
   return result;
 }
