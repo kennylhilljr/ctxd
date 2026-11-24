@@ -30,6 +30,8 @@ import { decryptSealed, encryptSealed, type CiphertextEnvelope } from "./crypto.
 import { type EncryptionKeyPair, deriveConfirmationCode, deriveTransferWrapKey, pinEncryptionPrekey, signEncryptionPrekey, verifyEncryptionPrekey } from "./encryptionKeys.js";
 
 const TRANSFER_TTL_MINUTES = 10;
+/** Unexpired pending transfers one peer may hold at once on the source, so an authenticated peer cannot fill the table. */
+export const MAX_PENDING_TRANSFERS_PER_PEER = 5;
 
 export interface SignedPrekey {
   nodeId: string;
@@ -51,7 +53,10 @@ export interface TransferRequestResult {
   sourcePrekey: SignedPrekey;
 }
 
-/** Source side: verifies the requester's presented prekey against its already-pinned identity, refusing a revoked or unknown node outright, then records a pending transfer. */
+/**
+ * Source side: verifies the requester's presented prekey against its already-pinned identity, refusing a revoked or unknown node outright, then records a pending transfer.
+ * `callerNodeId` is the node the sync listener authenticated (the peer token's `remote_node_id`); the prekey must be that node's own, so a peer cannot replay another node's signed prekey to open transfers in its name.
+ */
 export function requestKeyTransfer(
   db: Database.Database,
   poolId: string,
@@ -59,7 +64,9 @@ export function requestKeyTransfer(
   sourceNodeId: string,
   sourceSigningPrivateKey: KeyObject,
   sourceEncKeyPair: EncryptionKeyPair,
+  callerNodeId: string,
 ): TransferRequestResult {
+  if (requesterPrekey.nodeId !== callerNodeId) throw new CtxdError("UNAUTHORIZED", "Requester prekey does not belong to the authenticated peer");
   const requesterSigningKey = trustedPeerSigningKey(db, requesterPrekey.nodeId);
   verifyEncryptionPrekey(requesterPrekey.nodeId, requesterPrekey.publicKey, requesterPrekey.signature, requesterSigningKey);
   pinEncryptionPrekey(db, requesterPrekey.nodeId, requesterPrekey.publicKey, requesterPrekey.signature);
@@ -70,9 +77,17 @@ export function requestKeyTransfer(
   const transferId = newId();
   const now = nowIso();
   const expiresAt = new Date(Date.now() + TRANSFER_TTL_MINUTES * 60_000).toISOString();
-  db.prepare(
-    "INSERT INTO sealed_key_transfers (transfer_id, pool_id, requester_node_id, source_node_id, status, created_at, expires_at) VALUES (?, ?, ?, ?, 'pending', ?, ?)",
-  ).run(transferId, poolId, requesterPrekey.nodeId, sourceNodeId, now, expiresAt);
+  db.transaction(() => {
+    // Expired pending requests can never be approved; drop them so they do not count against the cap or accumulate.
+    db.prepare("DELETE FROM sealed_key_transfers WHERE status = 'pending' AND expires_at < ?").run(now);
+    const { pending } = db.prepare("SELECT COUNT(*) AS pending FROM sealed_key_transfers WHERE requester_node_id = ? AND status = 'pending'").get(callerNodeId) as { pending: number };
+    if (pending >= MAX_PENDING_TRANSFERS_PER_PEER) {
+      throw new CtxdError("BUDGET_EXCEEDED", `Node ${callerNodeId} already has ${pending} pending key transfers; approve or wait for them to expire`);
+    }
+    db.prepare(
+      "INSERT INTO sealed_key_transfers (transfer_id, pool_id, requester_node_id, source_node_id, status, created_at, expires_at) VALUES (?, ?, ?, ?, 'pending', ?, ?)",
+    ).run(transferId, poolId, callerNodeId, sourceNodeId, now, expiresAt);
+  })();
 
   const sourcePrekey = signEncryptionPrekey(sourceNodeId, sourceEncKeyPair, sourceSigningPrivateKey);
   return { transferId, sourcePrekey: { nodeId: sourceNodeId, ...sourcePrekey } };
@@ -110,13 +125,16 @@ export function approveKeyTransfer(db: Database.Database, transferId: string, so
   return { confirmationCode: deriveConfirmationCode(sourceEncKeyPair.privateKey, requesterPrekey.public_key) };
 }
 
-/** Source side: the one-time-use fetch. Refuses before approval and on any second call (replay protection), each with its own specific error. */
-export function fetchWrappedKey(db: Database.Database, transferId: string): CiphertextEnvelope {
+/**
+ * Source side: the one-time-use fetch. Refuses before approval and on any second call (replay protection), each with its own specific error.
+ * Only the transfer's own requester (`callerNodeId`, the authenticated peer's node) may fetch it; any other caller gets the same NOT_FOUND as an unknown id and consumes nothing.
+ */
+export function fetchWrappedKey(db: Database.Database, transferId: string, callerNodeId: string): CiphertextEnvelope {
   return db.transaction(() => {
-    const row = db.prepare("SELECT status, wrapped_key, fetched_at FROM sealed_key_transfers WHERE transfer_id = ?").get(transferId) as
-      | { status: string; wrapped_key: string | null; fetched_at: string | null }
+    const row = db.prepare("SELECT requester_node_id, status, wrapped_key, fetched_at FROM sealed_key_transfers WHERE transfer_id = ?").get(transferId) as
+      | { requester_node_id: string; status: string; wrapped_key: string | null; fetched_at: string | null }
       | undefined;
-    if (!row) throw new CtxdError("NOT_FOUND", `No such key transfer: ${transferId}`, {}, "transferId");
+    if (!row || row.requester_node_id !== callerNodeId) throw new CtxdError("NOT_FOUND", `No such key transfer: ${transferId}`, {}, "transferId");
     if (row.fetched_at !== null) throw new CtxdError("VALIDATION", `Key transfer ${transferId} was already fetched`, {}, "transferId");
     if (row.status !== "approved" || !row.wrapped_key) throw new CtxdError("NOT_ALLOWED", `Key transfer ${transferId} has not been approved yet`, {}, "transferId");
     db.prepare("UPDATE sealed_key_transfers SET status = 'fetched', fetched_at = ? WHERE transfer_id = ?").run(nowIso(), transferId);
