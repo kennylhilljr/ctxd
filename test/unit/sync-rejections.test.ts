@@ -202,13 +202,14 @@ describe("rejected replicated events (#74)", () => {
     const hub = node("hub");
     const target = node("target");
     const peerId = addPeer(target.db, hub.nodeId, wroteNote(hub, true).publicKey!);
-    const hostile = { ...unsignedGrant(target, "\u001b[2Jorigin\nnext"), eventId: "id\u001b]0;title\u0007" };
+    const hostile = { ...unsignedGrant(target, "\u001b[2Jorigin\nnext\u202e\u200b"), eventId: "id\u001b]0;title\u0007" };
 
     await expect(pull(target, peerId, [hostile])).resolves.toMatchObject({ rejected: 1 });
     const [row] = rejections(target);
     expect(row!.reason).toMatch(/refused unsigned event/);
-    expect(row!.reason).not.toMatch(/[\u0000-\u001f\u007f-\u009f]/);
-    expect(checkSyncRejections(target.db).detail).not.toMatch(/[\u0000-\u001f\u007f-\u009f]/);
+    const invisible = /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/;
+    expect(row!.reason).not.toMatch(invisible);
+    expect(checkSyncRejections(target.db).detail).not.toMatch(invisible);
   });
 
   it("treats only non-constraint SQLite errors as environmental, whichever driver raised them", () => {

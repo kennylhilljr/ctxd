@@ -3,6 +3,7 @@ import type Database from "better-sqlite3";
 import type { NodeRole, Replication } from "../core/kinds.js";
 import { nowIso } from "../core/time.js";
 import { mayReplicate } from "../security/policy.js";
+import { redactSecrets, sanitize } from "../security/redact.js";
 import { applyEvent, toWireEvent, type ApplyResult, type EventRow, type WireEvent } from "./apply.js";
 import type { SealedKeyProvider } from "../sealed/key-provider.js";
 import { decryptSealed, encryptSealed, type CiphertextEnvelope } from "../sealed/crypto.js";
@@ -255,10 +256,18 @@ function recordRejection(
   // A sealed entry lives (and is purged) in its pool's own database, not the main one.
   const isPurged = (target: Database.Database) =>
     (target.prepare("SELECT purged_at FROM entries WHERE entry_id = ?").get(entryId) as { purged_at: string | null } | undefined)?.purged_at != null;
+  const purgedInPool = (poolId: string): boolean => {
+    try {
+      return sealedStore!.withPool(poolId, isPurged);
+    } catch (poolErr) {
+      if (isEnvironmentalFailure(poolErr)) throw poolErr;
+      return false; // the pool can't be opened yet (the likely reason this item failed): keep its ciphertext for the retry
+    }
+  };
   const purged = entryId != null &&
-    (isPurged(db) || (isSealedItem(incoming) && sealedStore !== undefined && sealedStore.withPool(incoming.pool_id, isPurged)));
-  // Peer-controlled text ends up in terminal output (ctxd doctor), so control characters go.
-  const reason = (err instanceof Error ? err.message : String(err)).replace(/[\u0000-\u001f\u007f-\u009f]/g, " ").slice(0, 500);
+    (isPurged(db) || (isSealedItem(incoming) && sealedStore !== undefined && purgedInPool(incoming.pool_id)));
+  // Peer-controlled text ends up in terminal output (ctxd doctor): sanitize it like any stored text, on one line.
+  const reason = redactSecrets(sanitize(err instanceof Error ? err.message : String(err))).replace(/[\t\n]/g, " ").slice(0, 500);
   const now = nowIso();
   db.prepare(
     `INSERT INTO sync_rejections (peer_node, event_id, origin_node, origin_seq, entry_id, raw, reason, first_rejected_at, last_rejected_at)

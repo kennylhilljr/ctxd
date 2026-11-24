@@ -168,6 +168,24 @@ describe("sealed pools (Spec v9 section 10.6)", () => {
     expect(f.db.prepare("SELECT entry_id, raw FROM sync_rejections").all()).toEqual([{ entry_id: create.entryId, raw: null }]);
   });
 
+  it("keeps a refused sealed event whose pool can't be opened yet, instead of aborting the pull (#74)", async () => {
+    const f = fixture();
+    const relative = f.store.seal(f.poolId, f.nodeId);
+    f.db.prepare("UPDATE pools SET storage = 'sealed', sealed_file = ? WHERE pool_id = ?").run(relative, f.poolId);
+    const create = f.store.withPool(f.poolId, (db) => toWireEvent(db.prepare("SELECT * FROM events ORDER BY origin_seq LIMIT 1").get() as EventRow));
+    const late = { ...create, eventId: newId() };
+    const item = { sealed: true, pool_id: f.poolId, event_id: late.eventId, envelope: encryptSealed(Buffer.from(JSON.stringify(late)), f.keys.get(f.poolId), late.eventId) };
+    f.store.lock(f.poolId);
+    rmSync(join(f.root, relative)); // the pool key is here, but its database file is not (yet)
+    const peerId = newId();
+    f.db.prepare("INSERT INTO peers (peer_id, name, url, role, incoming_token_hash, outgoing_token, created_at) VALUES (?, 'node-b', 'http://127.0.0.1:1', 'home', ?, 'token', ?)").run(peerId, newId(), new Date().toISOString());
+    const peerFetch = (async () => new Response(JSON.stringify({ events: [item], through: { [late.originNode]: 99 }, more: false }), { status: 200 })) as typeof fetch;
+
+    await expect(pullFromPeer(f.db, f.nodeId, { peerId, name: "node-b", url: "http://127.0.0.1:1", outgoingToken: "token" }, peerFetch, f.keys, f.store))
+      .resolves.toMatchObject({ rejected: 1 });
+    expect(f.db.prepare("SELECT entry_id, raw FROM sync_rejections").all()).toEqual([{ entry_id: create.entryId, raw: JSON.stringify(item) }]);
+  });
+
   it("rejects unlock when the key provider is locked", () => {
     const f = fixture();
     const relative = f.store.seal(f.poolId, f.nodeId);
