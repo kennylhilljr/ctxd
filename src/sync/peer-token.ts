@@ -115,8 +115,11 @@ export function redactRawPeerOutgoingTokens(db: Database.Database): number {
   return db.prepare(`UPDATE peers SET outgoing_token = NULL WHERE outgoing_token NOT LIKE '${REF_PREFIX}%'`).run().changes;
 }
 
-/** Runs the migration and reports a failure on stderr without ever throwing, for command and server startup. */
-export function migratePeerOutgoingTokensQuietly(db: Database.Database, prefix: string, opts: KeychainOptions = {}): void {
+/**
+ * Runs the migration (and, given the data directory, the pending-transfer scrub) and reports a
+ * failure on stderr without ever throwing, for command and server startup.
+ */
+export function migratePeerOutgoingTokensQuietly(db: Database.Database, prefix: string, dataDir?: string, opts: KeychainOptions = {}): void {
   try {
     const { failed, checkpointBusy } = migratePeerOutgoingTokens(db, opts);
     if (checkpointBusy) {
@@ -128,29 +131,42 @@ export function migratePeerOutgoingTokensQuietly(db: Database.Database, prefix: 
   } catch (err) {
     console.error(`${prefix}: outgoing peer token migration skipped: ${err instanceof Error ? err.message : String(err)}`);
   }
+  if (dataDir) {
+    const { failed } = scrubPendingTransferTokens(dataDir);
+    if (failed.length > 0) {
+      console.error(`${prefix}: could not remove the outgoing token from pending key-transfer state file(s) ${failed.join(", ")}; delete them by hand if the transfer is abandoned.`);
+    }
+  }
 }
 
 /**
  * Earlier versions also copied the raw outgoing token into each pending enrollment state file
  * (`key-transfers/<transferId>.json`). Rewrites any such file without it; completion re-reads the
- * token from the keychain. Returns how many files were scrubbed. Never throws.
+ * token from the keychain. Never throws: a file it cannot read or rewrite is listed in `failed`.
  */
-export function scrubPendingTransferTokens(dataDir: string): number {
+export function scrubPendingTransferTokens(dataDir: string): { scrubbed: number; failed: string[] } {
+  const result = { scrubbed: 0, failed: [] as string[] };
   const dir = join(dataDir, "key-transfers");
-  if (!existsSync(dir)) return 0;
-  let scrubbed = 0;
-  for (const file of readdirSync(dir)) {
-    if (!file.endsWith(".json")) continue;
+  let files: string[];
+  try {
+    files = existsSync(dir) ? readdirSync(dir).filter((f) => f.endsWith(".json")) : [];
+  } catch {
+    result.failed.push(dir);
+    return result;
+  }
+  for (const file of files) {
     const path = join(dir, file);
     try {
-      const state = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+      const raw = readFileSync(path, "utf8");
+      if (!raw.includes("outgoingToken")) continue;
+      const state = JSON.parse(raw) as Record<string, unknown>;
       if (!("outgoingToken" in state)) continue;
       delete state.outgoingToken;
       writeFileSync(path, JSON.stringify(state));
-      scrubbed++;
+      result.scrubbed++;
     } catch {
-      // An unreadable state file is left alone; enrollment reports it when it is used.
+      result.failed.push(file);
     }
   }
-  return scrubbed;
+  return result;
 }

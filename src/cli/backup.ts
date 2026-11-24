@@ -261,7 +261,7 @@ export function runBackupCommand(argv: string[]): number {
   const dataDir = resolveDataDir({ dataDir: values["data-dir"], configPath: values.config });
   const db = openDatabase(join(dataDir, "ctxd.db"));
   try {
-    migratePeerOutgoingTokensQuietly(db, "ctxd backup");
+    migratePeerOutgoingTokensQuietly(db, "ctxd backup", dataDir);
     const copyTo = isFlagOn(flags, "backups.copy") ? values["copy-to"] ?? (config.backup.copy_to || undefined) : undefined;
     const result = runBackup(db, { dataDir, ageRecipient: config.backup.age_recipient, copyTo });
     console.log(`ctxd backup: wrote ${result.path}${result.copiedTo ? `, copied to ${result.copiedTo}` : ""}.`);

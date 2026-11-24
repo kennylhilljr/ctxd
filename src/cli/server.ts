@@ -80,7 +80,7 @@ export async function run(argv: string[]): Promise<number> {
     db.close();
     return 1;
   }
-  migratePeerOutgoingTokensQuietly(db, "ctxd server");
+  migratePeerOutgoingTokensQuietly(db, "ctxd server", dataDir);
 
   // Flags are resolved once here, at server startup, unlike the per-request live reload in
   // server/mcp.ts: starting or stopping the sync listener or the puller interval mid-process

@@ -17,7 +17,7 @@ import { FileEventKeyProvider } from "../security/event-signatures.js";
 import { FileEncryptionKeyProvider, deriveConfirmationCode, signEncryptionPrekey } from "../sealed/encryptionKeys.js";
 import { approveKeyTransfer, completeKeyTransfer, type SignedPrekey } from "../sealed/keyTransfer.js";
 import type { CiphertextEnvelope } from "../sealed/crypto.js";
-import { migratePeerOutgoingTokensQuietly, readPeerOutgoingToken, scrubPendingTransferTokens } from "../sync/peer-token.js";
+import { migratePeerOutgoingTokensQuietly, readPeerOutgoingToken } from "../sync/peer-token.js";
 
 function findPool(db: Database.Database, name: string): { pool_id: string } | undefined {
   return db.prepare("SELECT pool_id FROM pools WHERE name = ?").get(name) as { pool_id: string } | undefined;
@@ -405,8 +405,7 @@ export async function run(argv: string[]): Promise<number> {
       case "enroll": {
         requireFlag(flags, "sealed_pools");
         requireFlag(flags, "sealed_pools.key_transfer");
-        migratePeerOutgoingTokensQuietly(db, "ctxd pool enroll");
-        scrubPendingTransferTokens(dataDir);
+        migratePeerOutgoingTokensQuietly(db, "ctxd pool enroll", dataDir);
         const [name, nodeName] = positionals;
         const pool = name ? findPool(db, name) : undefined;
         const peer = nodeName

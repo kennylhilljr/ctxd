@@ -182,7 +182,7 @@ export async function run(argv: string[]): Promise<number> {
   const configPath = resolveConfigPath({ configPath: values.config });
   const db = openDatabase(join(dataDir, "ctxd.db"));
   try {
-    migratePeerOutgoingTokensQuietly(db, "ctxd node");
+    migratePeerOutgoingTokensQuietly(db, "ctxd node", dataDir);
     if (sub === "add-peer") {
       const [name, url] = positionals;
       if (!name || !url) {

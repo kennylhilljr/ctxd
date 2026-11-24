@@ -239,14 +239,16 @@ describe("pending enrollment state files written by earlier versions", () => {
     writeFileSync(current, JSON.stringify({ poolId: "pool-dev", peerUrl: "http://127.0.0.1:1", sourcePrekey: { publicKey: "k" } }));
     writeFileSync(join(dir, "broken.json"), "{not json");
 
-    expect(scrubPendingTransferTokens(dataDir)).toBe(1);
+    writeFileSync(join(dir, "broken-legacy.json"), `{"outgoingToken": "${TOKEN}"`);
+
+    expect(scrubPendingTransferTokens(dataDir)).toEqual({ scrubbed: 1, failed: ["broken-legacy.json"] });
     expect(readFileSync(legacy, "utf8")).not.toContain(TOKEN);
     expect(JSON.parse(readFileSync(legacy, "utf8"))).toEqual({ poolId: "pool-dev", peerUrl: "http://127.0.0.1:1", sourcePrekey: { publicKey: "k" } });
-    expect(scrubPendingTransferTokens(dataDir)).toBe(0);
+    expect(scrubPendingTransferTokens(dataDir).scrubbed).toBe(0);
   });
 
   it("is a no-op when there is no key-transfers directory", () => {
     const dataDir = mkdtempSync(join(tmpdir(), "ctxd-peer-token-transfers-")); scratch.push(dataDir);
-    expect(scrubPendingTransferTokens(dataDir)).toBe(0);
+    expect(scrubPendingTransferTokens(dataDir)).toEqual({ scrubbed: 0, failed: [] });
   });
 });

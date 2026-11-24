@@ -75,7 +75,7 @@ export async function run(argv: string[]): Promise<number> {
       console.error("ctxd sync: no node identity found; run ctxd init first.");
       return 1;
     }
-    migratePeerOutgoingTokensQuietly(db, "ctxd sync");
+    migratePeerOutgoingTokensQuietly(db, "ctxd sync", dataDir);
     const sealedStore = sealedKeys && human
       ? new SealedPoolStore(db, dataDir, sealedKeys, new SqlCipherDatabaseProvider(), config.sealed.unlock_minutes, createSealedPurgeReplay(node.node_id, human.client_id, resolveFlags(config)))
       : undefined;
