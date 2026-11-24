@@ -97,6 +97,9 @@ origin's pinned key, so a key-bound peer may relay signed events from any other 
 event already stored locally is not checked, so this node's own older unsigned events echoed back
 by a peer do not stall the pull. A peer added without a node id and key is the legacy
 unauthenticated mode: its unsigned events are still accepted, and nothing ties them to the peer.
+A peer row with only one of the two bound is treated as key-bound. This extends TS-12 (signed
+events with per-node keys); tests: `test/unit/sync-peer-binding.test.ts`, including a property test
+over delivery order and paging.
 
 Purge retains `payload_hash`, `signature`, and `public_key` while erasing payload and prior
 content. After erasure, verification checks the Ed25519 signature over the retained hash. It cannot

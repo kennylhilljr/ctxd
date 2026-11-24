@@ -1,3 +1,4 @@
+import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import type Database from "better-sqlite3";
 import { encodeHlc, HlcClock } from "../../src/core/hlc.js";
@@ -52,15 +53,21 @@ function addPeer(target: Database.Database, peerNodeId: string | null, publicKey
   return peerId;
 }
 
-function serving(events: WireEvent[]): typeof fetch {
-  const through: Record<string, number> = {};
-  for (const e of events) through[e.originNode] = Math.max(through[e.originNode] ?? 0, e.originSeq);
-  const body: PullResponse = { events, through, more: false };
-  return (async () => new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } })) as typeof fetch;
+/** A fake peer serving `events` in pages of `pageSize`, ignoring the request's vector. */
+function serving(events: WireEvent[], pageSize = Number.MAX_SAFE_INTEGER): typeof fetch {
+  let offset = 0;
+  return (async () => {
+    const page = events.slice(offset, offset + pageSize);
+    offset += page.length;
+    const through: Record<string, number> = {};
+    for (const e of page) through[e.originNode] = Math.max(through[e.originNode] ?? 0, e.originSeq);
+    const body: PullResponse = { events: page, through, more: offset < events.length };
+    return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
 }
 
-function pull(target: Node, peerId: string, events: WireEvent[]) {
-  return pullFromPeer(target.db, target.nodeId, { peerId, name: "hub", url: "http://127.0.0.1:1", outgoingToken: "token" }, serving(events));
+function pull(target: Node, peerId: string, events: WireEvent[], pageSize?: number) {
+  return pullFromPeer(target.db, target.nodeId, { peerId, name: "hub", url: "http://127.0.0.1:1", outgoingToken: "token" }, serving(events, pageSize));
 }
 
 /** An unsigned acl event granting a client write access, claiming an arbitrary origin. */
@@ -114,6 +121,60 @@ describe("peer-bound replication (LLD replication 7.7)", () => {
     const { peerId } = bound(target);
     const own = wroteNote(target, false);
     await expect(pull(target, peerId, [own])).resolves.toMatchObject({ pulled: 0 });
+  });
+
+  it("treats a peer row with only a bound key as key-bound", async () => {
+    const target = node("target");
+    const peerId = addPeer(target.db, null, "some-public-key");
+    await expect(pull(target, peerId, [forgedGrant(target, newId())])).rejects.toThrow(/refused unsigned event/);
+  });
+
+  it("property: forged unsigned events are never stored, and the signed events converge whatever the order and paging", async () => {
+    const hub = node("hub");
+    const third = node("third");
+    const signed = [wroteNote(hub, true), wroteNote(hub, true), wroteNote(third, true), wroteNote(third, true), wroteNote(third, true)];
+    const keys = new Map(signed.map((e) => [e.originNode, e.publicKey!]));
+    const snapshot = (n: Node) => ({
+      events: n.db.prepare("SELECT event_id FROM events ORDER BY event_id").all(),
+      entries: n.db.prepare("SELECT entry_id, title, body, content_rev, status FROM entries ORDER BY entry_id").all(),
+      pools: n.db.prepare("SELECT name FROM pools").all(),
+    });
+    const receiver = (): { target: Node; peerId: string } => {
+      const target = node("target");
+      const peerId = addPeer(target.db, hub.nodeId, keys.get(hub.nodeId)!);
+      pinPublicKey(target.db, third.nodeId, keys.get(third.nodeId)!, 0);
+      return { target, peerId };
+    };
+
+    const reference = receiver();
+    await pull(reference.target, reference.peerId, signed);
+    const expected = snapshot(reference.target);
+    expect(expected.events).toHaveLength(signed.length);
+
+    await fc.assert(
+      fc.asyncProperty(
+        fc.shuffledSubarray(signed, { minLength: signed.length, maxLength: signed.length }),
+        fc.array(fc.tuple(fc.nat({ max: signed.length }), fc.boolean()), { minLength: 1, maxLength: 3 }),
+        fc.integer({ min: 1, max: signed.length + 3 }),
+        async (order, forgeries, pageSize) => {
+          const { target, peerId } = receiver();
+          const delivered: WireEvent[] = [...order];
+          const forged: WireEvent[] = [];
+          for (const [at, asHub] of forgeries) {
+            const event = forgedGrant(target, asHub ? hub.nodeId : newId());
+            forged.push(event);
+            delivered.splice(Math.min(at, delivered.length), 0, event);
+          }
+          // The peer keeps serving the forged events: every pull stops at the first one.
+          await expect(pull(target, peerId, delivered, pageSize)).rejects.toThrow();
+          for (const event of forged) expect(target.db.prepare("SELECT 1 FROM events WHERE event_id = ?").get(event.eventId)).toBeUndefined();
+          // Once the peer stops (forged events dropped), a retry converges on the reference state.
+          await pull(target, peerId, delivered.filter((e) => !forged.includes(e)), pageSize);
+          expect(snapshot(target)).toEqual(expected);
+        },
+      ),
+      { numRuns: 25 },
+    );
   });
 
   it("still applies unsigned events from a legacy peer with no bound node id", async () => {

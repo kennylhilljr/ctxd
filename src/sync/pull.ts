@@ -112,8 +112,11 @@ export async function pullFromPeer(
   sealedStore?: SealedPoolStore,
 ): Promise<PullOutcome> {
   const vector = currentVector(db, peer.name);
-  const bound = db.prepare("SELECT remote_node_id FROM peers WHERE peer_id = ?").get(peer.peerId) as { remote_node_id: string | null } | undefined;
-  const remoteNodeId = bound?.remote_node_id ?? null;
+  // A row with only one of the two identity columns set still counts as key-bound (fail closed).
+  const peerIdentity = db.prepare("SELECT remote_node_id, remote_public_key FROM peers WHERE peer_id = ?").get(peer.peerId) as
+    | { remote_node_id: string | null; remote_public_key: string | null }
+    | undefined;
+  const keyBound = peerIdentity?.remote_node_id != null || peerIdentity?.remote_public_key != null;
   let pulled = 0;
   let conflicts = 0;
   let purged = 0;
@@ -137,7 +140,7 @@ export async function pullFromPeer(
         : incoming as WireEvent;
       if (isSealed && !sealedStore) throw new Error(`sealed event ${incoming.event_id} has no attached-store router`);
       const apply = (target: Database.Database) => {
-        assertPeerMayDeliver(target, peer.name, remoteNodeId, event);
+        assertPeerMayDeliver(target, peer.name, keyBound, event);
         return applyEvent(target, event);
       };
       const result = isSealed ? sealedStore!.withPool(incoming.pool_id, apply) : apply(db);
@@ -165,11 +168,11 @@ export async function pullFromPeer(
  * other pinned origins. An unsigned event from such a peer is refused whatever origin it claims,
  * since nothing ties it to that origin (a forged `originNode`, an unsigned acl or purge event). An
  * event already stored here is let through to `applyEvent`'s dedup, so this node's own older
- * unsigned events echoed back by the peer never stall the pull. A peer with no bound node id is
- * the legacy unauthenticated mode and is not checked here.
+ * unsigned events echoed back by the peer never stall the pull. A peer with neither a bound node
+ * id nor a bound key is the legacy unauthenticated mode and is not checked here.
  */
-export function assertPeerMayDeliver(db: Database.Database, peerName: string, remoteNodeId: string | null, event: WireEvent): void {
-  if (remoteNodeId === null || event.signature != null) return;
+export function assertPeerMayDeliver(db: Database.Database, peerName: string, keyBound: boolean, event: WireEvent): void {
+  if (!keyBound || event.signature != null) return;
   if (db.prepare("SELECT 1 FROM events WHERE event_id = ?").get(event.eventId)) return;
   throw new Error(`pull from ${peerName}: refused unsigned event ${event.eventId} claiming origin ${event.originNode}; a key-bound peer may only deliver signed events`);
 }
