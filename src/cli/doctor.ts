@@ -194,6 +194,22 @@ export interface DoctorOptions {
   execFile?: typeof execFileSync;
 }
 
+/** Replicated events a pull refused and keeps retrying (#74): each one is data a peer has that this node does not. */
+export function checkSyncRejections(db: Database.Database): DoctorCheck {
+  const peers = db.prepare(
+    "SELECT peer_node, COUNT(*) AS n, MAX(last_rejected_at) AS last FROM sync_rejections GROUP BY peer_node ORDER BY peer_node",
+  ).all() as { peer_node: string; n: number; last: string }[];
+  if (peers.length === 0) return { name: "sync rejections", ok: true, detail: "no rejected replicated events" };
+  const latestReason = db.prepare("SELECT reason FROM sync_rejections WHERE peer_node = ? ORDER BY last_rejected_at DESC LIMIT 1");
+  return {
+    name: "sync rejections",
+    ok: false,
+    detail: peers
+      .map((p) => `${p.peer_node}: ${p.n} rejected (last ${p.last}; latest reason: ${(latestReason.get(p.peer_node) as { reason: string }).reason})`)
+      .join(", "),
+  };
+}
+
 export async function runDoctor(db: Database.Database, config: CtxdConfig, opts: DoctorOptions): Promise<DoctorCheck[]> {
   return [
     checkBindAddresses(config),
@@ -201,6 +217,7 @@ export async function runDoctor(db: Database.Database, config: CtxdConfig, opts:
     checkDatabaseHealth(db),
     checkReviewRuleNarrowness(db),
     await checkPeers(db, opts.fetchImpl, config.sync.stale_hours),
+    checkSyncRejections(db),
     checkFileVault(opts.execFile),
     checkHookInstallation(opts.home),
     checkSemanticSearch(config, opts.dataDir),

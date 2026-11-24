@@ -48,7 +48,7 @@ export async function runSync(db: Database.Database, selfNodeId: string, only: s
     try {
       const outcome = await pullFromPeer(db, selfNodeId, { peerId: peer.peer_id, name: peer.name, url: peer.url, outgoingToken }, fetch, sealedKeys, sealedStore);
       console.log(
-        `ctxd sync: ${peer.name}: ${outcome.pulled} applied, ${outcome.conflicts} resolved by conflict policy, ${outcome.purged} purge-stripped, ${outcome.deferred} deferred`,
+        `ctxd sync: ${peer.name}: ${outcome.pulled} applied, ${outcome.conflicts} resolved by conflict policy, ${outcome.purged} purge-stripped, ${outcome.deferred} deferred, ${outcome.rejected} rejected`,
       );
     } catch (err) {
       console.error(`ctxd sync: ${peer.name}: ${err instanceof Error ? err.message : String(err)}`);

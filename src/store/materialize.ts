@@ -705,6 +705,8 @@ function applyEventCore(db: Database.Database, e: EventForMaterialize, skipFts: 
       const embeddingRows = db.prepare("SELECT rowid FROM embeddings WHERE entry_id = ?").all(e.entryId) as { rowid: number }[];
       for (const er of embeddingRows) removeFromVecIndex(db, er.rowid);
       db.prepare("DELETE FROM embeddings WHERE entry_id = ?").run(e.entryId);
+      // A refused replicated event kept for retry (#74) holds this entry's content as received.
+      db.prepare("DELETE FROM sync_rejections WHERE entry_id = ?").run(e.entryId);
     }
     return;
   }

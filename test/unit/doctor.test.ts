@@ -14,6 +14,7 @@ import {
   checkHookInstallation,
   checkPeers,
   checkReviewRuleNarrowness,
+  checkSyncRejections,
   checkSemanticSearch,
   checkTokenFilePermissions,
 } from "../../src/cli/doctor.js";
@@ -273,5 +274,26 @@ describe("checkBackupAge (W4)", () => {
     const result = checkBackupAge(dataDir, config, 36);
     expect(result.ok).toBe(false);
     expect(result.detail).toContain("stale");
+  });
+});
+
+describe("checkSyncRejections (#74)", () => {
+  it("passes with no rejected replicated events", () => {
+    const db = freshDb(tmpDataDir());
+    expect(checkSyncRejections(db)).toMatchObject({ ok: true, detail: "no rejected replicated events" });
+    db.close();
+  });
+
+  it("fails and names the peer, the count and the latest reason", () => {
+    const db = freshDb(tmpDataDir());
+    db.prepare(
+      "INSERT INTO sync_rejections (peer_node, event_id, reason, first_rejected_at, last_rejected_at) VALUES ('hub', 'e1', 'Payload hash mismatch on event e1', 't', 't')",
+    ).run();
+    const check = checkSyncRejections(db);
+    expect(check.ok).toBe(false);
+    expect(check.detail).toContain("hub");
+    expect(check.detail).toContain("1 rejected");
+    expect(check.detail).toContain("Payload hash mismatch on event e1");
+    db.close();
   });
 });

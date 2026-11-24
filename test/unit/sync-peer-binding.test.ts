@@ -81,6 +81,11 @@ function forgedGrant(target: Node, originNode: string): WireEvent {
   };
 }
 
+/** The reason recorded for a refused event (#74), or undefined when none was recorded. */
+function rejection(target: Node, eventId: string): string | undefined {
+  return (target.db.prepare("SELECT reason FROM sync_rejections WHERE event_id = ?").get(eventId) as { reason: string } | undefined)?.reason;
+}
+
 function bound(target: Node): { peerId: string; hub: Node; hubKey: string } {
   const hub = node("hub");
   const hubKey = wroteNote(hub, true).publicKey!;
@@ -93,7 +98,8 @@ describe("peer-bound replication (LLD replication 7.7)", () => {
     const { peerId } = bound(target);
     const forged = forgedGrant(target, newId());
 
-    await expect(pull(target, peerId, [forged])).rejects.toThrow(/refused unsigned event/);
+    await expect(pull(target, peerId, [forged])).resolves.toMatchObject({ rejected: 1 });
+    expect(rejection(target, forged.eventId)).toMatch(/refused unsigned event/);
     expect(target.db.prepare("SELECT 1 FROM events WHERE event_id = ?").get(forged.eventId)).toBeUndefined();
     expect(target.db.prepare("SELECT 1 FROM pools WHERE name = 'pool-dev'").get()).toBeUndefined();
   });
@@ -101,7 +107,10 @@ describe("peer-bound replication (LLD replication 7.7)", () => {
   it("refuses an unsigned event a key-bound peer sends under its own origin", async () => {
     const target = node("target");
     const { peerId, hub } = bound(target);
-    await expect(pull(target, peerId, [forgedGrant(target, hub.nodeId)])).rejects.toThrow();
+    const forged = forgedGrant(target, hub.nodeId);
+    await expect(pull(target, peerId, [forged])).resolves.toMatchObject({ rejected: 1 });
+    expect(rejection(target, forged.eventId)).toMatch(/refused unsigned event/);
+    expect(target.db.prepare("SELECT 1 FROM events WHERE event_id = ?").get(forged.eventId)).toBeUndefined();
     expect(target.db.prepare("SELECT 1 FROM pools WHERE name = 'pool-dev'").get()).toBeUndefined();
   });
 
@@ -126,10 +135,13 @@ describe("peer-bound replication (LLD replication 7.7)", () => {
   it("treats a peer row with only a bound key as key-bound", async () => {
     const target = node("target");
     const peerId = addPeer(target.db, null, "some-public-key");
-    await expect(pull(target, peerId, [forgedGrant(target, newId())])).rejects.toThrow(/refused unsigned event/);
+    const forged = forgedGrant(target, newId());
+    await expect(pull(target, peerId, [forged])).resolves.toMatchObject({ rejected: 1 });
+    expect(rejection(target, forged.eventId)).toMatch(/refused unsigned event/);
+    expect(target.db.prepare("SELECT 1 FROM events WHERE event_id = ?").get(forged.eventId)).toBeUndefined();
   });
 
-  it("property: forged unsigned events are never stored, and the signed events converge whatever the order and paging", async () => {
+  it("property (RP-AC-5): forged unsigned events are never stored, never stall the pull, and the signed events converge whatever the order and paging (#74)", async () => {
     const hub = node("hub");
     const third = node("third");
     const signed = [wroteNote(hub, true), wroteNote(hub, true), wroteNote(third, true), wroteNote(third, true), wroteNote(third, true)];
@@ -165,12 +177,32 @@ describe("peer-bound replication (LLD replication 7.7)", () => {
             forged.push(event);
             delivered.splice(Math.min(at, delivered.length), 0, event);
           }
-          // The peer keeps serving the forged events: every pull stops at the first one.
-          await expect(pull(target, peerId, delivered, pageSize)).rejects.toThrow();
-          for (const event of forged) expect(target.db.prepare("SELECT 1 FROM events WHERE event_id = ?").get(event.eventId)).toBeUndefined();
-          // Once the peer stops (forged events dropped), a retry converges on the reference state.
-          await pull(target, peerId, delivered.filter((e) => !forged.includes(e)), pageSize);
+          // One pull of the mixed stream converges: the forged events are recorded and skipped, not a stall.
+          await expect(pull(target, peerId, delivered, pageSize)).resolves.toMatchObject({ rejected: forged.length });
+          for (const event of forged) {
+            expect(target.db.prepare("SELECT 1 FROM events WHERE event_id = ?").get(event.eventId)).toBeUndefined();
+            expect(rejection(target, event.eventId)).toMatch(/refused unsigned event/);
+          }
           expect(snapshot(target)).toEqual(expected);
+          const through = Object.fromEntries(
+            (target.db.prepare("SELECT origin_node, through_seq FROM sync_state WHERE peer_node = 'hub'").all() as { origin_node: string; through_seq: number }[])
+              .map((r) => [r.origin_node, r.through_seq]),
+          );
+          // The watermark moved past the forged events: each origin's through is what the last page
+          // carrying it reported (this fake peer serves shuffled pages, so that is the page's max).
+          const lastReported: Record<string, number> = {};
+          for (let at = 0; at < delivered.length; at += pageSize) {
+            const page = delivered.slice(at, at + pageSize);
+            for (const origin of new Set(page.map((e) => e.originNode))) {
+              lastReported[origin] = Math.max(...page.filter((e) => e.originNode === origin).map((e) => e.originSeq));
+            }
+          }
+          expect(through).toEqual(lastReported);
+          // The peer keeps serving the forged events: a second pull still resolves, changes nothing
+          // and adds no rows (each forged event's attempts go up instead).
+          await expect(pull(target, peerId, delivered, pageSize)).resolves.toBeDefined();
+          expect(snapshot(target)).toEqual(expected);
+          expect((target.db.prepare("SELECT COUNT(*) AS n FROM sync_rejections").get() as { n: number }).n).toBe(forged.length);
         },
       ),
       { numRuns: 25 },

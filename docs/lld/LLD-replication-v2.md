@@ -28,9 +28,11 @@ Claim semantics (7.5) are in [LLD: Claims](LLD-claims-v1.md); cleanup operations
 - **Served watermark:** after serving a page, the handler records, per origin, the highest `origin_seq` served to the requesting peer in `peer_watermarks` (`recordServedThrough`), never lowering an existing value. Pull itself stays stateless for correctness; the watermark is for reporting only (W3).
 - **Relaying:** a node serves events from every origin it holds, not just its own, so replication works through the hub.
 - **Puller loop:**
-  1. Apply each event idempotently; `event_id` is unique, so duplicates are ignored.
-  2. Store `through` in `sync_state`.
-  3. Repeat while `more` is true.
+  1. Retry the items kept in `sync_rejections` for this peer (below); a row is deleted once its item applies.
+  2. Apply each event idempotently; `event_id` is unique, so duplicates are ignored.
+  3. Store `through` in `sync_state`.
+  4. Repeat while `more` is true.
+- **Rejected events (#74, RP-5, RP-8):** an event that fails to apply (a bad signature, a peer-binding refusal under 7.7, a validation in apply, a sealed envelope that won't decrypt, a malformed item) is recorded in `sync_rejections` with its reason and the item as received (a sealed item stays its ciphertext envelope), and the loop moves on, so `through` still advances and one bad event cannot stall replication from that peer. Kept items are retried on every later pull, since some failures heal on their own (an origin key pinned later, a sealed pool key or store that arrives later), and the row is deleted once its item applies. An item for an entry already purged here is recorded without the item. A purge applied by a pull, or replayed into a sealed pool, deletes the rejection rows for its entry; a sealed envelope that never decrypted has no known entry and stays ciphertext, and if it later decrypts for a purged entry, apply stores it already purged (7.6.6). A failure of the local database itself (any SQLite error other than a constraint violation: busy, locked, full, I/O) is not a rejection: it aborts the pull without advancing `through`, so a sick database never causes good events to be skipped. Rejections show in `ctxd sync` output, in `ctxd status` detail and as a `ctxd doctor` check.
 - **Triggering:**
   - **Scheduled:** every `interval_seconds`.
   - **On reconnect:** when a peer becomes reachable again.
@@ -91,8 +93,8 @@ verifies every stored signature. Unsigned legacy events remain valid.
 **Peer binding.** A peer paired with `--node-id` and `--public-key` (`ctxd node add-peer`) is an
 authenticated identity: its key is pinned with a signature cutoff of 0, so every event it delivers
 on a pull must be signed. An unsigned event from a key-bound peer is refused whatever origin it
-claims, and the pull stops with an error before anything later in the page is applied; this covers
-a forged `originNode` and unsigned acl or purge events. A signed event is verified against its
+claims; it is recorded as a rejected event (7.1) and never applied, and the rest of the page still
+applies. This covers a forged `originNode` and unsigned acl or purge events. A signed event is verified against its
 origin's pinned key, so a key-bound peer may relay signed events from any other pinned origin. An
 event already stored locally is not checked, so this node's own older unsigned events echoed back
 by a peer do not stall the pull. A peer added without a node id and key is the legacy
