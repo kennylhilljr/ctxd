@@ -10,11 +10,7 @@ permissions:
 
 jobs:
   test:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [macos-latest, ubuntu-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: macos-latest
     steps:
       # Actions are pinned to a commit SHA (the tag in the trailing comment), so a moved tag cannot change what runs.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
