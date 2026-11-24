@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import fc from "fast-check";
@@ -7,7 +7,7 @@ import { addPeer, revokePeer } from "../../src/cli/node.js";
 import { runInit } from "../../src/cli/init.js";
 import { openDatabase } from "../../src/store/db.js";
 import type { KeychainOptions } from "../../src/access/keychain.js";
-import { migratePeerOutgoingTokens, readPeerOutgoingToken, redactRawPeerOutgoingTokens } from "../../src/sync/peer-token.js";
+import { migratePeerOutgoingTokens, readPeerOutgoingToken, redactRawPeerOutgoingTokens, scrubPendingTransferTokens } from "../../src/sync/peer-token.js";
 
 /** Outgoing peer sync tokens live in the keychain; the database keeps only a reference. */
 
@@ -225,5 +225,28 @@ describe("backup images never carry a raw outgoing token", () => {
     expect(storedToken(copy, "node-c")).toBe("keychain:peer-outgoing/peer-2");
     copy.close();
     expect(databaseBytes(copyPath)).not.toContain(TOKEN);
+  });
+});
+
+describe("pending enrollment state files written by earlier versions", () => {
+  it("drops the raw outgoing token and keeps the rest of the state", () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "ctxd-peer-token-transfers-")); scratch.push(dataDir);
+    const dir = join(dataDir, "key-transfers");
+    mkdirSync(dir);
+    const legacy = join(dir, "transfer-a.json");
+    const current = join(dir, "transfer-b.json");
+    writeFileSync(legacy, JSON.stringify({ poolId: "pool-dev", peerUrl: "http://127.0.0.1:1", outgoingToken: TOKEN, sourcePrekey: { publicKey: "k" } }));
+    writeFileSync(current, JSON.stringify({ poolId: "pool-dev", peerUrl: "http://127.0.0.1:1", sourcePrekey: { publicKey: "k" } }));
+    writeFileSync(join(dir, "broken.json"), "{not json");
+
+    expect(scrubPendingTransferTokens(dataDir)).toBe(1);
+    expect(readFileSync(legacy, "utf8")).not.toContain(TOKEN);
+    expect(JSON.parse(readFileSync(legacy, "utf8"))).toEqual({ poolId: "pool-dev", peerUrl: "http://127.0.0.1:1", sourcePrekey: { publicKey: "k" } });
+    expect(scrubPendingTransferTokens(dataDir)).toBe(0);
+  });
+
+  it("is a no-op when there is no key-transfers directory", () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "ctxd-peer-token-transfers-")); scratch.push(dataDir);
+    expect(scrubPendingTransferTokens(dataDir)).toBe(0);
   });
 });

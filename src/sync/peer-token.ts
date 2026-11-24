@@ -1,3 +1,5 @@
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import type Database from "better-sqlite3";
 import { deleteSecret, readSecret, storeSecret, type KeychainOptions } from "../access/keychain.js";
 import { newId } from "../core/ids.js";
@@ -126,4 +128,29 @@ export function migratePeerOutgoingTokensQuietly(db: Database.Database, prefix: 
   } catch (err) {
     console.error(`${prefix}: outgoing peer token migration skipped: ${err instanceof Error ? err.message : String(err)}`);
   }
+}
+
+/**
+ * Earlier versions also copied the raw outgoing token into each pending enrollment state file
+ * (`key-transfers/<transferId>.json`). Rewrites any such file without it; completion re-reads the
+ * token from the keychain. Returns how many files were scrubbed. Never throws.
+ */
+export function scrubPendingTransferTokens(dataDir: string): number {
+  const dir = join(dataDir, "key-transfers");
+  if (!existsSync(dir)) return 0;
+  let scrubbed = 0;
+  for (const file of readdirSync(dir)) {
+    if (!file.endsWith(".json")) continue;
+    const path = join(dir, file);
+    try {
+      const state = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+      if (!("outgoingToken" in state)) continue;
+      delete state.outgoingToken;
+      writeFileSync(path, JSON.stringify(state));
+      scrubbed++;
+    } catch {
+      // An unreadable state file is left alone; enrollment reports it when it is used.
+    }
+  }
+  return scrubbed;
 }
