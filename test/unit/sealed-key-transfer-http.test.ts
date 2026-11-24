@@ -8,7 +8,7 @@ import { openDatabase } from "../../src/store/db.js";
 import { startSyncServer, type RunningSyncServer } from "../../src/server/sync.js";
 import { FileEventKeyProvider } from "../../src/security/event-signatures.js";
 import { FileEncryptionKeyProvider, signEncryptionPrekey, type EncryptionKeyPair } from "../../src/sealed/encryptionKeys.js";
-import { approveKeyTransfer, type SignedPrekey } from "../../src/sealed/keyTransfer.js";
+import { MAX_PENDING_TRANSFERS_PER_PEER, approveKeyTransfer, type SignedPrekey } from "../../src/sealed/keyTransfer.js";
 import { TestKeyProvider } from "../../src/sealed/key-provider.js";
 
 /**
@@ -108,5 +108,84 @@ describe("sealed pool key transfer over the real sync listener (W2)", () => {
     // Replay over HTTP is refused too.
     const replay = await post("/v1/key-transfer/fetch", token, { transferId });
     expect(replay.status).toBe(400);
+  });
+});
+
+/** A source listener with one sealed pool and two trusted, un-revoked peers (`requester` and `other`), each with its own token and real identity. */
+async function sourceWithTwoPeers() {
+  const db = freshDb();
+  const dbPath = (db.prepare("SELECT file FROM pragma_database_list WHERE name = 'main'").get() as { file: string }).file;
+  const nodeId = newId();
+  db.prepare("INSERT INTO nodes (node_id, name, role, created_at) VALUES (?, 'source', 'home', ?)").run(nodeId, now());
+  const poolId = newId();
+  db.prepare("INSERT INTO pools (pool_id, name, storage, created_at) VALUES (?, 'pool-dev', 'sealed', ?)").run(poolId, now());
+
+  function peer(name: string) {
+    const peerNodeId = newId();
+    const signing = new FileEventKeyProvider(":memory:").keyPair(peerNodeId);
+    const enc: EncryptionKeyPair = new FileEncryptionKeyProvider(":memory:").keyPair(peerNodeId);
+    const token = newId();
+    db.prepare(
+      "INSERT INTO peers (peer_id, name, url, role, incoming_token_hash, created_at, remote_node_id, remote_public_key) VALUES (?, ?, 'https://r.example/sync', 'home', ?, ?, ?, ?)",
+    ).run(newId(), name, sha256Hex(token), now(), peerNodeId, signing.publicKey.export({ type: "spki", format: "der" }).toString("base64"));
+    const prekey: SignedPrekey = { nodeId: peerNodeId, ...signEncryptionPrekey(peerNodeId, enc, signing.privateKey) };
+    return { nodeId: peerNodeId, token, prekey };
+  }
+
+  const requester = peer("requester");
+  const other = peer("other");
+  server = await startSyncServer({ db, nodeId, listen: `127.0.0.1:${PORT}`, flags: new Map([["sealed_pools.key_transfer", true]]) });
+  return { db, dbPath, nodeId, poolId, requester, other };
+}
+
+describe("key transfer is bound to the authenticated peer", () => {
+  it("refuses a fetch by a different peer without consuming the transfer, then serves the real requester", async () => {
+    const { db, dbPath, nodeId, poolId, requester, other } = await sourceWithTwoPeers();
+    const res = await post("/v1/key-transfer/request", requester.token, { poolId, requesterPrekey: requester.prekey });
+    expect(res.status).toBe(200);
+    const { transferId } = (await res.json()) as { transferId: string };
+    approveKeyTransfer(db, transferId, new FileEncryptionKeyProvider(dbPath).keyPair(nodeId), Buffer.alloc(32, 9));
+
+    const stolen = await post("/v1/key-transfer/fetch", other.token, { transferId });
+    expect(stolen.status).toBe(404);
+    expect((db.prepare("SELECT fetched_at FROM sealed_key_transfers WHERE transfer_id = ?").get(transferId) as { fetched_at: string | null }).fetched_at).toBeNull();
+
+    const real = await post("/v1/key-transfer/fetch", requester.token, { transferId });
+    expect(real.status).toBe(200);
+  });
+
+  it("refuses a request that replays another node's signed prekey", async () => {
+    const { db, poolId, requester, other } = await sourceWithTwoPeers();
+    const res = await post("/v1/key-transfer/request", other.token, { poolId, requesterPrekey: requester.prekey });
+    expect(res.status).toBe(401);
+    expect((db.prepare("SELECT COUNT(*) AS n FROM sealed_key_transfers").get() as { n: number }).n).toBe(0);
+  });
+
+  it("refuses both endpoints for a peer token with no pinned node identity", async () => {
+    const { db, poolId, requester } = await sourceWithTwoPeers();
+    const legacyToken = newId();
+    db.prepare("INSERT INTO peers (peer_id, name, url, role, incoming_token_hash, created_at) VALUES (?, 'legacy', 'https://l.example/sync', 'home', ?, ?)").run(
+      newId(),
+      sha256Hex(legacyToken),
+      now(),
+    );
+    expect((await post("/v1/key-transfer/request", legacyToken, { poolId, requesterPrekey: requester.prekey })).status).toBe(403);
+    expect((await post("/v1/key-transfer/fetch", legacyToken, { transferId: newId() })).status).toBe(403);
+  });
+
+  it("caps pending transfers per peer and drops expired pending rows", async () => {
+    const { db, poolId, requester, other } = await sourceWithTwoPeers();
+    for (let i = 0; i < MAX_PENDING_TRANSFERS_PER_PEER; i++) {
+      expect((await post("/v1/key-transfer/request", requester.token, { poolId, requesterPrekey: requester.prekey })).status).toBe(200);
+    }
+    expect((await post("/v1/key-transfer/request", requester.token, { poolId, requesterPrekey: requester.prekey })).status).toBe(429);
+    // The cap is per peer: another peer is unaffected.
+    expect((await post("/v1/key-transfer/request", other.token, { poolId, requesterPrekey: other.prekey })).status).toBe(200);
+
+    // Once the requester's pending rows expire they are deleted, freeing the cap.
+    db.prepare("UPDATE sealed_key_transfers SET expires_at = ? WHERE requester_node_id = ?").run(new Date(Date.now() - 60_000).toISOString(), requester.nodeId);
+    expect((await post("/v1/key-transfer/request", requester.token, { poolId, requesterPrekey: requester.prekey })).status).toBe(200);
+    const rows = db.prepare("SELECT COUNT(*) AS n FROM sealed_key_transfers WHERE requester_node_id = ?").get(requester.nodeId) as { n: number };
+    expect(rows.n).toBe(1);
   });
 });

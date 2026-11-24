@@ -70,10 +70,10 @@ describe("sealed pool key transfer: happy path", () => {
     const pool = sealedPool(source, "pool-dev");
 
     const requesterPrekey = presentPrekey(requester);
-    const { transferId, sourcePrekey } = requestKeyTransfer(source.db, pool.poolId, requesterPrekey, source.nodeId, source.signingKeys.privateKey, source.encKeys);
+    const { transferId, sourcePrekey } = requestKeyTransfer(source.db, pool.poolId, requesterPrekey, source.nodeId, source.signingKeys.privateKey, source.encKeys, requester.nodeId);
 
     const approval = approveKeyTransfer(source.db, transferId, source.encKeys, pool.key);
-    const wrapped = fetchWrappedKey(source.db, transferId);
+    const wrapped = fetchWrappedKey(source.db, transferId, requester.nodeId);
 
     const completion = completeKeyTransfer(transferId, requester.encKeys, sourcePrekey, wrapped);
     expect(completion.confirmationCode).toBe(approval.confirmationCode); // both sides saw the same code
@@ -92,7 +92,7 @@ describe("sealed pool key transfer: refusal paths", () => {
     const pool = sealedPool(source, "pool-dev");
 
     const prekey = presentPrekey(stranger);
-    expect(() => requestKeyTransfer(source.db, pool.poolId, prekey, source.nodeId, source.signingKeys.privateKey, source.encKeys)).toThrow(CtxdError);
+    expect(() => requestKeyTransfer(source.db, pool.poolId, prekey, source.nodeId, source.signingKeys.privateKey, source.encKeys, stranger.nodeId)).toThrow(CtxdError);
   });
 
   it("refuses a request from a revoked peer", () => {
@@ -103,7 +103,7 @@ describe("sealed pool key transfer: refusal paths", () => {
     const pool = sealedPool(source, "pool-dev");
 
     const prekey = presentPrekey(requester);
-    expect(() => requestKeyTransfer(source.db, pool.poolId, prekey, source.nodeId, source.signingKeys.privateKey, source.encKeys)).toThrow(CtxdError);
+    expect(() => requestKeyTransfer(source.db, pool.poolId, prekey, source.nodeId, source.signingKeys.privateKey, source.encKeys, requester.nodeId)).toThrow(CtxdError);
   });
 
   it("refuses a request with a prekey not actually signed by the claimed node (substitution)", () => {
@@ -115,7 +115,7 @@ describe("sealed pool key transfer: refusal paths", () => {
 
     // The payload claims to be from `requester` but the signature is from `attacker`'s key.
     const forged: SignedPrekey = { nodeId: requester.nodeId, ...signEncryptionPrekey(requester.nodeId, requester.encKeys, attacker.signingKeys.privateKey) };
-    expect(() => requestKeyTransfer(source.db, pool.poolId, forged, source.nodeId, source.signingKeys.privateKey, source.encKeys)).toThrow(CtxdError);
+    expect(() => requestKeyTransfer(source.db, pool.poolId, forged, source.nodeId, source.signingKeys.privateKey, source.encKeys, requester.nodeId)).toThrow(CtxdError);
   });
 
   it("refuses fetching before approval", () => {
@@ -124,8 +124,8 @@ describe("sealed pool key transfer: refusal paths", () => {
     trustPeer(source, requester);
     const pool = sealedPool(source, "pool-dev");
 
-    const { transferId } = requestKeyTransfer(source.db, pool.poolId, presentPrekey(requester), source.nodeId, source.signingKeys.privateKey, source.encKeys);
-    expect(() => fetchWrappedKey(source.db, transferId)).toThrow(CtxdError);
+    const { transferId } = requestKeyTransfer(source.db, pool.poolId, presentPrekey(requester), source.nodeId, source.signingKeys.privateKey, source.encKeys, requester.nodeId);
+    expect(() => fetchWrappedKey(source.db, transferId, requester.nodeId)).toThrow(CtxdError);
   });
 
   it("refuses approving an unknown transfer id", () => {
@@ -140,10 +140,10 @@ describe("sealed pool key transfer: refusal paths", () => {
     trustPeer(source, requester);
     const pool = sealedPool(source, "pool-dev");
 
-    const { transferId } = requestKeyTransfer(source.db, pool.poolId, presentPrekey(requester), source.nodeId, source.signingKeys.privateKey, source.encKeys);
+    const { transferId } = requestKeyTransfer(source.db, pool.poolId, presentPrekey(requester), source.nodeId, source.signingKeys.privateKey, source.encKeys, requester.nodeId);
     approveKeyTransfer(source.db, transferId, source.encKeys, pool.key);
-    fetchWrappedKey(source.db, transferId); // first fetch succeeds
-    expect(() => fetchWrappedKey(source.db, transferId)).toThrow(CtxdError); // replay refused
+    fetchWrappedKey(source.db, transferId, requester.nodeId); // first fetch succeeds
+    expect(() => fetchWrappedKey(source.db, transferId, requester.nodeId)).toThrow(CtxdError); // replay refused
   });
 
   it("refuses approving an expired transfer, and a subsequent fetch too", () => {
@@ -152,11 +152,11 @@ describe("sealed pool key transfer: refusal paths", () => {
     trustPeer(source, requester);
     const pool = sealedPool(source, "pool-dev");
 
-    const { transferId } = requestKeyTransfer(source.db, pool.poolId, presentPrekey(requester), source.nodeId, source.signingKeys.privateKey, source.encKeys);
+    const { transferId } = requestKeyTransfer(source.db, pool.poolId, presentPrekey(requester), source.nodeId, source.signingKeys.privateKey, source.encKeys, requester.nodeId);
     source.db.prepare("UPDATE sealed_key_transfers SET expires_at = ? WHERE transfer_id = ?").run(new Date(Date.now() - 60_000).toISOString(), transferId);
 
     expect(() => approveKeyTransfer(source.db, transferId, source.encKeys, pool.key)).toThrow(CtxdError);
-    expect(() => fetchWrappedKey(source.db, transferId)).toThrow(CtxdError); // never became approved
+    expect(() => fetchWrappedKey(source.db, transferId, requester.nodeId)).toThrow(CtxdError); // never became approved
   });
 
   it("refuses enrolling for a pool that is not sealed", () => {
@@ -166,6 +166,6 @@ describe("sealed pool key transfer: refusal paths", () => {
     const poolId = newId();
     source.db.prepare("INSERT INTO pools (pool_id, name, storage, created_at) VALUES (?, 'pool-ops', 'shared', ?)").run(poolId, now());
 
-    expect(() => requestKeyTransfer(source.db, poolId, presentPrekey(requester), source.nodeId, source.signingKeys.privateKey, source.encKeys)).toThrow(CtxdError);
+    expect(() => requestKeyTransfer(source.db, poolId, presentPrekey(requester), source.nodeId, source.signingKeys.privateKey, source.encKeys, requester.nodeId)).toThrow(CtxdError);
   });
 });

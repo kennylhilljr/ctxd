@@ -107,7 +107,7 @@ async function handleRequest(
   }
 
   if (req.url && KEY_TRANSFER_PATHS.has(req.url)) {
-    await handleKeyTransferRequest(req, res, db, nodeId, req.url, flags);
+    await handleKeyTransferRequest(req, res, db, nodeId, req.url, auth.remoteNodeId, flags);
     return;
   }
 
@@ -116,9 +116,22 @@ async function handleRequest(
   res.writeHead(202, { "content-type": "application/json" }).end(JSON.stringify({ accepted: true }));
 }
 
-async function handleKeyTransferRequest(req: IncomingMessage, res: ServerResponse, db: Database.Database, nodeId: string, path: string, flags?: Map<string, boolean>): Promise<void> {
+async function handleKeyTransferRequest(
+  req: IncomingMessage,
+  res: ServerResponse,
+  db: Database.Database,
+  nodeId: string,
+  path: string,
+  callerNodeId: string | null,
+  flags?: Map<string, boolean>,
+): Promise<void> {
   if (!isFlagOn(flags, "sealed_pools.key_transfer")) {
     res.writeHead(404, { "content-type": "application/json" }).end(JSON.stringify({ error: "sealed_pools.key_transfer is off" }));
+    return;
+  }
+  // Every transfer is bound to the authenticated peer's node; a peer token with no pinned node identity cannot take part.
+  if (callerNodeId === null) {
+    res.writeHead(403, { "content-type": "application/json" }).end(JSON.stringify({ error: "peer has no pinned node identity" }));
     return;
   }
   try {
@@ -131,7 +144,7 @@ async function handleKeyTransferRequest(req: IncomingMessage, res: ServerRespons
       const databasePath = (db.prepare("SELECT file FROM pragma_database_list WHERE name = 'main'").get() as { file: string }).file;
       const signingKeys = new FileEventKeyProvider(databasePath).keyPair(nodeId);
       const encKeys = new FileEncryptionKeyProvider(databasePath).keyPair(nodeId);
-      const result = requestKeyTransfer(db, body.poolId, body.requesterPrekey, nodeId, signingKeys.privateKey, encKeys);
+      const result = requestKeyTransfer(db, body.poolId, body.requesterPrekey, nodeId, signingKeys.privateKey, encKeys, callerNodeId);
       res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(result));
       return;
     }
@@ -142,10 +155,10 @@ async function handleKeyTransferRequest(req: IncomingMessage, res: ServerRespons
       res.writeHead(400, { "content-type": "application/json" }).end(JSON.stringify({ error: "invalid key-transfer fetch" }));
       return;
     }
-    const wrappedKey = fetchWrappedKey(db, body.transferId);
+    const wrappedKey = fetchWrappedKey(db, body.transferId, callerNodeId);
     res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ wrappedKey }));
   } catch (err) {
-    const status = err instanceof CtxdError ? (err.code === "NOT_FOUND" ? 404 : err.code === "UNAUTHORIZED" ? 401 : 400) : 500;
+    const status = err instanceof CtxdError ? (err.code === "NOT_FOUND" ? 404 : err.code === "UNAUTHORIZED" ? 401 : err.code === "BUDGET_EXCEEDED" ? 429 : 400) : 500;
     res.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
   }
 }
