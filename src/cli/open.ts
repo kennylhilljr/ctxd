@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { expandHome, loadConfig } from "../config/config.js";
 import { requireFlag, resolveFlags } from "../config/flags.js";
 import { parsePath } from "../fsview/paths.js";
-import { collidingMirrorFiles } from "../mirror/markdown.js";
+import { collidingMirrorFiles, mirrorRelativePath } from "../mirror/markdown.js";
 import { resolveConfigPath } from "./common.js";
 
 export function run(argv: string[]): number {
@@ -14,7 +14,7 @@ export function run(argv: string[]): number {
   parsePath(uri);
   const config = loadConfig(resolveConfigPath({ configPath: values.config }));
   requireFlag(resolveFlags(config), "mirror");
-  const path = join(expandHome(config.mirror.dir), uri.slice("ctxd://".length).replace("#", "--"));
+  const path = join(expandHome(config.mirror.dir), mirrorRelativePath(uri));
   const shared = collidingMirrorFiles(path);
   if (shared.length) {
     console.error(`ctxd open: several entries share this path (an offline slug collision); open one of:\n${shared.map((file) => `  ${file}`).join("\n")}`);

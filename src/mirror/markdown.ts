@@ -122,7 +122,26 @@ function relativePath(row: MarkdownRow): string {
     skillName: row.skill_name ?? undefined,
     createdAt: new Date(decodeHlc(row.created_hlc).physical),
   });
-  return uri.slice("ctxd://".length).replace("#", "--");
+  return mirrorRelativePath(uri);
+}
+
+/**
+ * The mirror path, relative to the mirror root, of the entry at ctxd:// `uri`. A journal entry
+ * (`<scope>/journal/<y>/<m>/<d>.md#<slug>`) gets `<d>--<slug>.md`, so its file ends in `.md` like
+ * every other mirror file: it is read back, and its conflict copy is a separate file (#99).
+ */
+export function mirrorRelativePath(uri: string): string {
+  const path = uri.slice("ctxd://".length);
+  const hashAt = path.indexOf("#");
+  if (hashAt < 0) return path;
+  const before = path.slice(0, hashAt);
+  const slug = path.slice(hashAt + 1);
+  return `${before.endsWith(".md") ? before.slice(0, -3) : before}--${slug}.md`;
+}
+
+/** The conflict copy of the mirror file at `path`, never `path` itself (#99). */
+function conflictPathFor(path: string): string {
+  return path.endsWith(".md") ? `${path.slice(0, -3)}.conflict.md` : `${path}.conflict.md`;
 }
 
 /** `path` with a lowercase entry id inserted before its `.md` extension (appended when it has none). */
@@ -215,7 +234,7 @@ export function confirmArchiveRequest(ctx: WriteContext, ref: string): void {
 }
 
 function recordConflict(db: Database.Database, dir: string, path: string, row: MarkdownRow, fileRev: string | undefined, reason: string, text: string): void {
-  const conflictPath = path.replace(/\.md$/, ".conflict.md");
+  const conflictPath = conflictPathFor(path);
   atomicWrite(insideRoot(dir, conflictPath), `<!-- ${reason} -->\n${text}`);
   db.prepare(
     "INSERT INTO mirror_conflicts (path, entry_id, file_rev, current_rev, reason, created_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(path) DO UPDATE SET entry_id=excluded.entry_id, file_rev=excluded.file_rev, current_rev=excluded.current_rev, reason=excluded.reason, created_at=excluded.created_at",
@@ -626,7 +645,7 @@ function isSealedScope(db: Database.Database, scope: string): boolean {
 }
 
 function removeConflict(db: Database.Database, mirrorDir: string, path: string): void {
-  const conflict = insideRoot(mirrorDir, path.replace(/\.md$/, ".conflict.md"));
+  const conflict = insideRoot(mirrorDir, conflictPathFor(path));
   if (existsSync(conflict)) unlinkSync(conflict);
   db.prepare("DELETE FROM mirror_conflicts WHERE path = ?").run(path);
 }
