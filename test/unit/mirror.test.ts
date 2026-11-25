@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, readdirSync, writeFileSync, existsSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, readdirSync, writeFileSync, existsSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -124,28 +124,55 @@ describe("Markdown export and mirror (Spec v9 section 12.1)", () => {
     expect(count("entries")).toBe(1);
   });
 
-  it("imports a file again as a new entry after the entry its earlier copy created was archived (#83)", () => {
+  it("reuses the first entry when the rename itself fails once (#83)", () => {
     const f = fixture();
-    const live = () => f.db.prepare("SELECT entry_id FROM entries WHERE status NOT IN ('archived')").all() as { entry_id: string }[];
+    const count = (table: string) => (f.db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n;
+    const notes = join(f.mirror, "sample-app", "notes");
+    mkdirSync(notes, { recursive: true });
+    const source = join(f.mirror, "sample-app", "renamed.md");
+    writeFileSync(source, "---\nkind: \"note\"\ntitle: \"Rename retry\"\n---\n# Rename retry\n\nBody\n");
+    // A read-only notes/ folder lets mkdir succeed but makes the rename into it fail.
+    chmodSync(notes, 0o555);
+    try {
+      try { syncMirror(f.ctx, f.mirror); } catch { /* read-only canonical folder */ }
+      expect(existsSync(source)).toBe(true);
+      expect(count("entries")).toBe(1);
+    } finally {
+      chmodSync(notes, 0o755);
+    }
+    const [first] = f.db.prepare("SELECT entry_id FROM entries").all() as { entry_id: string }[];
+    syncMirror(f.ctx, f.mirror);
+    expect(existsSync(source)).toBe(false);
+    expect(f.db.prepare("SELECT entry_id FROM entries").all()).toEqual([first]);
+    expect(count("events")).toBe(1);
+  });
+
+  it("records a skip, not a duplicate, for a file whose earlier import was archived (#83)", () => {
+    const f = fixture();
+    const count = () => (f.db.prepare("SELECT COUNT(*) AS n FROM entries").get() as { n: number }).n;
     const content = "---\nkind: \"note\"\ntitle: \"Again\"\n---\n# Again\n\nBody\n";
     mkdirSync(join(f.mirror, "sample-app"), { recursive: true });
     const source = join(f.mirror, "sample-app", "again.md");
     writeFileSync(source, content);
     syncMirror(f.ctx, f.mirror);
-    const [first] = live();
-    expect(existsSync(source)).toBe(false);
-    for (const file of readdirSync(join(f.mirror, "sample-app", "notes"))) rmSync(join(f.mirror, "sample-app", "notes", file));
+    const { entry_id: first } = f.db.prepare("SELECT entry_id FROM entries").get() as { entry_id: string };
+    const notes = join(f.mirror, "sample-app", "notes");
+    for (const file of readdirSync(notes)) rmSync(join(notes, file));
     syncMirror(f.ctx, f.mirror);
-    confirmArchiveRequest(f.ctx, first!.entry_id);
-    expect(live()).toEqual([]);
+    confirmArchiveRequest(f.ctx, first);
 
     writeFileSync(source, content);
     syncMirror(f.ctx, f.mirror);
     syncMirror(f.ctx, f.mirror);
+    expect(count()).toBe(1);
+    expect(existsSync(source)).toBe(true);
+    expect(f.db.prepare("SELECT code, attempts FROM mirror_skips").get()).toEqual({ code: "NOT_ALLOWED", attempts: 2 });
+
+    writeFileSync(source, content.replace("Body", "Edited body"));
+    syncMirror(f.ctx, f.mirror);
+    expect(count()).toBe(2);
     expect(existsSync(source)).toBe(false);
-    expect(live()).toHaveLength(1);
-    expect(live()[0]!.entry_id).not.toBe(first!.entry_id);
-    expect((f.db.prepare("SELECT COUNT(*) AS n FROM entries").get() as { n: number }).n).toBe(2);
+    expect((f.db.prepare("SELECT COUNT(*) AS n FROM mirror_skips").get() as { n: number }).n).toBe(0);
   });
 
   it("creates an entry from a new file in a scope folder", () => {
