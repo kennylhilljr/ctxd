@@ -6,7 +6,7 @@
 | **Date** | 2026-11-24 |
 | **Layer** | L4 low-level design |
 | **Parent** | [Spec v10](../spec/SPEC-v10.md) section 7 |
-| **Implements** | [Replication and offline work](../prd/components/PRD-replication-v6.md) (RP-1 to RP-17); signed events from [Trust and safety](../prd/components/PRD-trust-safety-v5.md) |
+| **Implements** | [Replication and offline work](../prd/components/PRD-replication-v7.md) (RP-1 to RP-18); signed events from [Trust and safety](../prd/components/PRD-trust-safety-v5.md) |
 | **Owner** | A (agent-generated) by persona `component-designer`; human review at Gate 3 for contracts, persisted schema and access paths |
 | **Code** | `src/sync/`, `src/store/materialize.ts` |
 | **Moved from** | Spec v9 sections 7.1 to 7.4 and 7.7 |
@@ -20,7 +20,7 @@ Claim semantics (7.5) are in [LLD: Claims](LLD-claims-v1.md); cleanup operations
 
 ### 7.1 Protocol
 
-- **Endpoint:** `POST /v1/pull`, served on the sync listener and reachable only through `tailscale serve`. Body size, bad JSON, timeouts and internal errors follow [LLD: MCP server](LLD-mcp-server-v1.md) 8.3.1.
+- **Endpoint:** `POST /v1/pull`, served on the sync listener and reachable only through `tailscale serve`. Body size, bad JSON, timeouts and internal errors follow [LLD: MCP server](LLD-mcp-server-v2.md) 8.3.1.
 - **Request:** `{ "node": "<requesting node_id>", "vector": { "<origin_node>": <through_seq>, ... }, "limit": 500 }`
 - **Response:** `{ "events": [...], "through": { "<origin_node>": <seq>, ... }, "more": true|false }`
 - **What the server returns:** events where `origin_seq > vector[origin]`, ordered by `(origin_node, origin_seq)`, filtered by the replication policy for the requesting node (7.2).
@@ -32,7 +32,7 @@ Claim semantics (7.5) are in [LLD: Claims](LLD-claims-v1.md); cleanup operations
   2. Apply each event idempotently; `event_id` is unique, so duplicates are ignored.
   3. Store `through` in `sync_state`.
   4. Repeat while `more` is true.
-- **Rejected events (#74, RP-5, RP-8):** an event that fails to apply (a bad signature, a peer-binding refusal under 7.7, a validation in apply, a sealed envelope that won't decrypt, a malformed item) is recorded in `sync_rejections` with its reason and the item as received (a sealed item stays its ciphertext envelope), and the loop moves on, so `through` still advances and one bad event cannot stall replication from that peer. Kept items are retried on every later pull, since some failures heal on their own (an origin key pinned later, a sealed pool key or store that arrives later), and the row is deleted once its item applies. An item for an entry already purged here is recorded without the item. A purge applied by a pull, or replayed into a sealed pool, deletes the rejection rows for its entry; a sealed envelope that never decrypted has no known entry and stays ciphertext, and if it later decrypts for a purged entry, apply stores it already purged (7.6.6). A failure of the local database itself (any SQLite error other than a constraint violation: busy, locked, full, I/O) is not a rejection: it aborts the pull without advancing `through`, so a sick database never causes good events to be skipped. Rejections show in `ctxd sync` output, in `ctxd status` detail and as a `ctxd doctor` check.
+- **Rejected events (#74, RP-5, RP-8, RP-AC-8):** an event that fails to apply (a bad signature, a peer-binding refusal under 7.7, a validation in apply, a sealed envelope that won't decrypt, a malformed item) is recorded in `sync_rejections` with its reason and the item as received (a sealed item stays its ciphertext envelope), and the loop moves on, so `through` still advances and one bad event cannot stall replication from that peer. Kept items are retried on every later pull, since some failures heal on their own (an origin key pinned later, a sealed pool key or store that arrives later), and the row is deleted once its item applies. An item for an entry already purged here is recorded without the item. A purge applied by a pull, or replayed into a sealed pool, deletes the rejection rows for its entry; a sealed envelope that never decrypted has no known entry and stays ciphertext, and if it later decrypts for a purged entry, apply stores it already purged (7.6.6). A failure of the local database itself (any SQLite error other than a constraint violation: busy, locked, full, I/O) is not a rejection: it aborts the pull without advancing `through`, so a sick database never causes good events to be skipped. Rejections show in `ctxd sync` output, in `ctxd status` detail and as a `ctxd doctor` check.
 - **Triggering:**
   - **Scheduled:** every `interval_seconds`.
   - **On reconnect:** when a peer becomes reachable again.
@@ -64,7 +64,7 @@ Events for different parts of the same entry never interact: a status change and
 
 ### 7.4 Conflict policies
 
-Implements [PRD-replication-v6](../prd/components/PRD-replication-v6.md) section 5. Policies apply only when two events change the **same part** concurrently.
+Implements [PRD-replication-v7](../prd/components/PRD-replication-v7.md) section 5. Policies apply only when two events change the **same part** concurrently.
 
 | Part and kind | Policy on concurrent updates |
 |---|---|
@@ -99,7 +99,7 @@ origin's pinned key, so a key-bound peer may relay signed events from any other 
 event already stored locally is not checked, so this node's own older unsigned events echoed back
 by a peer do not stall the pull. A peer added without a node id and key is the legacy
 unauthenticated mode: its unsigned events are still accepted, and nothing ties them to the peer.
-A peer row with only one of the two bound is treated as key-bound. This extends TS-12 (signed
+A peer row with only one of the two bound is treated as key-bound. This implements RP-18 (criteria RP-AC-7 to RP-AC-11: refusal whatever the origin, record and continue, already-stored events skipped, signed relays verified, legacy peers kept) and extends TS-12 (signed
 events with per-node keys); tests: `test/unit/sync-peer-binding.test.ts`, including a property test
 over delivery order and paging.
 

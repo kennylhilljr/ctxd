@@ -6,7 +6,7 @@
 | **Date** | 2026-11-25 |
 | **Layer** | L4 low-level design |
 | **Parent** | [Spec v10](../spec/SPEC-v10.md) section 12 |
-| **Implements** | [Trust and safety](../prd/components/PRD-trust-safety-v5.md) (backups, startup checks), [Replication](../prd/components/PRD-replication-v6.md) (hub migration), [Filesystem view](../prd/components/PRD-filesystem-view-v2.md) (mirror and import, FS-6 and FS-8), [Skills](../prd/components/PRD-skills-v3.md) (native sync) |
+| **Implements** | [Trust and safety](../prd/components/PRD-trust-safety-v5.md) (backups, startup checks), [Replication](../prd/components/PRD-replication-v7.md) (hub migration), [Filesystem view](../prd/components/PRD-filesystem-view-v3.md) (mirror and import, FS-6, FS-8 and FS-10), [Skills](../prd/components/PRD-skills-v3.md) (native sync) |
 | **Owner** | A (agent-generated) by persona `sre`; human review at Gate 3 for contracts, persisted schema and access paths |
 | **Code** | `src/cli/`, `src/fsview/`, `src/mirror/`, `src/skills/`, `deploy/` |
 | **Moved from** | Spec v9 section 12; Spec v10 draft W5.4 and W5.5 |
@@ -65,7 +65,7 @@ Section numbers are the Spec's own (for example 9.1), unchanged from Spec v9, so
 
 ### 12.1 Markdown mirror and import
 
-Implements [Filesystem view](../prd/components/PRD-filesystem-view-v2.md) section 5. `ctxd mirror start` runs the mirror inside the server process; it is off by default.
+Implements [Filesystem view](../prd/components/PRD-filesystem-view-v3.md) section 5. `ctxd mirror start` runs the mirror inside the server process; it is off by default.
 
 - **Whose view.** The mirror is written as the human client and shows every scope I can read, except sealed pools, which are never written to disk in plaintext. The mirror directory is under the data directory, so the path guard (9.9) blocks agents from it.
 - **Files.** One file per entry at its path (4.2), plus generated `.abstract.md` and `.overview.md` per folder (read-only). Each entry file has YAML frontmatter, then the body:
@@ -86,7 +86,7 @@ links: ["[[supersedes::ctxd:sample-app/01JAB...]]"]
 ```
 
 - **Writing out.** While the feature is enabled, the server reconciles the mirror every 2 seconds. It rewrites files atomically (temporary file, then rename), and `mirror_files` records the revision and file hash.
-- **Containment.** Every write, rename and unlink in the mirror (and every file `ctxd export` writes) resolves against the mirror root and is refused if the result lies outside it or passes through a symbolic link below the root. This is defence in depth behind the name and slug validation in [LLD-data-model](LLD-data-model-v1.md) section 4.
+- **Containment.** Every write, rename and unlink in the mirror (and every file `ctxd export` writes) resolves against the mirror root and is refused if the result lies outside it or passes through a symbolic link below the root. This is defence in depth behind the name and slug validation in [LLD-data-model](LLD-data-model-v1.md) section 4. Implements FS-10; criteria FS-AC-9 (outside the root), FS-AC-10 (symbolic links in the mirror) and FS-AC-11 (export).
 - **Reading back.** Each reconciliation processes changed files:
   - **Unchanged hash:** ignore, so ctxd's own writes do not loop.
   - **Edited file:** compare the frontmatter `rev` with the current content revision. If it matches, apply the edit as a human-client update through the write path (6). If not, write `<name>.conflict.md` beside the file with my version and add a review item; nothing is applied.

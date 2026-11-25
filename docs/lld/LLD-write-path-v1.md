@@ -6,7 +6,7 @@
 | **Date** | 2026-10-20 |
 | **Layer** | L4 low-level design |
 | **Parent** | [Spec v10](../spec/SPEC-v10.md) section 6 |
-| **Implements** | [Knowledge model](../prd/components/PRD-knowledge-model-v4.md), [Trust and safety](../prd/components/PRD-trust-safety-v5.md) (sanitization and redaction requirements), [Persona pools and access](../prd/components/PRD-pools-access-v3.md) (held writes) |
+| **Implements** | [Knowledge model](../prd/components/PRD-knowledge-model-v4.md), [Trust and safety](../prd/components/PRD-trust-safety-v5.md) (sanitization and redaction requirements), [Persona pools and access](../prd/components/PRD-pools-access-v4.md) (held writes) |
 | **Owner** | A (agent-generated) by persona `component-designer`; human review at Gate 3 for contracts, persisted schema and access paths |
 | **Code** | `src/store/write.ts`, `src/security/` |
 | **Moved from** | Spec v9 sections 6 and 6.1 |

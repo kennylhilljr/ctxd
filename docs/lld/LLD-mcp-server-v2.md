@@ -6,7 +6,7 @@
 | **Date** | 2026-11-24 |
 | **Layer** | L4 low-level design |
 | **Parent** | [Spec v10](../spec/SPEC-v10.md) section 8 |
-| **Implements** | [Briefs and search](../prd/components/PRD-briefs-search-v5.md) (footprint, ergonomics), [Persona pools and access](../prd/components/PRD-pools-access-v3.md) (launcher), [Hooks](../prd/components/PRD-hooks-v6.md) (internal API) |
+| **Implements** | [Briefs and search](../prd/components/PRD-briefs-search-v5.md) (footprint, ergonomics), [Persona pools and access](../prd/components/PRD-pools-access-v4.md) (launcher), [Hooks](../prd/components/PRD-hooks-v6.md) (internal API) |
 | **Owner** | A (agent-generated) by persona `component-designer`; human review at Gate 3 for contracts, persisted schema and access paths |
 | **Code** | `src/server/`, `src/tools/`, `src/access/keychain.ts` |
 | **Moved from** | Spec v9 sections 8.1, 8.3 and 8.4 (8.2 and 8.5 moved to the [MCP tools contract](../contracts/mcp-tools-v1.md)) |
@@ -62,7 +62,7 @@ Both loopback listeners (MCP and sync, [LLD: Replication](LLD-replication-v2.md)
 
 ### 8.4 The `ctxd mcp` launcher
 
-Implements [PRD-pools-access-v3](../prd/components/PRD-pools-access-v3.md) section 6.2. `ctxd mcp --client <id>` is a stdio MCP server that each client starts from its single, user-level MCP entry.
+Implements [PRD-pools-access-v4](../prd/components/PRD-pools-access-v4.md) section 6.2. `ctxd mcp --client <id>` is a stdio MCP server that each client starts from its single, user-level MCP entry.
 
 1. **Working directory.** Take `CLAUDE_PROJECT_DIR` if set (Claude Code sets it in a server's environment), otherwise the process working directory (verify for each client at its pinned version).
 2. **Bypass.** If the directory is bypassed (3), serve no tools and exit cleanly.

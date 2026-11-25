@@ -20,7 +20,7 @@ Earlier changes are listed in [Spec v9](SPEC-v9.md), [v8](SPEC-v8.md) and before
 | **Stable section numbers.** Every numbered section keeps its Spec v9 number, in this document and in the LLDs, so `SPEC 9.1` or `Spec 7.6.6` in code comments, PRDs and AGENTS.md still points at the right text. Two previously unnumbered parts of section 3 now have numbers: 3.2 (additional configuration keys) and 3.3 (scope resolution and bypass) | "How this spec is organized" below |
 | **Schema caught up.** The data model LLD now carries the executable schema (version 21 at the split; later rows note each bump) from `src/store/schema.ts`, which adds `acl_cursors`, `node_origin_sequences`, `node_encryption_keys`, `sealed_key_transfers` and `sessions.cwd` that Spec v9's SQL lacked | [LLD: Data model](../lld/LLD-data-model-v1.md) 4 |
 | **Spec v10 draft folded in.** W5.1 approval timestamps (data model 4, digest 11.5); W5.2 crash sweep mechanical work (9.10); W5.3 list-mode ordering (11.2); W5.4 automatic skill sync and W5.5 Codex skills folder (12.2, closes open issue 16); the W5 PreCompact limitation (9.2); W2 sealed pool key transfer (10.6.1, CLI) | The LLD sections named |
-| **W3 sync observability folded in** (merged after the restructure). Served-side `peer_watermarks` (schema version 22), real sync age in `ctxd doctor` with `sync.stale_hours`, and a real `unsynced` count in `ctxd status` | [LLD: Replication](../lld/LLD-replication-v1.md) 7.1, [LLD: Operations](../lld/LLD-operations-v1.md) 12, [LLD: Hooks](../lld/LLD-hooks-v1.md) 9.11, [LLD: Data model](../lld/LLD-data-model-v1.md) 4 |
+| **W3 sync observability folded in** (merged after the restructure). Served-side `peer_watermarks` (schema version 22), real sync age in `ctxd doctor` with `sync.stale_hours`, and a real `unsynced` count in `ctxd status` | [LLD: Replication](../lld/LLD-replication-v2.md) 7.1, [LLD: Operations](../lld/LLD-operations-v1.md) 12, [LLD: Hooks](../lld/LLD-hooks-v1.md) 9.11, [LLD: Data model](../lld/LLD-data-model-v1.md) 4 |
 | **W4 scheduled backups folded in** (merged after the restructure). A launchd schedule for `ctxd backup` and a backup-age check in `ctxd doctor` | [LLD: Operations](../lld/LLD-operations-v1.md) 12, [Contract: CLI reference](../contracts/cli-reference-v1.md) |
 | **W6 search benchmark folded in** (merged after the restructure). A fixed relevance benchmark with a CI regression check, and FTS5 query escaping | [LLD: Briefs and search](../lld/LLD-briefs-search-v1.md) 11.2, section 14 |
 | **Mobile inbox (M7, W1) folded in** (merged after the restructure). W1 had written a full Spec v10 adding section 17; its section 17 is now [LLD: Mobile inbox](../lld/LLD-mobile-inbox-v1.md) and summarized below, its CLI row is in the CLI contract, and its other changes (W2, W5) were already in the LLDs | Section 17 below |
@@ -36,16 +36,16 @@ The Spec's section numbers are one namespace shared by this HLD and the LLDs. A 
 | 3 | Files and configuration | This document (file locations); [LLD: Configuration](../lld/LLD-configuration-v1.md) (keys, 3.1 feature flags); [LLD: Hooks](../lld/LLD-hooks-v1.md) (3.3 scope resolution and bypass) |
 | 4, 4.1 to 4.3, 5 | Data model, references, paths, kinds, identifiers and clocks | [LLD: Data model](../lld/LLD-data-model-v1.md) |
 | 6, 6.1 | Write path, sanitization pipeline | [LLD: Write path](../lld/LLD-write-path-v1.md) |
-| 7.1 to 7.4, 7.7 | Replication protocol, policy filter, apply, conflict policies, signed events | [LLD: Replication](../lld/LLD-replication-v1.md) |
+| 7.1 to 7.4, 7.7 | Replication protocol, policy filter, apply, conflict policies, signed events | [LLD: Replication](../lld/LLD-replication-v2.md) |
 | 7.5 | Claims and write intent | [LLD: Claims](../lld/LLD-claims-v1.md) |
 | 7.6 | Cleanup operations: flag, quarantine, revert, rollback, purge, tidy | [LLD: Context hygiene](../lld/LLD-context-hygiene-v1.md) |
-| 8.1, 8.3, 8.4 | Server instructions, internal API, `ctxd mcp` launcher | [LLD: MCP server](../lld/LLD-mcp-server-v1.md) |
+| 8.1, 8.3, 8.4 | Server instructions, internal API, `ctxd mcp` launcher | [LLD: MCP server](../lld/LLD-mcp-server-v2.md) |
 | 8.2, 8.5 | Tools, error codes, aliases, error envelope, metering | [Contract: MCP tools](../contracts/mcp-tools-v1.md) |
 | 9 | Hooks | [LLD: Hooks](../lld/LLD-hooks-v1.md) |
 | 10.1 | Threat model | This document |
 | 10.2 to 10.7 | Tailscale exposure, detectors, review rules, access evaluation, sealed pools (and key transfer), traversal | [LLD: Security and access](../lld/LLD-security-access-v1.md) |
 | 11 | Briefs, search, embeddings, importance, signals, digest, local model | [LLD: Briefs and search](../lld/LLD-briefs-search-v1.md) |
-| 12 | Operations, mirror and import, native skill sync | [LLD: Operations](../lld/LLD-operations-v1.md); procedures in [runbooks](../runbooks/) |
+| 12 | Operations, mirror and import, native skill sync | [LLD: Operations](../lld/LLD-operations-v2.md); procedures in [runbooks](../runbooks/) |
 | 13 | CLI reference | [Contract: CLI reference](../contracts/cli-reference-v1.md) |
 | 14 | Testing strategy | This document; per-criterion coverage in the [test plan](../test/test-plan-v1.md) |
 | 15, 16 | Repository layout, open issues | This document |
@@ -59,15 +59,15 @@ The Spec's section numbers are one namespace shared by this HLD and the LLDs. A 
 |---|---|---|
 | [Feature flags](../prd/components/PRD-feature-flags-v2.md) | 3.1, 9.1 (R7), 13 (`features`) | [LLD: Configuration](../lld/LLD-configuration-v1.md) |
 | [Knowledge model](../prd/components/PRD-knowledge-model-v4.md) | 4, 4.1, 4.3, 6, 7.3, 7.4, 8.2 (`context_write`, `context_get`), 13 (`history`, `show`) | [LLD: Data model](../lld/LLD-data-model-v1.md), [LLD: Write path](../lld/LLD-write-path-v1.md), [Contract: MCP tools](../contracts/mcp-tools-v1.md) |
-| [Persona pools and access](../prd/components/PRD-pools-access-v3.md) | 4 (pool and persona tables), 6 (step 1), 8.4, 10.5 to 10.7, 11, 13 (`pool`, `persona`, `grant`, `access`, `hold`) | [LLD: Security and access](../lld/LLD-security-access-v1.md), [LLD: MCP server](../lld/LLD-mcp-server-v1.md) |
+| [Persona pools and access](../prd/components/PRD-pools-access-v4.md) | 4 (pool and persona tables), 6 (step 1), 8.4, 10.5 to 10.7, 11, 13 (`pool`, `persona`, `grant`, `access`, `hold`) | [LLD: Security and access](../lld/LLD-security-access-v1.md), [LLD: MCP server](../lld/LLD-mcp-server-v2.md) |
 | [Context hygiene](../prd/components/PRD-context-hygiene-v2.md) | 4 (`flags`, `batches`, purge fields, `read_stats`), 7.6, 8.2 (`context_flag`), 11, 13 | [LLD: Context hygiene](../lld/LLD-context-hygiene-v1.md) |
-| [Hooks and agent lifecycle](../prd/components/PRD-hooks-v6.md) | 3.3 (scope resolution), 8.1, 8.3, 9.1 to 9.11 | [LLD: Hooks](../lld/LLD-hooks-v1.md), [LLD: MCP server](../lld/LLD-mcp-server-v1.md) |
+| [Hooks and agent lifecycle](../prd/components/PRD-hooks-v6.md) | 3.3 (scope resolution), 8.1, 8.3, 9.1 to 9.11 | [LLD: Hooks](../lld/LLD-hooks-v1.md), [LLD: MCP server](../lld/LLD-mcp-server-v2.md) |
 | [Claims and write intent](../prd/components/PRD-claims-v4.md) | 4 (`leases`, `claim_overlaps`, `sessions`), 7.4, 7.5, 8.2 (`context_claim`) | [LLD: Claims](../lld/LLD-claims-v1.md) |
-| [Trust and safety](../prd/components/PRD-trust-safety-v5.md) | 4 (`clients`), 6, 6.1, 10, 12 (backups, startup checks), 13 (`review`, `client`, `export`) | [LLD: Write path](../lld/LLD-write-path-v1.md), [LLD: Security and access](../lld/LLD-security-access-v1.md), [LLD: Operations](../lld/LLD-operations-v1.md) |
-| [Replication and offline work](../prd/components/PRD-replication-v6.md) | 4 (`events`, `sync_state`), 5, 7.1 to 7.4, 7.7, 11.2.1, 12 (migration) | [LLD: Replication](../lld/LLD-replication-v1.md), [LLD: Data model](../lld/LLD-data-model-v1.md) |
+| [Trust and safety](../prd/components/PRD-trust-safety-v5.md) | 4 (`clients`), 6, 6.1, 10, 12 (backups, startup checks), 13 (`review`, `client`, `export`) | [LLD: Write path](../lld/LLD-write-path-v1.md), [LLD: Security and access](../lld/LLD-security-access-v1.md), [LLD: Operations](../lld/LLD-operations-v2.md) |
+| [Replication and offline work](../prd/components/PRD-replication-v7.md) | 4 (`events`, `sync_state`), 5, 7.1 to 7.4, 7.7, 11.2.1, 12 (migration) | [LLD: Replication](../lld/LLD-replication-v2.md), [LLD: Data model](../lld/LLD-data-model-v1.md) |
 | [Briefs and search](../prd/components/PRD-briefs-search-v5.md) | 8.2 (`context_brief`, `context_search`, `context_get`), 8.5, 11 | [LLD: Briefs and search](../lld/LLD-briefs-search-v1.md), [Contract: MCP tools](../contracts/mcp-tools-v1.md) |
-| [Filesystem view](../prd/components/PRD-filesystem-view-v2.md) | 4 (`slug`, `mirror_files`), 4.2, 8.2 (`path`), 12.1, 13 (`ls`, `tree`, `read`, `grep`, `open`, `mirror`, `import`) | [LLD: Data model](../lld/LLD-data-model-v1.md), [LLD: Operations](../lld/LLD-operations-v1.md) |
-| [Skills](../prd/components/PRD-skills-v3.md) | 4 (`skill_name`, `skill_syncs`), 4.3, 6, 10.4, 11.1, 12.2, 13 (`skills`) | [LLD: Data model](../lld/LLD-data-model-v1.md), [LLD: Operations](../lld/LLD-operations-v1.md) |
+| [Filesystem view](../prd/components/PRD-filesystem-view-v3.md) | 4 (`slug`, `mirror_files`), 4.2, 8.2 (`path`), 12.1, 13 (`ls`, `tree`, `read`, `grep`, `open`, `mirror`, `import`) | [LLD: Data model](../lld/LLD-data-model-v1.md), [LLD: Operations](../lld/LLD-operations-v2.md) |
+| [Skills](../prd/components/PRD-skills-v3.md) | 4 (`skill_name`, `skill_syncs`), 4.3, 6, 10.4, 11.1, 12.2, 13 (`skills`) | [LLD: Data model](../lld/LLD-data-model-v1.md), [LLD: Operations](../lld/LLD-operations-v2.md) |
 | [Memory and journal](../prd/components/PRD-memory-journal-v2.md) | 4 (`significance`, `signals`), 4.1, 4.3, 6, 9.2, 9.3, 11.1 to 11.5, 13 (`remember`, `log`, `journal`, `digest`, `show --why`) | [LLD: Briefs and search](../lld/LLD-briefs-search-v1.md), [LLD: Data model](../lld/LLD-data-model-v1.md) |
 | [Mobile inbox](../prd/components/PRD-mobile-inbox-v2.md) | 17, 13 (`inbox`) | [LLD: Mobile inbox](../lld/LLD-mobile-inbox-v1.md), [Contract: CLI reference](../contracts/cli-reference-v1.md) |
 
@@ -147,13 +147,13 @@ Every write, from MCP, a hook or the CLI, goes through one function: authenticat
 
 Pull-based, per-origin event replication over the sync listener, exposed to the tailnet only; per-part apply with conflict policies by part and kind; convergence is a tested property. Detail:
 
-- 7.1 to 7.4 and 7.7 (protocol, policy filter, apply, conflict policies, signed events): [LLD: Replication](../lld/LLD-replication-v1.md)
+- 7.1 to 7.4 and 7.7 (protocol, policy filter, apply, conflict policies, signed events): [LLD: Replication](../lld/LLD-replication-v2.md)
 - 7.5 (claims and write intent): [LLD: Claims](../lld/LLD-claims-v1.md)
 - 7.6 (flag, quarantine, revert, release, rollback, purge, review-by and tidy): [LLD: Context hygiene](../lld/LLD-context-hygiene-v1.md)
 
 ## 8. MCP interface
 
-Seven terse tools under a fixed token budget (NFR-4), served by one server per node; hooks and the admin CLI use an internal API that costs agents no tokens; one stdio launcher per client picks the persona. Detail: [LLD: MCP server](../lld/LLD-mcp-server-v1.md) (8.1, 8.3, 8.4) and [Contract: MCP tools](../contracts/mcp-tools-v1.md) (8.2, 8.5).
+Seven terse tools under a fixed token budget (NFR-4), served by one server per node; hooks and the admin CLI use an internal API that costs agents no tokens; one stdio launcher per client picks the persona. Detail: [LLD: MCP server](../lld/LLD-mcp-server-v2.md) (8.1, 8.3, 8.4) and [Contract: MCP tools](../contracts/mcp-tools-v1.md) (8.2, 8.5).
 
 ## 9. Hooks
 
@@ -189,7 +189,7 @@ Briefs are deterministic, budgeted assemblies of the session's working set; sear
 
 ## 12. Operations
 
-One launchd service per node, startup integrity checks, nightly encrypted backups, `ctxd doctor`, hub migration, the optional Markdown mirror and native skill sync. Detail: [LLD: Operations](../lld/LLD-operations-v1.md); step-by-step procedures in [runbooks](../runbooks/).
+One launchd service per node, startup integrity checks, nightly encrypted backups, `ctxd doctor`, hub migration, the optional Markdown mirror and native skill sync. Detail: [LLD: Operations](../lld/LLD-operations-v2.md); step-by-step procedures in [runbooks](../runbooks/).
 
 ## 13. CLI reference
 

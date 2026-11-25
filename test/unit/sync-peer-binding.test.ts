@@ -93,6 +93,7 @@ function bound(target: Node): { peerId: string; hub: Node; hubKey: string } {
 }
 
 describe("peer-bound replication (LLD replication 7.7)", () => {
+  // RP-AC-7, RP-AC-8
   it("refuses an unsigned acl event a key-bound peer relays under a forged origin", async () => {
     const target = node("target");
     const { peerId } = bound(target);
@@ -104,6 +105,7 @@ describe("peer-bound replication (LLD replication 7.7)", () => {
     expect(target.db.prepare("SELECT 1 FROM pools WHERE name = 'pool-dev'").get()).toBeUndefined();
   });
 
+  // RP-AC-7, RP-AC-8
   it("refuses an unsigned event a key-bound peer sends under its own origin", async () => {
     const target = node("target");
     const { peerId, hub } = bound(target);
@@ -114,6 +116,37 @@ describe("peer-bound replication (LLD replication 7.7)", () => {
     expect(target.db.prepare("SELECT 1 FROM pools WHERE name = 'pool-dev'").get()).toBeUndefined();
   });
 
+  // RP-AC-7: the refusal does not depend on the operation; an ordinary content create is refused too.
+  it("refuses an unsigned content create a key-bound peer sends under its own origin", async () => {
+    const target = node("target");
+    const { peerId, hub } = bound(target);
+    const unsigned = wroteNote(hub, false);
+    await expect(pull(target, peerId, [unsigned])).resolves.toMatchObject({ rejected: 1, pulled: 0 });
+    expect(rejection(target, unsigned.eventId)).toMatch(/refused unsigned event/);
+    expect(target.db.prepare("SELECT 1 FROM events WHERE event_id = ?").get(unsigned.eventId)).toBeUndefined();
+    expect(target.db.prepare("SELECT 1 FROM entries WHERE entry_id = ?").get(unsigned.entryId)).toBeUndefined();
+  });
+
+  // RP-AC-7: an unsigned purge is refused too, and the entry it targets keeps its content.
+  it("refuses an unsigned purge event a key-bound peer relays, leaving the entry intact", async () => {
+    const target = node("target");
+    const { peerId } = bound(target);
+    const note = wroteNote(target, false);
+    const eventId = newId();
+    const originNode = newId();
+    const purge: WireEvent = {
+      eventId, originNode, originSeq: 1, hlc: encodeHlc({ physical: Date.now(), counter: 0, node: originNode }),
+      scopeId: target.scopeId, entryId: note.entryId, op: "purge", part: "meta", parentRevs: [], rev: makeRev(1, eventId),
+      clientId: target.humanId, sessionRef: null, requestId: null, requestHash: null,
+      payload: { fingerprint: "deadbeef", reason: "forged", scope_id: target.scopeId, kind: "note", slug: "note" }, prev: null,
+    };
+    await expect(pull(target, peerId, [purge])).resolves.toMatchObject({ rejected: 1 });
+    expect(rejection(target, eventId)).toMatch(/refused unsigned event/);
+    expect(target.db.prepare("SELECT 1 FROM events WHERE event_id = ?").get(eventId)).toBeUndefined();
+    expect(target.db.prepare("SELECT title, purged_at FROM entries WHERE entry_id = ?").get(note.entryId)).toEqual({ title: "Note", purged_at: null });
+  });
+
+  // RP-AC-10
   it("applies a signed event a key-bound peer relays from another pinned origin", async () => {
     const target = node("target");
     const { peerId } = bound(target);
@@ -125,13 +158,34 @@ describe("peer-bound replication (LLD replication 7.7)", () => {
     expect(target.db.prepare("SELECT 1 FROM events WHERE event_id = ?").get(relayed.eventId)).toBeDefined();
   });
 
+  // RP-AC-10: the relay is verified against the origin's pinned key, not merely accepted because it is signed.
+  it("refuses a signed event a key-bound peer relays when it fails verification against its origin's pinned key", async () => {
+    const target = node("target");
+    const { peerId } = bound(target);
+    const third = node("third");
+    const fourth = node("fourth");
+    const genuine = wroteNote(third, true);
+    pinPublicKey(target.db, third.nodeId, genuine.publicKey!, 0);
+    const tampered: WireEvent = { ...genuine, payload: { ...genuine.payload, title: "Forged" } };
+    const otherKey: WireEvent = { ...wroteNote(third, true), publicKey: wroteNote(fourth, true).publicKey };
+
+    await expect(pull(target, peerId, [tampered, otherKey])).resolves.toMatchObject({ pulled: 0, rejected: 2 });
+    for (const event of [tampered, otherKey]) {
+      expect(rejection(target, event.eventId)).toMatch(/signature|public key|hash/i);
+      expect(target.db.prepare("SELECT 1 FROM events WHERE event_id = ?").get(event.eventId)).toBeUndefined();
+    }
+    expect(target.db.prepare("SELECT 1 FROM entries WHERE entry_id = ?").get(genuine.entryId)).toBeUndefined();
+  });
+
+  // RP-AC-9
   it("lets a key-bound peer echo back this node's own older unsigned events", async () => {
     const target = node("target");
     const { peerId } = bound(target);
     const own = wroteNote(target, false);
-    await expect(pull(target, peerId, [own])).resolves.toMatchObject({ pulled: 0 });
+    await expect(pull(target, peerId, [own])).resolves.toMatchObject({ pulled: 0, rejected: 0 });
   });
 
+  // RP-AC-7
   it("treats a peer row with only a bound key as key-bound", async () => {
     const target = node("target");
     const peerId = addPeer(target.db, null, "some-public-key");
@@ -141,6 +195,28 @@ describe("peer-bound replication (LLD replication 7.7)", () => {
     expect(target.db.prepare("SELECT 1 FROM events WHERE event_id = ?").get(forged.eventId)).toBeUndefined();
   });
 
+  // RP-AC-7
+  it("treats a peer row with only a bound node id as key-bound", async () => {
+    const target = node("target");
+    const peerId = addPeer(target.db, newId(), null);
+    const forged = forgedGrant(target, newId());
+    await expect(pull(target, peerId, [forged])).resolves.toMatchObject({ rejected: 1 });
+    expect(rejection(target, forged.eventId)).toMatch(/refused unsigned event/);
+    expect(target.db.prepare("SELECT 1 FROM events WHERE event_id = ?").get(forged.eventId)).toBeUndefined();
+  });
+
+  // RP-AC-8
+  it("records a refused unsigned event and still applies the rest of the page", async () => {
+    const target = node("target");
+    const { peerId, hub } = bound(target);
+    const forged = forgedGrant(target, newId());
+    const good = wroteNote(hub, true);
+    await expect(pull(target, peerId, [forged, good])).resolves.toMatchObject({ rejected: 1, pulled: 1 });
+    expect(rejection(target, forged.eventId)).toMatch(/refused unsigned event/);
+    expect(target.db.prepare("SELECT 1 FROM events WHERE event_id = ?").get(good.eventId)).toBeDefined();
+  });
+
+  // RP-AC-5, RP-AC-7, RP-AC-8, RP-AC-10
   it("property (RP-AC-5): forged unsigned events are never stored, never stall the pull, and the signed events converge whatever the order and paging (#74)", async () => {
     const hub = node("hub");
     const third = node("third");
@@ -209,6 +285,7 @@ describe("peer-bound replication (LLD replication 7.7)", () => {
     );
   });
 
+  // RP-AC-11
   it("still applies unsigned events from a legacy peer with no bound node id", async () => {
     const target = node("target");
     const peerId = addPeer(target.db, null, null);

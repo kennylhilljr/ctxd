@@ -6,7 +6,7 @@
 | **Date** | 2026-10-20 |
 | **Layer** | L4 low-level design |
 | **Parent** | [Spec v10](../spec/SPEC-v10.md) section 10 (the threat model, 10.1, stays in the HLD) |
-| **Implements** | [Trust and safety](../prd/components/PRD-trust-safety-v5.md) (TS-1 to TS-17, access and safety requirements), [Persona pools and access](../prd/components/PRD-pools-access-v3.md) (PA-1 to PA-19) |
+| **Implements** | [Trust and safety](../prd/components/PRD-trust-safety-v5.md) (TS-1 to TS-17, access and safety requirements), [Persona pools and access](../prd/components/PRD-pools-access-v4.md) (PA-1 to PA-21) |
 | **Owner** | A (agent-generated) by persona `security-reviewer`; human review at Gate 3 for contracts, persisted schema and access paths |
 | **Code** | `src/security/`, `src/access/`, `src/sealed/` |
 | **Moved from** | Spec v9 sections 10.2 to 10.7; Spec v10 draft W2 (sealed pool key transfer) |
@@ -68,7 +68,7 @@ Rules are created from `ctxd review` ("approve and remember") or `ctxd review --
 
 ### 10.5 Access evaluation
 
-Implements [PRD-pools-access-v3](../prd/components/PRD-pools-access-v3.md) sections 5 and 6. Every request carries a persona token, which identifies the client and its **assumed pools** for the session. `level(client, assumed pools, scope)` returns `none`, `read`, `propose` or `write`:
+Implements [PRD-pools-access-v4](../prd/components/PRD-pools-access-v4.md) sections 5 and 6. Every request carries a persona token, which identifies the client and its **assumed pools** for the session. `level(client, assumed pools, scope)` returns `none`, `read`, `propose` or `write`:
 
 1. **Human client:** `write` for every scope (the `all` pool).
 2. **Global `_me` (`kind = me`):** `read` for every client. For writes, `propose`, or `write` if a pool grants `_me` at `write`.
@@ -97,7 +97,7 @@ Implements [PRD-pools-access-v3](../prd/components/PRD-pools-access-v3.md) secti
 
 ### 10.6 Sealed pools
 
-Implements [PRD-pools-access-v3](../prd/components/PRD-pools-access-v3.md) section 7.1.
+Implements [PRD-pools-access-v4](../prd/components/PRD-pools-access-v4.md) section 7.1.
 
 - **Separate file, same schema.** `ctxd pool seal <pool>` moves the pool's scopes, their entries, events, relations, flags, FTS and vector rows into a new database file under `sealed/`, named from the pool id. It uses the same schema, so the access layer and queries are unchanged apart from the database prefix.
 - **Encryption at rest.** The file uses `better-sqlite3-multiple-ciphers` in SQLCipher compatibility mode. The key is 32 random bytes. Database construction is injected so tests use the same lifecycle with an isolated test provider.
@@ -125,7 +125,7 @@ Implements [PRD-pools-access-v3](../prd/components/PRD-pools-access-v3.md) secti
 
 **Refusal paths**, every one surfaced as a specific error rather than a generic failure: no approval yet (`fetch` before `approve`), wrong or already-used `transferId`, an expired pending request, a revoked or unknown requesting node (checked at request time, not just at approval), and a replayed fetch after the transfer is already consumed.
 
-**Binding to the authenticated peer:** both endpoints act only for the node the peer token authenticates (`peers.remote_node_id`); a token with no pinned node identity gets 403. On `request`, the presented prekey's `nodeId` must be that node (401 otherwise), so a peer cannot replay another node's signed prekey; each peer may hold at most 5 unexpired pending transfers (429 beyond that), and expired pending rows are deleted when a new request arrives. On `fetch`, a caller that is not the transfer's `requester_node_id` gets the same 404 as an unknown id and consumes nothing, so no other peer can burn the one-time fetch.
+**Binding to the authenticated peer:** both endpoints act only for the node the peer token authenticates (`peers.remote_node_id`); a token with no pinned node identity gets 403. On `request`, the presented prekey's `nodeId` must be that node (401 otherwise), so a peer cannot replay another node's signed prekey; each peer may hold at most 5 unexpired pending transfers (429 beyond that), and expired pending rows are deleted when a new request arrives. On `fetch`, a caller that is not the transfer's `requester_node_id` gets the same 404 as an unknown id and consumes nothing, so no other peer can burn the one-time fetch. Implements PA-21; criteria PA-AC-14 (no pinned identity, 403), PA-AC-15 (another node's prekey, 401), PA-AC-16 (another peer's fetch, 404), PA-AC-17 (five pending, 429) and PA-AC-18 (expired rows deleted first).
 
 **Revoking a node:** at minimum, no new keys. A revoked node's peer record fails the un-revoked check at request time, so it can never start or complete a new transfer. **Existing sealed pools are not re-keyed** on revocation: a pool key a since-revoked node already received stays valid for whatever that node already holds, since rotating a pool's key and redistributing it to every other enrolled node is a materially heavier operation (decrypt and re-encrypt the sealed file, re-wrap for every remaining node) that this slice does not build. A future `ctxd pool rekey <pool>` is the place for that, not assumed here.
 
@@ -172,7 +172,7 @@ nodes that would lose access, and this warning) and changes nothing.
 
 ### 10.7 Traversal rule
 
-Implements [PRD-pools-access-v3](../prd/components/PRD-pools-access-v3.md) section 7.2. Every operation that moves from one entry to another re-evaluates `level` for the target's scope, under the session's persona:
+Implements [PRD-pools-access-v4](../prd/components/PRD-pools-access-v4.md) section 7.2. Every operation that moves from one entry to another re-evaluates `level` for the target's scope, under the session's persona:
 
 - related entries in `context_get`;
 - supersession chains and `superseded_by`;
