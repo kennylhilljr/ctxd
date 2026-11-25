@@ -8,7 +8,7 @@
 | **Owner** | C (co-authored): persona `architect` drafts, the owner decides at Gate 2 |
 | **Implements** | [PRD v8](../prd/PRD-v8.md) and its component PRDs (traceability below) |
 | **Supersedes** | [Spec v9](SPEC-v9.md) and the working notes formerly in `SPEC-v10-draft.md` |
-| **Related** | [ADR 0001](../adr/0001-local-first-replicated-store.md), [ADR 0002](../adr/0002-event-log-sync.md), [ADR 0003](../adr/0003-no-public-endpoint.md), [ADR 0004](../adr/0004-embeddings-replicate.md), [Prior art v4](../research/prior-art-v4.md), [Test plan v1](../test/test-plan-v1.md) |
+| **Related** | [ADR 0001](../adr/0001-local-first-replicated-store.md), [ADR 0002](../adr/0002-event-log-sync.md), [ADR 0003](../adr/0003-no-public-endpoint.md), [ADR 0004](../adr/0004-embeddings-replicate.md), [Prior art v4](../research/prior-art-v4.md), [Test plan v2](../test/test-plan-v2.md) |
 
 ## Changes in v10
 
@@ -45,9 +45,9 @@ The Spec's section numbers are one namespace shared by this HLD and the LLDs. A 
 | 10.1 | Threat model | This document |
 | 10.2 to 10.7 | Tailscale exposure, detectors, review rules, access evaluation, sealed pools (and key transfer), traversal | [LLD: Security and access](../lld/LLD-security-access-v1.md) |
 | 11 | Briefs, search, embeddings, importance, signals, digest, local model | [LLD: Briefs and search](../lld/LLD-briefs-search-v1.md) |
-| 12 | Operations, mirror and import, native skill sync | [LLD: Operations](../lld/LLD-operations-v2.md); procedures in [runbooks](../runbooks/) |
+| 12 | Operations, mirror and import, native skill sync | [LLD: Operations](../lld/LLD-operations-v3.md); procedures in [runbooks](../runbooks/) |
 | 13 | CLI reference | [Contract: CLI reference](../contracts/cli-reference-v1.md) |
-| 14 | Testing strategy | This document; per-criterion coverage in the [test plan](../test/test-plan-v1.md) |
+| 14 | Testing strategy | This document; per-criterion coverage in the [test plan](../test/test-plan-v2.md) |
 | 15, 16 | Repository layout, open issues | This document |
 | 17 | Mobile inbox: transport, pull engine, provenance, cloud adapter, brief publishing, CLI | [LLD: Mobile inbox](../lld/LLD-mobile-inbox-v1.md); deployment in [runbooks](../runbooks/mobile-inbox-deploy-v1.md) |
 
@@ -63,15 +63,15 @@ The Spec's section numbers are one namespace shared by this HLD and the LLDs. A 
 | [Context hygiene](../prd/components/PRD-context-hygiene-v2.md) | 4 (`flags`, `batches`, purge fields, `read_stats`), 7.6, 8.2 (`context_flag`), 11, 13 | [LLD: Context hygiene](../lld/LLD-context-hygiene-v1.md) |
 | [Hooks and agent lifecycle](../prd/components/PRD-hooks-v6.md) | 3.3 (scope resolution), 8.1, 8.3, 9.1 to 9.11 | [LLD: Hooks](../lld/LLD-hooks-v1.md), [LLD: MCP server](../lld/LLD-mcp-server-v2.md) |
 | [Claims and write intent](../prd/components/PRD-claims-v4.md) | 4 (`leases`, `claim_overlaps`, `sessions`), 7.4, 7.5, 8.2 (`context_claim`) | [LLD: Claims](../lld/LLD-claims-v1.md) |
-| [Trust and safety](../prd/components/PRD-trust-safety-v5.md) | 4 (`clients`), 6, 6.1, 10, 12 (backups, startup checks), 13 (`review`, `client`, `export`) | [LLD: Write path](../lld/LLD-write-path-v1.md), [LLD: Security and access](../lld/LLD-security-access-v1.md), [LLD: Operations](../lld/LLD-operations-v2.md) |
+| [Trust and safety](../prd/components/PRD-trust-safety-v5.md) | 4 (`clients`), 6, 6.1, 10, 12 (backups, startup checks), 13 (`review`, `client`, `export`) | [LLD: Write path](../lld/LLD-write-path-v1.md), [LLD: Security and access](../lld/LLD-security-access-v1.md), [LLD: Operations](../lld/LLD-operations-v3.md) |
 | [Replication and offline work](../prd/components/PRD-replication-v7.md) | 4 (`events`, `sync_state`), 5, 7.1 to 7.4, 7.7, 11.2.1, 12 (migration) | [LLD: Replication](../lld/LLD-replication-v2.md), [LLD: Data model](../lld/LLD-data-model-v1.md) |
 | [Briefs and search](../prd/components/PRD-briefs-search-v5.md) | 8.2 (`context_brief`, `context_search`, `context_get`), 8.5, 11 | [LLD: Briefs and search](../lld/LLD-briefs-search-v1.md), [Contract: MCP tools](../contracts/mcp-tools-v1.md) |
-| [Filesystem view](../prd/components/PRD-filesystem-view-v3.md) | 4 (`slug`, `mirror_files`), 4.2, 8.2 (`path`), 12.1, 13 (`ls`, `tree`, `read`, `grep`, `open`, `mirror`, `import`) | [LLD: Data model](../lld/LLD-data-model-v1.md), [LLD: Operations](../lld/LLD-operations-v2.md) |
-| [Skills](../prd/components/PRD-skills-v3.md) | 4 (`skill_name`, `skill_syncs`), 4.3, 6, 10.4, 11.1, 12.2, 13 (`skills`) | [LLD: Data model](../lld/LLD-data-model-v1.md), [LLD: Operations](../lld/LLD-operations-v2.md) |
+| [Filesystem view](../prd/components/PRD-filesystem-view-v3.md) | 4 (`slug`, `mirror_files`), 4.2, 8.2 (`path`), 12.1, 13 (`ls`, `tree`, `read`, `grep`, `open`, `mirror`, `import`) | [LLD: Data model](../lld/LLD-data-model-v1.md), [LLD: Operations](../lld/LLD-operations-v3.md) |
+| [Skills](../prd/components/PRD-skills-v3.md) | 4 (`skill_name`, `skill_syncs`), 4.3, 6, 10.4, 11.1, 12.2, 13 (`skills`) | [LLD: Data model](../lld/LLD-data-model-v1.md), [LLD: Operations](../lld/LLD-operations-v3.md) |
 | [Memory and journal](../prd/components/PRD-memory-journal-v2.md) | 4 (`significance`, `signals`), 4.1, 4.3, 6, 9.2, 9.3, 11.1 to 11.5, 13 (`remember`, `log`, `journal`, `digest`, `show --why`) | [LLD: Briefs and search](../lld/LLD-briefs-search-v1.md), [LLD: Data model](../lld/LLD-data-model-v1.md) |
 | [Mobile inbox](../prd/components/PRD-mobile-inbox-v2.md) | 17, 13 (`inbox`) | [LLD: Mobile inbox](../lld/LLD-mobile-inbox-v1.md), [Contract: CLI reference](../contracts/cli-reference-v1.md) |
 
-Acceptance criteria for every component, and the tests that verify each one, are in the [test plan](../test/test-plan-v1.md).
+Acceptance criteria for every component, and the tests that verify each one, are in the [test plan](../test/test-plan-v2.md).
 
 Items marked **(verify)** depend on third-party behavior that must be confirmed against current client documentation during implementation.
 
@@ -189,7 +189,7 @@ Briefs are deterministic, budgeted assemblies of the session's working set; sear
 
 ## 12. Operations
 
-One launchd service per node, startup integrity checks, nightly encrypted backups, `ctxd doctor`, hub migration, the optional Markdown mirror and native skill sync. Detail: [LLD: Operations](../lld/LLD-operations-v2.md); step-by-step procedures in [runbooks](../runbooks/).
+One launchd service per node, startup integrity checks, nightly encrypted backups, `ctxd doctor`, hub migration, the optional Markdown mirror and native skill sync. Detail: [LLD: Operations](../lld/LLD-operations-v3.md); step-by-step procedures in [runbooks](../runbooks/).
 
 ## 13. CLI reference
 
@@ -230,7 +230,7 @@ Detail: [Contract: CLI reference](../contracts/cli-reference-v1.md).
 | Search quality | Fixed benchmark: hybrid stays within 0.03 of its recorded MRR, nDCG and recall baseline and beats keyword-only on paraphrase queries (W6) | vitest, `npm run bench:search` |
 | End to end | Two real servers on different ports; Claude Code and Codex smoke scripts (manual, per release) | scripts |
 
-Each component's acceptance criteria, and the tests that verify them, are mapped in the [test plan](../test/test-plan-v1.md).
+Each component's acceptance criteria, and the tests that verify them, are mapped in the [test plan](../test/test-plan-v2.md).
 
 ## 15. Repository layout
 

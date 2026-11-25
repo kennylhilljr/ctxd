@@ -13,7 +13,9 @@ const read = (path: string) => readFileSync(join(root, path), "utf8");
 const readme = read("docs/README.md");
 // The authoritative part of the map: the layer tables and the component table, not the history below them.
 const map = readme.slice(0, readme.indexOf("## Conventions"));
-const designLink = /\]\(((?:\.\.\/)?(?:lld|contracts)\/([\w-]+)-v(\d+)\.md)/g;
+// LLDs, contracts and the test plan: the L4 documents the map versions (issue 102 added the test plan).
+const designLink = /\]\(((?:\.\.\/)?(?:lld|contracts|test)\/([\w-]+)-v(\d+)\.md)/g;
+const designDirs = ["lld", "contracts", "test"];
 
 function links(text: string): { path: string; name: string; version: number }[] {
   return [...text.matchAll(designLink)].map((m) => ({
@@ -34,7 +36,7 @@ function latestSpec(): string {
   return `docs/${m![1]}`;
 }
 
-describe("doc map is authoritative for latest LLD versions (issue 90)", () => {
+describe("doc map is authoritative for latest LLD, contract and test plan versions (issues 90, 102)", () => {
   it("the map lists only the latest version of each LLD and contract", () => {
     const listed = links(map);
     expect(listed.length).toBeGreaterThan(0);
@@ -44,7 +46,7 @@ describe("doc map is authoritative for latest LLD versions (issue 90)", () => {
   it("the map lists the latest version of every LLD and contract on disk", () => {
     const mapped = new Set(links(map).map((l) => l.path));
     const latest = new Map<string, { path: string; version: number }>();
-    for (const dir of ["lld", "contracts"]) {
+    for (const dir of designDirs) {
       for (const file of readdirSync(join(root, "docs", dir))) {
         const m = /^([\w-]+)-v(\d+)\.md$/.exec(file);
         if (!m) continue;
@@ -74,6 +76,33 @@ describe("doc map is authoritative for latest LLD versions (issue 90)", () => {
     const table = links(routing.slice(0, routing.indexOf("### Traceability")));
     const tabled = new Set(table.map((l) => l.path));
     for (const path of mapped) expect(tabled.has(path), `${path} is missing from the Spec's section table`).toBe(true);
+  });
+
+  it("the Spec's Related row and AGENTS.md link the test plan the map lists (issue 102)", () => {
+    const mapped = links(map).filter((l) => l.path.startsWith("test/"));
+    expect(mapped.map((l) => l.name)).toEqual(["test-plan"]);
+    const related = read(latestSpec()).split("\n").find((line) => line.startsWith("| **Related** |"));
+    expect(related).toBeDefined();
+    const agents = read("AGENTS.md").replaceAll("](docs/", "](");
+    for (const text of [related!, agents]) {
+      const plans = links(text).filter((l) => l.path.startsWith("test/"));
+      expect(plans.length).toBeGreaterThan(0);
+      for (const l of plans) expect(l.path).toBe(mapped[0]!.path);
+    }
+  });
+
+  it("every later version of an L4 document names the version it supersedes (issue 102)", () => {
+    const missing: string[] = [];
+    for (const dir of designDirs) {
+      for (const file of readdirSync(join(root, "docs", dir))) {
+        const m = /^([\w-]+)-v(\d+)\.md$/.exec(file);
+        if (!m || m[2] === "1") continue;
+        const previous = `${m[1]}-v${Number(m[2]) - 1}.md`;
+        const row = read(`docs/${dir}/${file}`).split("\n").find((line) => line.startsWith("| **Supersedes** |"));
+        if (!row?.includes(`](${previous})`)) missing.push(`${dir}/${file} does not supersede ${previous}`);
+      }
+    }
+    expect(missing).toEqual([]);
   });
 
   it("AGENTS.md states the rule without a new HLD version per LLD version", () => {
