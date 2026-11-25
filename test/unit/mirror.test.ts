@@ -98,6 +98,56 @@ describe("Markdown export and mirror (Spec v9 section 12.1)", () => {
     expect(f.db.prepare("SELECT op FROM events ORDER BY origin_seq DESC LIMIT 1").get()).toEqual({ op: "status" });
   });
 
+  it("imports a new file once when moving it to its canonical path fails (#83)", () => {
+    const f = fixture();
+    const count = (table: string) => (f.db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n;
+    mkdirSync(join(f.mirror, "sample-app"), { recursive: true });
+    const source = join(f.mirror, "sample-app", "new-note.md");
+    writeFileSync(source, "---\nkind: \"note\"\ntitle: \"Retry note\"\n---\n# Retry note\n\nBody\n");
+    // A regular file where the canonical notes/ folder belongs makes mkdir (and the export) fail.
+    const blocker = join(f.mirror, "sample-app", "notes");
+    writeFileSync(blocker, "not a directory");
+    for (let i = 0; i < 3; i++) {
+      try { syncMirror(f.ctx, f.mirror); } catch { /* blocked canonical folder */ }
+    }
+    expect(count("entries")).toBe(1);
+    expect(count("events")).toBe(1);
+    expect(existsSync(source)).toBe(true);
+
+    rmSync(blocker);
+    syncMirror(f.ctx, f.mirror);
+    expect(count("entries")).toBe(1);
+    expect(count("events")).toBe(1);
+    expect(existsSync(source)).toBe(false);
+    expect(f.db.prepare("SELECT title FROM entries").get()).toEqual({ title: "Retry note" });
+    syncMirror(f.ctx, f.mirror);
+    expect(count("entries")).toBe(1);
+  });
+
+  it("imports a file again as a new entry after the entry its earlier copy created was archived (#83)", () => {
+    const f = fixture();
+    const live = () => f.db.prepare("SELECT entry_id FROM entries WHERE status NOT IN ('archived')").all() as { entry_id: string }[];
+    const content = "---\nkind: \"note\"\ntitle: \"Again\"\n---\n# Again\n\nBody\n";
+    mkdirSync(join(f.mirror, "sample-app"), { recursive: true });
+    const source = join(f.mirror, "sample-app", "again.md");
+    writeFileSync(source, content);
+    syncMirror(f.ctx, f.mirror);
+    const [first] = live();
+    expect(existsSync(source)).toBe(false);
+    for (const file of readdirSync(join(f.mirror, "sample-app", "notes"))) rmSync(join(f.mirror, "sample-app", "notes", file));
+    syncMirror(f.ctx, f.mirror);
+    confirmArchiveRequest(f.ctx, first!.entry_id);
+    expect(live()).toEqual([]);
+
+    writeFileSync(source, content);
+    syncMirror(f.ctx, f.mirror);
+    syncMirror(f.ctx, f.mirror);
+    expect(existsSync(source)).toBe(false);
+    expect(live()).toHaveLength(1);
+    expect(live()[0]!.entry_id).not.toBe(first!.entry_id);
+    expect((f.db.prepare("SELECT COUNT(*) AS n FROM entries").get() as { n: number }).n).toBe(2);
+  });
+
   it("creates an entry from a new file in a scope folder", () => {
     const f = fixture();
     const dir = join(f.mirror, "sample-app", "notes");

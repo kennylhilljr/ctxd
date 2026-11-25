@@ -222,6 +222,30 @@ function setReviewAfter(ctx: WriteContext, row: MarkdownRow, value: string | nul
   })();
 }
 
+/**
+ * The request id for importing an untracked mirror file comes from its path and content, so a retry
+ * after a failed mkdir or rename replays the earlier write through writeEntry's idempotency check
+ * instead of importing the same file again as a duplicate entry (#83). If the entry an earlier
+ * import created is no longer live (archived, deleted, superseded), the id chains past it so the
+ * file imports as a new entry, and that new import is itself idempotent.
+ */
+function importRequestId(db: Database.Database, clientId: string, path: string, text: string): string {
+  const idFor = (prior: string) => `mirror-import:${hash(`${path}\0${text}\0${prior}`)}`;
+  const priorImport = db.prepare(
+    `SELECT ev.entry_id, e.status, e.purged_at FROM events ev LEFT JOIN entries e ON e.entry_id = ev.entry_id
+     WHERE ev.client_id = ? AND ev.request_id = ?`,
+  );
+  let requestId = idFor("");
+  for (;;) {
+    const prior = priorImport.get(clientId, requestId) as { entry_id: string; status: string | null; purged_at: string | null } | undefined;
+    if (!prior) return requestId;
+    if (prior.status !== null && prior.purged_at === null && !STALE_IMPORT.has(prior.status)) return requestId;
+    requestId = idFor(prior.entry_id);
+  }
+}
+
+const STALE_IMPORT = new Set(["deleted", "archived", "superseded", "quarantined"]);
+
 export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: number; applied: number; conflicts: number; archiveRequests: number } {
   if (!isFlagOn(ctx.flags, "mirror")) return { written: 0, applied: 0, conflicts: 0, archiveRequests: 0 };
   const { db } = ctx;
@@ -292,7 +316,8 @@ export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: num
     if (trackedPaths.has(path)) continue;
     untracked.add(skipKey(path));
     try {
-      const parsed = parseMarkdown(readFileSync(file, "utf8"), path.replace(/\.md$/, "").split(/[\\/]/).pop() ?? "New note");
+      const text = readFileSync(file, "utf8");
+      const parsed = parseMarkdown(text, path.replace(/\.md$/, "").split(/[\\/]/).pop() ?? "New note");
       if (parsed.meta.ref) {
         clearSkip(db, path);
         continue;
@@ -306,7 +331,7 @@ export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: num
       if (sealed) throw new CtxdError("SCOPE_FORBIDDEN", `Mirror writes to sealed scope ${scope} are refused`);
       const result = writeEntry(ctx, {
         scope, kind: parsed.meta.kind ?? "note", title: parsed.title, body: parsed.body,
-        tags: parsed.meta.tags, request_id: newId(),
+        tags: parsed.meta.tags, request_id: importRequestId(db, ctx.clientId, path, text),
       } as never);
       if (!("held" in result)) {
         const created = rows(db).find((row) => row.entry_id === result.id);
