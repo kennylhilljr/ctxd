@@ -181,7 +181,7 @@ function recordConflict(db: Database.Database, dir: string, path: string, row: M
   const conflictPath = path.replace(/\.md$/, ".conflict.md");
   atomicWrite(insideRoot(dir, conflictPath), `<!-- ${reason} -->\n${text}`);
   db.prepare(
-    "INSERT INTO mirror_conflicts (path, entry_id, file_rev, current_rev, reason, created_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(path) DO UPDATE SET file_rev=excluded.file_rev, current_rev=excluded.current_rev, reason=excluded.reason, created_at=excluded.created_at",
+    "INSERT INTO mirror_conflicts (path, entry_id, file_rev, current_rev, reason, created_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(path) DO UPDATE SET entry_id=excluded.entry_id, file_rev=excluded.file_rev, current_rev=excluded.current_rev, reason=excluded.reason, created_at=excluded.created_at",
   ).run(path, row.entry_id, fileRev ?? null, row.content_rev, reason, nowIso());
 }
 
@@ -590,7 +590,7 @@ function removeInactiveUntracked(db: Database.Database, mirrorDir: string, path:
   // still carries the entry's content revision, title, body and tags (every render writes tags).
   // A file that no longer parses (a partial save) counts as edited, so it is kept.
   let parsed: ReturnType<typeof parseMarkdown> | undefined;
-  try { parsed = parseMarkdown(text, row.title); } catch { /* kept as a conflict copy below */ }
+  try { parsed = parseMarkdown(text.replace(/\r\n/g, "\n"), row.title); } catch { /* kept as a conflict copy below */ }
   const unedited = parsed !== undefined && parsed.meta.rev === row.content_rev && parsed.title === row.title &&
     parsed.body === row.body && JSON.stringify(parsed.meta.tags) === row.tags;
   if (!unedited) recordConflict(db, mirrorDir, path, row, parsed?.meta.rev, `This entry is no longer mirrored (${row.status}); your edit was not applied.`, text);

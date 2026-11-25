@@ -355,6 +355,7 @@ describe("Markdown export and mirror (Spec v9 section 12.1)", () => {
     syncMirror(f.ctx, f.mirror); syncMirror(f.ctx, f.mirror);
     expect(existsSync(file)).toBe(false);
     expect(count(f, "entries")).toBe(1);
+    expect(existsSync(file.replace(/\.md$/, ".conflict.md"))).toBe(false); // unedited, so no conflict copy
   });
 
   it("keeps an untracked file whose tags line was removed as a conflict copy when its entry is archived (#91)", () => {
