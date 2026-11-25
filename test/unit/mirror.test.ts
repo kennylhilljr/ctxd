@@ -1,4 +1,4 @@
-import { chmodSync, lstatSync, mkdtempSync, readFileSync, readdirSync, writeFileSync, existsSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
+import { chmodSync, lstatSync, mkdtempSync, readFileSync, readdirSync, renameSync, writeFileSync, existsSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import fc from "fast-check";
@@ -7,7 +7,7 @@ import { HlcClock } from "../../src/core/hlc.js";
 import { newId } from "../../src/core/ids.js";
 import { openDatabase } from "../../src/store/db.js";
 import { writeEntry, type WriteContext } from "../../src/store/write.js";
-import { confirmArchiveRequest, exportMarkdown, importMarkdown, parseMarkdown, syncMirror } from "../../src/mirror/markdown.js";
+import { collidingMirrorFiles, confirmArchiveRequest, exportMarkdown, importMarkdown, parseMarkdown, syncMirror } from "../../src/mirror/markdown.js";
 import { checkMirrorSkips } from "../../src/cli/doctor.js";
 import { setEntryStatus } from "../../src/store/tidy.js";
 import { formatRef } from "../../src/model/refs.js";
@@ -31,6 +31,22 @@ function fixture() {
 
 function count(f: ReturnType<typeof fixture>, table: "entries" | "events"): number {
   return (f.db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n;
+}
+
+/** Gives `second` the slug of `first`, an offline slug collision; returns their shared canonical path. */
+function collide(f: ReturnType<typeof fixture>, first: string, second: string): string {
+  const { slug } = f.db.prepare("SELECT slug FROM entries WHERE entry_id = ?").get(first) as { slug: string };
+  f.db.prepare("UPDATE entries SET slug = ? WHERE entry_id = ?").run(slug, second);
+  return join("sample-app", "notes", `${slug}.md`);
+}
+
+/** A colliding entry's mirror path: its canonical path with its entry id before `.md` (#95). */
+function idPath(canonical: string, entryId: string): string {
+  return canonical.replace(/\.md$/, `.${entryId.toLowerCase()}.md`);
+}
+
+function trackedEntries(f: ReturnType<typeof fixture>): string[] {
+  return (f.db.prepare("SELECT entry_id FROM mirror_files ORDER BY entry_id").all() as { entry_id: string }[]).map((row) => row.entry_id);
 }
 
 function createNote(f: ReturnType<typeof fixture>, kind: "note" | "decision" = "note") {
@@ -227,17 +243,213 @@ describe("Markdown export and mirror (Spec v9 section 12.1)", () => {
     expect(readdirSync(dirname(file))).toEqual([basename(file)]);
   });
 
-  it("never reconciles an untracked file against one of two entries sharing its path (#88)", () => {
-    const f = fixture(); createNote(f); const second = createNote(f);
-    const { slug } = f.db.prepare("SELECT slug FROM entries WHERE entry_id != ?").get(second.id) as { slug: string };
-    f.db.prepare("UPDATE entries SET slug = ? WHERE entry_id = ?").run(slug, second.id); // an offline slug collision
-    syncMirror(f.ctx, f.mirror);
+  it("never reconciles or overwrites an untracked file at a path two entries share (#88, #95)", () => {
+    const f = fixture(); const first = createNote(f); syncMirror(f.ctx, f.mirror);
+    const state = f.db.prepare("SELECT path FROM mirror_files").get() as { path: string };
+    f.db.prepare("DELETE FROM mirror_files").run(); // a stop before tracking
+    const second = createNote(f); collide(f, first.id, second.id);
+    const file = join(f.mirror, state.path);
+    const edited = readFileSync(file, "utf8").replace("Original body", "Edited while stopped");
+    writeFileSync(file, edited);
+    for (let cycle = 0; cycle < 2; cycle++) {
+      expect(syncMirror(f.ctx, f.mirror)).toMatchObject({ applied: 0 });
+      expect(readFileSync(file, "utf8")).toBe(edited);
+    }
+    expect(f.db.prepare("SELECT DISTINCT body FROM entries").all()).toEqual([{ body: "Original body" }]);
+    expect(count(f, "entries")).toBe(2);
+    expect(f.db.prepare("SELECT code, attempts FROM mirror_skips").all()).toEqual([{ code: "REV_CONFLICT", attempts: 2 }]);
+    expect(checkMirrorSkips(f.db)).toMatchObject({ ok: false, detail: expect.stringContaining("slug collision") });
+    expect(trackedEntries(f)).toEqual([first.id, second.id].sort());
+  });
+
+  it("keeps holding a shared file once the collision is resolved, until it is removed (#95)", () => {
+    const f = fixture(); const first = createNote(f); syncMirror(f.ctx, f.mirror);
     const state = f.db.prepare("SELECT path FROM mirror_files").get() as { path: string };
     f.db.prepare("DELETE FROM mirror_files").run();
+    const second = createNote(f); collide(f, first.id, second.id);
     const file = join(f.mirror, state.path);
-    writeFileSync(file, readFileSync(file, "utf8").replace("Original body", "Edited while stopped"));
-    expect(syncMirror(f.ctx, f.mirror)).toMatchObject({ applied: 0 });
-    expect(f.db.prepare("SELECT DISTINCT body FROM entries").all()).toEqual([{ body: "Original body" }]);
+    const edited = readFileSync(file, "utf8").replace(formatRef("sample-app", first.id), formatRef("sample-app", second.id)).replace("Original body", "Meant for the second");
+    writeFileSync(file, edited);
+    syncMirror(f.ctx, f.mirror);
+    setEntryStatus(f.ctx, formatRef("sample-app", second.id), "archived"); // the path has one owner again
+    for (let cycle = 0; cycle < 2; cycle++) {
+      expect(syncMirror(f.ctx, f.mirror)).toMatchObject({ applied: 0 });
+      expect(readFileSync(file, "utf8")).toBe(edited);
+    }
+    expect(f.db.prepare("SELECT body FROM entries WHERE entry_id = ?").get(first.id)).toEqual({ body: "Original body" });
+    rmSync(file);
+    syncMirror(f.ctx, f.mirror);
+    expect(readFileSync(file, "utf8")).toContain(formatRef("sample-app", first.id));
+    expect(f.db.prepare("SELECT path, entry_id FROM mirror_files").all()).toEqual([{ path: state.path, entry_id: first.id }]);
+    expect((f.db.prepare("SELECT COUNT(*) AS n FROM mirror_skips").get() as { n: number }).n).toBe(0);
+  });
+
+  it("keeps holding a shared file when the collision resolves during the same cycle (#95)", () => {
+    const f = fixture(); const first = createNote(f); syncMirror(f.ctx, f.mirror);
+    const state = f.db.prepare("SELECT path FROM mirror_files").get() as { path: string };
+    f.db.prepare("DELETE FROM mirror_files").run();
+    const second = createNote(f); collide(f, first.id, second.id);
+    const file = join(f.mirror, state.path);
+    const edited = readFileSync(file, "utf8").replace("Original body", "Meant for one of them");
+    writeFileSync(file, edited);
+    syncMirror(f.ctx, f.mirror);
+    const own = join(f.mirror, idPath(state.path, second.id));
+    writeFileSync(own, readFileSync(own, "utf8").replace('status: "active"', 'status: "archived"')); // resolves it mid-cycle
+    syncMirror(f.ctx, f.mirror);
+    expect(f.db.prepare("SELECT status FROM entries WHERE entry_id = ?").get(second.id)).toEqual({ status: "archived" });
+    expect(readFileSync(file, "utf8")).toBe(edited);
+    syncMirror(f.ctx, f.mirror);
+    expect(readFileSync(file, "utf8")).toBe(edited);
+    expect(f.db.prepare("SELECT body FROM entries WHERE entry_id = ?").get(first.id)).toEqual({ body: "Original body" });
+  });
+
+  it("keeps holding a shared file saved under another letter case through a mid-cycle resolution (#95)", () => {
+    const f = fixture(); const first = createNote(f); const second = createNote(f);
+    const canonical = collide(f, first.id, second.id); syncMirror(f.ctx, f.mirror);
+    const upper = join(f.mirror, dirname(canonical), basename(canonical).toUpperCase().replace(/\.MD$/, ".md"));
+    writeFileSync(upper, "An edit meant for one of them\n");
+    syncMirror(f.ctx, f.mirror);
+    const own = join(f.mirror, idPath(canonical, second.id));
+    writeFileSync(own, readFileSync(own, "utf8").replace('status: "active"', 'status: "archived"'));
+    syncMirror(f.ctx, f.mirror);
+    expect(readFileSync(upper, "utf8")).toBe("An edit meant for one of them\n");
+    expect(f.db.prepare("SELECT body FROM entries WHERE entry_id = ?").get(first.id)).toEqual({ body: "Original body" });
+  });
+
+  it("keeps holding a shared file renamed by letter case as the collision resolves (#95)", () => {
+    const f = fixture(); const first = createNote(f); const second = createNote(f);
+    const canonical = collide(f, first.id, second.id); syncMirror(f.ctx, f.mirror);
+    const held = join(f.mirror, canonical);
+    writeFileSync(held, "An edit meant for one of them\n");
+    syncMirror(f.ctx, f.mirror);
+    const upper = join(f.mirror, dirname(canonical), basename(canonical).toUpperCase().replace(/\.MD$/, ".md"));
+    renameSync(held, `${held}.tmp`); renameSync(`${held}.tmp`, upper);
+    setEntryStatus(f.ctx, formatRef("sample-app", second.id), "archived");
+    for (let cycle = 0; cycle < 2; cycle++) {
+      syncMirror(f.ctx, f.mirror);
+      expect(readFileSync(upper, "utf8")).toBe("An edit meant for one of them\n");
+    }
+    expect(f.db.prepare("SELECT body FROM entries WHERE entry_id = ?").get(first.id)).toEqual({ body: "Original body" });
+  });
+
+  it("removes an untracked colliding file once its entry is archived (#95, #91)", () => {
+    const f = fixture(); const first = createNote(f); const second = createNote(f);
+    const canonical = collide(f, first.id, second.id); syncMirror(f.ctx, f.mirror);
+    f.db.prepare("DELETE FROM mirror_files WHERE entry_id = ?").run(second.id); // a stop before tracking
+    setEntryStatus(f.ctx, formatRef("sample-app", second.id), "archived");
+    syncMirror(f.ctx, f.mirror);
+    expect(existsSync(join(f.mirror, idPath(canonical, second.id)))).toBe(false);
+    expect(readdirSync(join(f.mirror, dirname(canonical)))).toEqual([basename(canonical)]);
+  });
+
+  it("names each colliding entry's file for a shared canonical path, for ctxd open (#95)", () => {
+    const f = fixture(); const first = createNote(f); const second = createNote(f);
+    const canonical = collide(f, first.id, second.id); syncMirror(f.ctx, f.mirror);
+    expect(collidingMirrorFiles(join(f.mirror, canonical))).toEqual([first.id, second.id].map((id) => join(f.mirror, idPath(canonical, id))).sort());
+    writeFileSync(join(f.mirror, canonical), "A held file at the shared path\n");
+    syncMirror(f.ctx, f.mirror);
+    expect(collidingMirrorFiles(join(f.mirror, canonical))).toHaveLength(2);
+    rmSync(join(f.mirror, canonical));
+    setEntryStatus(f.ctx, formatRef("sample-app", second.id), "archived"); syncMirror(f.ctx, f.mirror);
+    expect(collidingMirrorFiles(join(f.mirror, canonical))).toEqual([]);
+  });
+
+  it("mirrors each of two entries sharing a canonical path to its own file (#95, FS-6)", () => {
+    const f = fixture(); const first = createNote(f); const second = createNote(f);
+    const canonical = collide(f, first.id, second.id);
+    expect(syncMirror(f.ctx, f.mirror)).toMatchObject({ written: 2, applied: 0, conflicts: 0 });
+    expect(existsSync(join(f.mirror, canonical))).toBe(false);
+    for (const id of [first.id, second.id]) {
+      expect(readFileSync(join(f.mirror, idPath(canonical, id)), "utf8")).toContain(formatRef("sample-app", id));
+    }
+    const events = count(f, "events");
+    syncMirror(f.ctx, f.mirror);
+    expect(count(f, "events")).toBe(events);
+    expect(trackedEntries(f)).toEqual([first.id, second.id].sort());
+    expect(exportMarkdown(f.db, join(f.root, "export"))).toEqual({ written: 2 });
+    expect(readdirSync(join(f.root, "export", dirname(canonical))).sort()).toEqual([first.id, second.id].map((id) => basename(idPath(canonical, id))).sort());
+  });
+
+  it("applies an edit to one colliding entry's file and leaves the other entry alone (#95)", () => {
+    const f = fixture(); const first = createNote(f); const second = createNote(f);
+    const canonical = collide(f, first.id, second.id); syncMirror(f.ctx, f.mirror);
+    const file = join(f.mirror, idPath(canonical, second.id));
+    writeFileSync(file, readFileSync(file, "utf8").replace("Original body", "Edited second"));
+    expect(syncMirror(f.ctx, f.mirror)).toMatchObject({ applied: 1, conflicts: 0 });
+    expect(f.db.prepare("SELECT body FROM entries WHERE entry_id = ?").get(second.id)).toEqual({ body: "Edited second" });
+    expect(f.db.prepare("SELECT body FROM entries WHERE entry_id = ?").get(first.id)).toEqual({ body: "Original body" });
+    expect(readFileSync(join(f.mirror, idPath(canonical, first.id)), "utf8")).toContain("Original body");
+  });
+
+  it("moves a tracked file to its own path when a collision arrives, keeping its edit (#95)", () => {
+    const f = fixture(); const first = createNote(f); syncMirror(f.ctx, f.mirror);
+    const state = f.db.prepare("SELECT path FROM mirror_files").get() as { path: string };
+    const file = join(f.mirror, state.path);
+    writeFileSync(file, readFileSync(file, "utf8").replace("Original body", "Edited before the collision"));
+    const second = createNote(f); collide(f, first.id, second.id); // replicated in from another node
+    expect(syncMirror(f.ctx, f.mirror)).toMatchObject({ applied: 1, conflicts: 0, archiveRequests: 0 });
+    expect(f.db.prepare("SELECT body FROM entries WHERE entry_id = ?").get(first.id)).toEqual({ body: "Edited before the collision" });
+    expect(f.db.prepare("SELECT body FROM entries WHERE entry_id = ?").get(second.id)).toEqual({ body: "Original body" });
+    expect(existsSync(file)).toBe(false);
+    expect(readFileSync(join(f.mirror, idPath(state.path, first.id)), "utf8")).toContain("Edited before the collision");
+    expect(readFileSync(join(f.mirror, idPath(state.path, second.id)), "utf8")).toContain("Original body");
+    expect(trackedEntries(f)).toEqual([first.id, second.id].sort());
+  });
+
+  it("keeps a stale edit to a moved file as a conflict copy (#95, FS-AC-4)", () => {
+    const f = fixture(); const first = createNote(f); syncMirror(f.ctx, f.mirror);
+    const state = f.db.prepare("SELECT path FROM mirror_files").get() as { path: string };
+    const file = join(f.mirror, state.path);
+    writeFileSync(file, readFileSync(file, "utf8").replace("Original body", "Stale edit"));
+    writeEntry(f.ctx, { scope: "sample-app", id: first.id, expected_rev: first.rev, kind: "note", title: "Mirror entry", body: "Changed elsewhere", request_id: newId() } as never);
+    const second = createNote(f); collide(f, first.id, second.id);
+    expect(syncMirror(f.ctx, f.mirror)).toMatchObject({ applied: 0, conflicts: 1 });
+    expect(readFileSync(file.replace(/\.md$/, ".conflict.md"), "utf8")).toContain("Stale edit");
+    expect(f.db.prepare("SELECT body FROM entries WHERE entry_id = ?").get(first.id)).toEqual({ body: "Changed elsewhere" });
+    expect(f.db.prepare("SELECT path, entry_id FROM mirror_conflicts").all()).toEqual([{ path: state.path, entry_id: first.id }]);
+  });
+
+  it("returns an entry to its canonical path once the collision is resolved (#95)", () => {
+    const f = fixture(); const first = createNote(f); const second = createNote(f);
+    const canonical = collide(f, first.id, second.id); syncMirror(f.ctx, f.mirror);
+    setEntryStatus(f.ctx, formatRef("sample-app", second.id), "archived");
+    expect(syncMirror(f.ctx, f.mirror)).toMatchObject({ archiveRequests: 0 });
+    expect(readFileSync(join(f.mirror, canonical), "utf8")).toContain(formatRef("sample-app", first.id));
+    expect(readdirSync(join(f.mirror, dirname(canonical)))).toEqual([basename(canonical)]);
+    expect(f.db.prepare("SELECT path, entry_id FROM mirror_files").all()).toEqual([{ path: canonical, entry_id: first.id }]);
+  });
+
+  it("records one archive request, not one per cycle, for a file deleted as its path moves (#95)", () => {
+    const f = fixture(); const first = createNote(f); syncMirror(f.ctx, f.mirror);
+    const state = f.db.prepare("SELECT path FROM mirror_files").get() as { path: string };
+    rmSync(join(f.mirror, state.path));
+    const second = createNote(f); collide(f, first.id, second.id);
+    expect(syncMirror(f.ctx, f.mirror).archiveRequests).toBe(1);
+    expect(syncMirror(f.ctx, f.mirror).archiveRequests).toBe(0);
+    expect(f.db.prepare("SELECT entry_id FROM archive_requests").all()).toEqual([{ entry_id: first.id }]);
+  });
+
+  it("converges with every colliding entry keeping its own edit, however often it syncs (#95, property)", () => {
+    const body = fc.stringMatching(/^[A-Za-z0-9][A-Za-z0-9 ]{0,38}[A-Za-z0-9]$/);
+    fc.assert(fc.property(fc.boolean(), body, body, fc.integer({ min: 1, max: 3 }), (trackedBefore, a, b, cycles) => {
+      const f = fixture(); const first = createNote(f);
+      if (trackedBefore) syncMirror(f.ctx, f.mirror);
+      const second = createNote(f); const canonical = collide(f, first.id, second.id);
+      syncMirror(f.ctx, f.mirror);
+      for (const [id, text] of [[first.id, a], [second.id, b]] as const) {
+        const file = join(f.mirror, idPath(canonical, id));
+        writeFileSync(file, readFileSync(file, "utf8").replace("Original body", text));
+      }
+      for (let i = 0; i < cycles; i++) syncMirror(f.ctx, f.mirror);
+      const events = count(f, "events");
+      syncMirror(f.ctx, f.mirror);
+      expect(count(f, "events")).toBe(events);
+      expect(count(f, "entries")).toBe(2);
+      expect(f.db.prepare("SELECT body FROM entries WHERE entry_id = ?").get(first.id)).toEqual({ body: a });
+      expect(f.db.prepare("SELECT body FROM entries WHERE entry_id = ?").get(second.id)).toEqual({ body: b });
+      expect(existsSync(join(f.mirror, canonical))).toBe(false);
+      expect(trackedEntries(f)).toEqual([first.id, second.id].sort());
+    }), { numRuns: 25 });
   });
 
   it("removes an untracked file whose edit archived its entry (#88)", () => {

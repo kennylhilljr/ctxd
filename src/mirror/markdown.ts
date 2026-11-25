@@ -125,6 +125,41 @@ function relativePath(row: MarkdownRow): string {
   return uri.slice("ctxd://".length).replace("#", "--");
 }
 
+/** `path` with a lowercase entry id inserted before its `.md` extension (appended when it has none). */
+function withIdSuffix(path: string, entryId: string): string {
+  const id = entryId.toLowerCase();
+  return path.endsWith(".md") ? `${path.slice(0, -3)}.${id}.md` : `${path}.${id}`;
+}
+
+/**
+ * The mirror files of entries that share the canonical mirror file `file` (#95): its siblings with an
+ * entry id before `.md`, whether or not a held file remains at `file` itself. Empty when it is not shared.
+ */
+export function collidingMirrorFiles(file: string): string[] {
+  if (!file.endsWith(".md") || !existsSync(dirname(file))) return [];
+  const base = file.slice(dirname(file).length + 1, -3);
+  return readdirSync(dirname(file))
+    .filter((name) => name.startsWith(`${base}.`) && /^[0-9a-z]{26}\.md$/.test(name.slice(base.length + 1)))
+    .sort()
+    .map((name) => join(dirname(file), name));
+}
+
+/**
+ * Each entry's mirror file path (#95). An entry's file is its canonical path, unless several
+ * entries share that path (an offline slug collision, compared ignoring letter case): then each of
+ * them is written to the canonical path with its entry id before `.md`, so no entry overwrites
+ * another's file. `shared` holds the canonical paths, lowercased, that no entry owns for that reason.
+ */
+function mirrorPaths(all: MarkdownRow[]): { pathOf: Map<string, string>; shared: Set<string> } {
+  const canonical = new Map(all.map((row) => [row.entry_id, relativePath(row)]));
+  const owners = new Map<string, number>();
+  for (const path of canonical.values()) owners.set(path.toLowerCase(), (owners.get(path.toLowerCase()) ?? 0) + 1);
+  const shared = new Set([...owners].filter(([, n]) => n > 1).map(([path]) => path));
+  const pathOf = new Map<string, string>();
+  for (const [id, path] of canonical) pathOf.set(id, shared.has(path.toLowerCase()) ? withIdSuffix(path, id) : path);
+  return { pathOf, shared };
+}
+
 /**
  * Join a mirror-relative path onto the mirror root, refusing any result outside it (issue 68).
  * Defence in depth: scope names and slugs are validated when events materialize, but every
@@ -157,8 +192,10 @@ function atomicWrite(path: string, content: string): void {
 
 export function exportMarkdown(db: Database.Database, outputDir: string, scopeName?: string): { written: number } {
   let written = 0;
-  for (const row of rows(db, scopeName)) {
-    atomicWrite(insideRoot(outputDir, relativePath(row)), renderMarkdown(row));
+  const selected = rows(db, scopeName);
+  const { pathOf } = mirrorPaths(selected);
+  for (const row of selected) {
+    atomicWrite(insideRoot(outputDir, pathOf.get(row.entry_id)!), renderMarkdown(row));
     written++;
   }
   return { written };
@@ -341,19 +378,31 @@ function reconcileUntracked(ctx: WriteContext, mirrorDir: string, path: string, 
   return outcome;
 }
 
+const COLLISION_SKIP = "Several entries share this path (an offline slug collision); each is mirrored with its entry id in the file name. Copy any edit into the right one, then remove this file";
+
+/**
+ * A test for whether an untracked file is held as a slug collision's shared file (#95), from the
+ * holds recorded before this cycle. Compared ignoring letter case, so a case-only rename keeps the hold.
+ */
+function collisionHolds(db: Database.Database): (path: string) => boolean {
+  const rows = db.prepare("SELECT path FROM mirror_skips WHERE code = 'REV_CONFLICT' AND reason = ?").all(sanitizeCapture(COLLISION_SKIP, 500)) as { path: string }[];
+  const held = new Set(rows.map((row) => row.path.toLowerCase()));
+  return (path) => held.size > 0 && held.has(sanitizeCapture(path, 1000).toLowerCase());
+}
+
 export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: number; applied: number; conflicts: number; archiveRequests: number } {
   if (!isFlagOn(ctx.flags, "mirror")) return { written: 0, applied: 0, conflicts: 0, archiveRequests: 0 };
   const { db } = ctx;
-  const byId = new Map(rows(db).map((row) => [row.entry_id, row]));
-  // Canonical path -> entry, for files written but never tracked (#88). A path two entries share (an
-  // offline slug collision) is left out, so it never resolves to an arbitrary entry.
-  const byPath = new Map<string, MarkdownRow | null>();
-  for (const row of byId.values()) {
-    const path = relativePath(row);
-    byPath.set(path, byPath.has(path) ? null : row);
-  }
-  const byPathCase = new Map<string, string | null>();
-  for (const path of byPath.keys()) byPathCase.set(path.toLowerCase(), byPathCase.has(path.toLowerCase()) ? null : path);
+  const live = rows(db);
+  const byId = new Map(live.map((row) => [row.entry_id, row]));
+  // Mirror path -> entry, for files written but never tracked (#88). Entries that share a canonical
+  // path (an offline slug collision) each have their own mirror path, and the shared canonical path
+  // belongs to none of them, so it never resolves to an arbitrary entry (#95).
+  const { pathOf, shared } = mirrorPaths(live);
+  const byPath = new Map<string, MarkdownRow>();
+  for (const row of live) byPath.set(pathOf.get(row.entry_id)!, row);
+  const byPathCase = new Map<string, string>();
+  for (const path of byPath.keys()) byPathCase.set(path.toLowerCase(), path);
   let applied = 0;
   let conflicts = 0;
   let archiveRequests = 0;
@@ -373,18 +422,30 @@ export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: num
     if (!existsSync(file)) {
       db.prepare("INSERT OR IGNORE INTO archive_requests (entry_id, path, created_at) VALUES (?, ?, ?)").run(row.entry_id, state.path, nowIso());
       archiveRequests++;
+      // Tracking for a path the entry no longer uses would repeat the request every cycle (#95).
+      if (pathOf.get(row.entry_id) !== state.path) db.prepare("DELETE FROM mirror_files WHERE path = ?").run(state.path);
       continue;
     }
     const text = readFileSync(file, "utf8");
-    if (hash(text) === state.file_hash) continue;
-    let outcome: "applied" | "conflict";
-    try {
-      outcome = reconcileEdit(ctx, mirrorDir, state.path, row, text);
-    } catch (err) {
-      throw err instanceof WriteRefused ? err.cause : err;
+    if (hash(text) !== state.file_hash) {
+      let outcome: "applied" | "conflict";
+      try {
+        outcome = reconcileEdit(ctx, mirrorDir, state.path, row, text);
+      } catch (err) {
+        throw err instanceof WriteRefused ? err.cause : err;
+      }
+      if (outcome === "conflict") conflicts++;
+      else applied++;
     }
-    if (outcome === "conflict") conflicts++;
-    else applied++;
+    // The entry's mirror path moved (a slug collision appeared or was resolved, #95). Its edit, if any,
+    // is applied or kept in the conflict copy above, so the old file goes; the export below writes the
+    // entry at its new path. Nothing else is ever written at a path two entries share.
+    // Tracking goes first: a stop in between leaves a stray file, never a missing tracked file that
+    // the next cycle would take for a deletion and turn into an archive request.
+    if (pathOf.get(row.entry_id) !== state.path) {
+      db.prepare("DELETE FROM mirror_files WHERE path = ?").run(state.path);
+      unlinkSync(file);
+    }
   }
 
   // A conflict copy is never walked, so one whose scope is now sealed or whose entry was purged is
@@ -396,11 +457,22 @@ export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: num
     if (conflict.purged_at !== null || isSealedScope(db, conflict.path.split(/[\\/]/)[0] ?? "")) removeConflict(db, mirrorDir, conflict.path);
   }
   const untracked = new Set<string>();
-  const keep = new Set<string>(); // untracked edits that could not be kept elsewhere: not overwritten this cycle
+  // Untracked edits that could not be kept elsewhere: not overwritten this cycle. Lowercased, since a
+  // case-insensitive filesystem writes a path under any case to the same file.
+  const keep = new Set<string>();
+  const kept = (path: string) => keep.has(path.toLowerCase());
+  const files = walkMarkdown(mirrorDir);
+  const heldForCollision = collisionHolds(db);
+  // A slug collision's shared file is held before any pending import replays, which could otherwise
+  // write over it should the collision resolve earlier in this cycle (#95).
+  for (const file of files) {
+    const path = relative(resolve(mirrorDir), file);
+    if (!trackedPaths.has(path) && (shared.has(path.toLowerCase()) || heldForCollision(path))) keep.add(path.toLowerCase());
+  }
   // Files at canonical paths come first, so replaying a pending import cannot rewrite an untracked,
   // edited canonical file before it is reconciled (#88).
   const atCanonical = (file: string) => byPathCase.has(relative(resolve(mirrorDir), file).toLowerCase());
-  for (const file of walkMarkdown(mirrorDir).sort((a, b) => Number(!atCanonical(a)) - Number(!atCanonical(b)))) {
+  for (const file of files.sort((a, b) => Number(!atCanonical(a)) - Number(!atCanonical(b)))) {
     const path = relative(resolve(mirrorDir), file);
     if (trackedPaths.has(path)) continue;
     // A tracked file seen under another letter case (a stop before the case-fixing rename below, on a
@@ -435,6 +507,14 @@ export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: num
         if (alias && byPath.get(alias) && sameInode(file, insideRoot(mirrorDir, alias))) ownerPath = alias;
       }
       const owner = ownerPath === undefined ? undefined : byPath.get(ownerPath);
+      // An untracked file at a canonical path several entries share may hold an edit meant for any of
+      // them, so it is left in place for review and never overwritten or imported (#95). It stays so
+      // until it is removed, even once the collision is resolved and the path has one owner again.
+      if ((owner === undefined && shared.has(path.toLowerCase())) || heldForCollision(path)) {
+        // Not written this cycle, even if the collision resolves during it and the export finds one owner.
+        keep.add(path.toLowerCase());
+        throw new CtxdError("REV_CONFLICT", COLLISION_SKIP);
+      }
       if (owner && ownerPath !== undefined) {
         clearSkip(db, path);
         if (ownerPath !== path) renameSync(file, insideRoot(mirrorDir, ownerPath)); // only fixes the name's case
@@ -442,7 +522,7 @@ export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: num
         const outcome = reconcileUntracked(ctx, mirrorDir, ownerPath, owner, text);
         if (outcome === "applied") applied++;
         else if (outcome === "conflict") conflicts++;
-        else keep.add(ownerPath);
+        else keep.add(ownerPath.toLowerCase());
         continue;
       }
       const removed = ref === undefined ? null : removeInactiveUntracked(db, mirrorDir, path, ref, text);
@@ -487,9 +567,9 @@ export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: num
         // Write the entry, with its ref, at the canonical path and track it before removing the source,
         // so a stop at any point leaves either the pending source (replayed next cycle) or a file that
         // already names its entry, never an untracked copy without a ref that would import again (#85).
-        const relTarget = relativePath(created);
+        const relTarget = mirrorPaths(rows(db)).pathOf.get(created.entry_id)!;
         // An untracked edit at the target that could not be kept this cycle is not overwritten (#88).
-        if (keep.has(relTarget)) continue;
+        if (kept(relTarget)) continue;
         const target = insideRoot(mirrorDir, relTarget);
         const content = renderMarkdown(created);
         // On a case-insensitive filesystem the source may already be the target under another case.
@@ -513,9 +593,11 @@ export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: num
   }
 
   let written = 0;
-  for (const row of rows(db)) {
-    const path = relativePath(row);
-    if (keep.has(path)) continue;
+  const current = rows(db);
+  const finalPaths = mirrorPaths(current).pathOf;
+  for (const row of current) {
+    const path = finalPaths.get(row.entry_id)!;
+    if (kept(path)) continue;
     const content = renderMarkdown(row);
     atomicWrite(insideRoot(mirrorDir, path), content);
     trackFile(db, path, row, content);
@@ -580,7 +662,7 @@ function removeInactiveUntracked(db: Database.Database, mirrorDir: string, path:
   try { canonical = relativePath(row); } catch { /* a purge stub rebuilt from its event has no skill name */ }
   const atCanonical = canonical === undefined
     ? row.purged_at !== null && row.kind === "skill" && path.startsWith(`${row.scope_name}/skills/`) && /^[^/\\]+[/\\]SKILL\.md$/.test(path.slice(row.scope_name.length + 8))
-    : canonical === path;
+    : canonical === path || withIdSuffix(canonical, row.entry_id) === path; // its own file during a slug collision (#95)
   if (!atCanonical) return null;
   if (row.purged_at !== null) {
     removeWithConflict(db, mirrorDir, path);

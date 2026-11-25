@@ -10,7 +10,7 @@
 | **Owner** | A (agent-generated) by persona `sre`; human review at Gate 3 for contracts, persisted schema and access paths |
 | **Code** | `src/cli/`, `src/fsview/`, `src/mirror/`, `src/skills/`, `deploy/` |
 | **Moved from** | Spec v9 section 12; Spec v10 draft W5.4 and W5.5 |
-| **Supersedes** | [v1](LLD-operations-v1.md); v2 adds to 12.1 how a mirror import reaches its canonical path so a stop never imports a file twice (#85), how an edit to a written but untracked mirror file is reconciled instead of overwritten (#88), and how such a file is removed once its entry stops being mirrored (#91) |
+| **Supersedes** | [v1](LLD-operations-v1.md); v2 adds to 12.1 how a mirror import reaches its canonical path so a stop never imports a file twice (#85), how an edit to a written but untracked mirror file is reconciled instead of overwritten (#88), how such a file is removed once its entry stops being mirrored (#91), and how entries that share a canonical path are each mirrored to their own file (#95) |
 
 Section numbers are the Spec's own (for example 9.1), unchanged from Spec v9, so references in code comments, PRDs and AGENTS.md still resolve. Detail here is normative; [Spec v10](../spec/SPEC-v10.md) states the system-level design.
 
@@ -68,7 +68,7 @@ Section numbers are the Spec's own (for example 9.1), unchanged from Spec v9, so
 Implements [Filesystem view](../prd/components/PRD-filesystem-view-v3.md) section 5. `ctxd mirror start` runs the mirror inside the server process; it is off by default.
 
 - **Whose view.** The mirror is written as the human client and shows every scope I can read, except sealed pools, which are never written to disk in plaintext. The mirror directory is under the data directory, so the path guard (9.9) blocks agents from it.
-- **Files.** One file per entry at its path (4.2), plus generated `.abstract.md` and `.overview.md` per folder (read-only). Each entry file has YAML frontmatter, then the body:
+- **Files.** One file per entry at its path (4.2), plus generated `.abstract.md` and `.overview.md` per folder (read-only). Entries that share a path (an offline slug collision, [LLD-data-model](LLD-data-model-v1.md) section 4.2, compared ignoring letter case) are each written to that path with the lowercase entry id inserted before `.md` (for example `notes/use-an-event-log-7k2pqz.01jabcdef000000000007k2pqz.md`), so no entry overwrites another's file; nothing is written at the shared path. When a collision appears or is resolved, a tracked file at the entry's old path is reconciled as an edit (applied, or kept as `<name>.conflict.md`), then its tracking is dropped and it is removed (in that order, so a stop in between never reads as a deletion), and the export writes the entry at its new path; a tracked file deleted in that cycle opens one archive request. An untracked file at a shared path may hold an edit meant for any of the entries, so it is never matched, overwritten or imported: it stays in place and is recorded in `mirror_skips` (code `REV_CONFLICT`) so `ctxd doctor` names it; it is held so until it is removed, even after the collision is resolved, and its path is not written meanwhile. `ctxd open` on a shared path lists the entries' own files instead of opening it. An untracked file at an entry's own (id-named) path is treated as at its canonical path when that entry leaves the mirror (#91) (#95, FS-6). Each entry file has YAML frontmatter, then the body:
 
 ```markdown
 ---
