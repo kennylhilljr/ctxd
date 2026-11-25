@@ -65,12 +65,12 @@ Beside the stack:
 | Context hygiene | [v2](prd/components/PRD-context-hygiene-v2.md) | CH-1 to CH-12 | CH-AC-n | [Context hygiene v1](lld/LLD-context-hygiene-v1.md) |
 | Replication and offline work | [v6](prd/components/PRD-replication-v6.md) | RP-1 to RP-17 | RP-AC-n | [Replication v2](lld/LLD-replication-v2.md) |
 | Briefs and search | [v5](prd/components/PRD-briefs-search-v5.md) | BS-1 to BS-20 | BS-AC-n | [Briefs and search v1](lld/LLD-briefs-search-v1.md), [MCP tools v1](contracts/mcp-tools-v1.md) |
-| Filesystem view | [v2](prd/components/PRD-filesystem-view-v2.md) | FS-1 to FS-8 | FS-AC-n | [Data model v1](lld/LLD-data-model-v1.md) 4.2, [Operations v1](lld/LLD-operations-v1.md) 12.1 |
-| Skills | [v3](prd/components/PRD-skills-v3.md) | SK-1 to SK-8 | SK-AC-n | [Operations v1](lld/LLD-operations-v1.md) 12.2 |
+| Filesystem view | [v2](prd/components/PRD-filesystem-view-v2.md) | FS-1 to FS-8 | FS-AC-n | [Data model v1](lld/LLD-data-model-v1.md) 4.2, [Operations v2](lld/LLD-operations-v2.md) 12.1 |
+| Skills | [v3](prd/components/PRD-skills-v3.md) | SK-1 to SK-8 | SK-AC-n | [Operations v2](lld/LLD-operations-v2.md) 12.2 |
 | Memory and journal | [v2](prd/components/PRD-memory-journal-v2.md) | MJ-1 to MJ-10 | MJ-AC-n | [Briefs and search v1](lld/LLD-briefs-search-v1.md) |
 | Feature flags | [v2](prd/components/PRD-feature-flags-v2.md) | FF-1 to FF-8 | FF-AC-n | [Configuration v1](lld/LLD-configuration-v1.md) |
 | Mobile inbox (M7) | [v2](prd/components/PRD-mobile-inbox-v2.md) | MI-1 to MI-12 | MI-AC-n | [Mobile inbox v1](lld/LLD-mobile-inbox-v1.md) |
-| Operations (cross-cutting) | Parent PRD NFRs | NFR-n | | [Operations v1](lld/LLD-operations-v1.md) |
+| Operations (cross-cutting) | Parent PRD NFRs | NFR-n | | [Operations v2](lld/LLD-operations-v2.md) |
 
 ## Conventions
 

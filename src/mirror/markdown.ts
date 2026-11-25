@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type Database from "better-sqlite3";
 import { entryPath } from "../fsview/paths.js";
@@ -264,6 +264,7 @@ export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: num
 
   const tracked = db.prepare("SELECT path, entry_id, file_hash FROM mirror_files").all() as { path: string; entry_id: string; file_hash: string }[];
   const trackedPaths = new Set(tracked.map((state) => state.path));
+  const trackedByCase = new Map(tracked.map((state) => [state.path.toLowerCase(), state.path]));
   for (const state of tracked) {
     const row = byId.get(state.entry_id);
     const file = insideRoot(mirrorDir, state.path);
@@ -322,6 +323,16 @@ export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: num
   for (const file of walkMarkdown(mirrorDir)) {
     const path = relative(resolve(mirrorDir), file);
     if (trackedPaths.has(path)) continue;
+    // A tracked file seen under another letter case (a stop before the case-fixing rename below, on a
+    // case-insensitive filesystem) is that file, not a new note: restore its canonical name (#85).
+    const alias = trackedByCase.get(path.toLowerCase());
+    if (alias !== undefined) {
+      const canonical = insideRoot(mirrorDir, alias);
+      if (existsSync(canonical) && sameInode(file, canonical)) {
+        renameSync(file, canonical);
+        continue;
+      }
+    }
     untracked.add(skipKey(path));
     try {
       const text = readFileSync(file, "utf8");
@@ -362,9 +373,18 @@ export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: num
           // the move was failing): leave the file and record why, rather than importing it again.
           throw new CtxdError("NOT_ALLOWED", "This file was already imported as an entry that is no longer active; edit it to import a new entry");
         }
-        const target = insideRoot(mirrorDir, relativePath(created));
-        mkdirSync(dirname(target), { recursive: true });
-        if (resolve(file) !== resolve(target)) renameSync(file, target);
+        // Write the entry, with its ref, at the canonical path and track it before removing the source,
+        // so a stop at any point leaves either the pending source (replayed next cycle) or a file that
+        // already names its entry, never an untracked copy without a ref that would import again (#85).
+        const relTarget = relativePath(created);
+        const target = insideRoot(mirrorDir, relTarget);
+        const content = renderMarkdown(created);
+        // On a case-insensitive filesystem the source may already be the target under another case.
+        const sameFile = existsSync(target) && sameInode(file, target);
+        atomicWrite(target, content);
+        trackFile(db, relTarget, created, content);
+        if (!sameFile) unlinkSync(file);
+        else if (file !== target) renameSync(file, target); // only fixes the name's case
         applied++;
       }
       clearSkip(db, path);
@@ -384,12 +404,21 @@ export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: num
     const path = relativePath(row);
     const content = renderMarkdown(row);
     atomicWrite(insideRoot(mirrorDir, path), content);
-    db.prepare(
-      "INSERT INTO mirror_files (path, entry_id, content_rev, file_hash, written_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(path) DO UPDATE SET entry_id=excluded.entry_id, content_rev=excluded.content_rev, file_hash=excluded.file_hash, written_at=excluded.written_at",
-    ).run(path, row.entry_id, row.content_rev, hash(content), nowIso());
+    trackFile(db, path, row, content);
     written++;
   }
   return { written, applied, conflicts, archiveRequests };
+}
+
+function sameInode(a: string, b: string): boolean {
+  const [x, y] = [statSync(a), statSync(b)];
+  return x.dev === y.dev && x.ino === y.ino;
+}
+
+function trackFile(db: Database.Database, path: string, row: MarkdownRow, content: string): void {
+  db.prepare(
+    "INSERT INTO mirror_files (path, entry_id, content_rev, file_hash, written_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(path) DO UPDATE SET entry_id=excluded.entry_id, content_rev=excluded.content_rev, file_hash=excluded.file_hash, written_at=excluded.written_at",
+  ).run(path, row.entry_id, row.content_rev, hash(content), nowIso());
 }
 
 function walkMarkdown(dir: string): string[] {
