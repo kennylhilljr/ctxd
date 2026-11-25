@@ -90,19 +90,74 @@ function resolveToken(configPath: string, clientName: string, poolIds: readonly 
   }
 }
 
-/** The request id from a JSON-RPC line, or undefined if it's unparseable or a notification (no id). */
-function parseRequestId(line: string): string | number | undefined {
-  try {
-    const parsed = JSON.parse(line) as { id?: string | number };
-    return parsed.id;
-  } catch {
-    return undefined;
+type JsonRpcId = string | number | null;
+
+/**
+ * What a stdin line asks for: `parse-error` if it is not JSON, otherwise the ids that each need one
+ * response, in order. A request contributes its id. A notification (a method, no id) and a response
+ * the client is sending back (no method, a result or error) contribute none. Anything else is an
+ * invalid request, answered with id null as JSON-RPC 2.0 requires. An empty batch is one invalid
+ * request, answered with a single object rather than an array.
+ */
+/** A request awaiting its response, or an invalid message the launcher answers itself with -32600. */
+type Pending = JsonRpcId | typeof INVALID;
+const INVALID = Symbol("invalid request");
+
+type ParsedLine = { kind: "parse-error" } | { kind: "message"; ids: Pending[]; batch: boolean };
+
+function pendingIdOf(message: unknown): Pending | undefined {
+  if (typeof message !== "object" || message === null || Array.isArray(message)) return INVALID;
+  const m = message as Record<string, unknown>;
+  if (m.jsonrpc !== "2.0") return INVALID;
+  if (typeof m.method === "string") {
+    if (!("id" in m)) return undefined; // a notification
+    return typeof m.id === "string" || typeof m.id === "number" || m.id === null ? m.id : INVALID;
   }
+  if ("id" in m && ("result" in m) !== ("error" in m)) return undefined; // the client answering a server request
+  return INVALID;
+}
+
+function parseLine(line: string): ParsedLine {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(line);
+  } catch {
+    return { kind: "parse-error" };
+  }
+  if (Array.isArray(parsed) && parsed.length === 0) return { kind: "message", ids: [INVALID], batch: false };
+  const messages = Array.isArray(parsed) ? parsed : [parsed];
+  const ids = messages.map(pendingIdOf).filter((id): id is Pending => id !== undefined);
+  return { kind: "message", ids, batch: Array.isArray(parsed) };
+}
+
+function invalidRequest(): Record<string, unknown> {
+  return jsonRpcError(null, -32600, "Invalid Request");
+}
+
+function jsonRpcError(id: JsonRpcId, code: number, message: string, data?: unknown): Record<string, unknown> {
+  return { jsonrpc: "2.0", id, error: data === undefined ? { code, message } : { code, message, data } };
+}
+
+/** One error per request in the line, as a single object or, for a batch, an array; null when the line holds only notifications. */
+function errorsFor(parsed: Extract<ParsedLine, { kind: "message" }>, code: number, message: string, data?: unknown): string | null {
+  if (parsed.ids.length === 0) return null;
+  const errors = parsed.ids.map((id) => (id === INVALID ? invalidRequest() : jsonRpcError(id, code, message, data)));
+  return JSON.stringify(parsed.batch ? errors : errors[0]);
+}
+
+type JsonRpcResponse = { jsonrpc: "2.0"; id: JsonRpcId; result?: unknown; error?: unknown };
+
+/** True for a single JSON-RPC 2.0 response object. */
+function isJsonRpcResponse(value: unknown): value is JsonRpcResponse {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const v = value as Record<string, unknown>;
+  return v.jsonrpc === "2.0" && "id" in v && ("result" in v || "error" in v);
 }
 
 /** Extract each event's `data:` payload from a text/event-stream body (one JSON-RPC message each). */
 function parseSseMessages(raw: string): string[] {
   return raw
+    .replace(/\r\n?/g, "\n")
     .split("\n\n")
     .map((block) =>
       block
@@ -114,8 +169,60 @@ function parseSseMessages(raw: string): string[] {
     .filter((msg) => msg.length > 0);
 }
 
-/** Forward one line (a JSON-RPC message) to the server; returns the response line, or null for a notification. */
-function proxyLine(listen: string, token: string, line: string): Promise<string | null> {
+function parseJson(text: string): unknown {
+  try {
+    return text.trim() ? JSON.parse(text) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export interface HttpReply {
+  status: number;
+  contentType: string;
+  body: string;
+}
+
+/**
+ * The stdout line for one stdin line, given the server's HTTP reply, or null when nothing should be
+ * written (#81). Every request in the line gets exactly one JSON-RPC response carrying its id, and a
+ * notification gets none. JSON-RPC responses from the server (a JSON body, or every event of an SSE
+ * body) are kept; a JSON-RPC error the transport sent with id null is given the pending ids. Anything
+ * else (the listener's plain `{ error }` envelope for an auth failure, bad JSON, an oversized body or
+ * an internal error, or an empty or non-JSON body) becomes a -32603 error for each pending id, with
+ * the HTTP status and the envelope in `data`.
+ */
+export function responseFor(line: string, reply: HttpReply): string | null {
+  const parsed = parseLine(line);
+  if (parsed.kind === "parse-error") return JSON.stringify(jsonRpcError(null, -32700, "Parse error"));
+  if (parsed.ids.length === 0) return null;
+
+  const bodies = reply.contentType.includes("text/event-stream") ? parseSseMessages(reply.body).map(parseJson) : [parseJson(reply.body)];
+  const received = bodies.flatMap((b) => (Array.isArray(b) ? b : [b])).filter(isJsonRpcResponse);
+
+  // The error every request without its own response gets: an id-null error if the server sent one, else one built from the reply.
+  const uncorrelated = received.find((r) => r.id === null && "error" in r);
+  let fallback: (id: JsonRpcId) => Record<string, unknown>;
+  if (uncorrelated) fallback = (id) => ({ ...uncorrelated, id });
+  else {
+    const body = bodies.length === 1 ? bodies[0] : undefined;
+    const envelope = (body as { error?: { message?: unknown } } | undefined)?.error;
+    if (!isJsonRpcResponse(body) && typeof envelope === "object" && envelope !== null) {
+      const message = typeof envelope.message === "string" ? envelope.message : `ctxd server error (HTTP ${reply.status})`;
+      fallback = (id) => jsonRpcError(id, -32603, message, { httpStatus: reply.status, ...(body as Record<string, unknown>) });
+    } else {
+      fallback = (id) => jsonRpcError(id, -32603, `ctxd server returned no JSON-RPC response (HTTP ${reply.status})`, { httpStatus: reply.status });
+    }
+  }
+
+  const byId = new Map<JsonRpcId, JsonRpcResponse>();
+  for (const r of received) if (!byId.has(r.id)) byId.set(r.id, r);
+  const responses = parsed.ids.map((id) => (id === INVALID ? invalidRequest() : (byId.get(id) ?? fallback(id))));
+  return JSON.stringify(parsed.batch ? responses : responses[0]);
+}
+
+/** Forward one line (a JSON-RPC message) to the server over loopback; resolves with the raw HTTP reply. */
+function postLine(listen: string, token: string, line: string): Promise<HttpReply> {
   return new Promise((resolve, reject) => {
     const { host, port } = parseListen(listen);
     const req = httpRequest(
@@ -130,21 +237,32 @@ function proxyLine(listen: string, token: string, line: string): Promise<string 
       },
       (res) => {
         let data = "";
-        res.on("data", (chunk: Buffer | string) => (data += chunk));
-        res.on("end", () => {
-          const contentType = res.headers["content-type"] ?? "";
-          if (contentType.includes("text/event-stream")) {
-            const messages = parseSseMessages(data);
-            resolve(messages.length ? messages[messages.length - 1]! : null);
-          } else {
-            resolve(data.trim().length > 0 ? data : null);
-          }
-        });
+        res.setEncoding("utf8");
+        res.on("data", (chunk: string) => (data += chunk));
+        res.on("error", reject);
+        res.on("end", () => resolve({ status: res.statusCode ?? 0, contentType: res.headers["content-type"] ?? "", body: data }));
       },
     );
     req.on("error", reject);
     req.end(line);
   });
+}
+
+/**
+ * Proxy one stdin line: the stdout line to write, or null. SPEC v6 NFR-9 ("fail open for reads"):
+ * a request that gets no response at all would hang the calling client forever waiting for it, so
+ * every request is answered, even when the server is unreachable, letting the agent proceed without
+ * ctxd instead of stalling.
+ */
+export async function proxyLine(listen: string, token: string, line: string): Promise<string | null> {
+  const parsed = parseLine(line);
+  if (parsed.kind === "parse-error") return responseFor(line, { status: 0, contentType: "", body: "" });
+  try {
+    return responseFor(line, await postLine(listen, token, line));
+  } catch (err) {
+    console.error(`ctxd mcp: ${(err as Error).message}. Is "ctxd server" running?`);
+    return errorsFor(parsed, -32000, `ctxd server unreachable: ${(err as Error).message}`);
+  }
 }
 
 function sleep(ms: number): Promise<void> {
@@ -248,23 +366,9 @@ export async function run(argv: string[]): Promise<number> {
         const line = buffer.slice(0, newline);
         buffer = buffer.slice(newline + 1);
         if (!line.trim()) continue;
-        proxyLine(listen, token, line)
-          .then((responseLine) => {
-            if (responseLine !== null) process.stdout.write(responseLine.trimEnd() + "\n");
-          })
-          .catch((err: Error) => {
-            console.error(`ctxd mcp: ${err.message}. Is "ctxd server" running?`);
-            // SPEC v6 NFR-9 ("fail open for reads"): a request that gets no response at all
-            // would hang the calling client forever waiting for it. Always answer, even when
-            // the server is unreachable, so the agent can proceed without ctxd instead of stalling.
-            const responseId = parseRequestId(line);
-            if (responseId !== undefined) {
-              process.stdout.write(
-                JSON.stringify({ jsonrpc: "2.0", id: responseId, error: { code: -32000, message: `ctxd server unreachable: ${err.message}` } }) +
-                  "\n",
-              );
-            }
-          });
+        void proxyLine(listen, token, line).then((responseLine) => {
+          if (responseLine !== null) process.stdout.write(responseLine.trimEnd() + "\n");
+        });
       }
     });
     process.stdin.on("end", () => resolve(0));

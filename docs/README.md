@@ -58,7 +58,7 @@ Beside the stack:
 | Component | PRD (latest) | Requirement IDs | Criteria IDs | LLD (latest) |
 |---|---|---|---|---|
 | Knowledge model | [v4](prd/components/PRD-knowledge-model-v4.md) | KM-1 to KM-17 | KM-AC-n | [Data model v1](lld/LLD-data-model-v1.md), [Write path v1](lld/LLD-write-path-v1.md) |
-| Persona pools and access | [v3](prd/components/PRD-pools-access-v3.md) | PA-1 to PA-19 | PA-AC-n | [Security and access v1](lld/LLD-security-access-v1.md), [MCP server v1](lld/LLD-mcp-server-v1.md) |
+| Persona pools and access | [v3](prd/components/PRD-pools-access-v3.md) | PA-1 to PA-19 | PA-AC-n | [Security and access v1](lld/LLD-security-access-v1.md), [MCP server v2](lld/LLD-mcp-server-v2.md) |
 | Hooks and agent lifecycle | [v6](prd/components/PRD-hooks-v6.md) | HK-1 to HK-26 | HK-AC-n | [Hooks v1](lld/LLD-hooks-v1.md) |
 | Claims and write intent | [v4](prd/components/PRD-claims-v4.md) | CL-1 to CL-14 | CL-AC-n | [Claims v1](lld/LLD-claims-v1.md) |
 | Trust and safety | [v5](prd/components/PRD-trust-safety-v5.md) | TS-1 to TS-17 | TS-AC-n | [Write path v1](lld/LLD-write-path-v1.md), [Security and access v1](lld/LLD-security-access-v1.md) |
