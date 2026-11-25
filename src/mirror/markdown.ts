@@ -467,6 +467,25 @@ export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: num
     }
   }
 
+  // A journal file written under its pre-#99 name (`<day>.md--<slug>`) but never tracked is not
+  // walked below (its name does not end in `.md`), so it is reconciled here against the entry now
+  // mirrored at `<day>--<slug>.md`, keeping any edit, and then removed; the export writes the new file.
+  for (const path of legacyJournalFiles(mirrorDir)) {
+    if (trackedPaths.has(path)) continue;
+    const owner = byPath.get(path.replace(/(\d{2})\.md--([^/\\]+)$/, "$1--$2.md"));
+    if (!owner) continue;
+    const file = insideRoot(mirrorDir, path);
+    const text = readFileSync(file, "utf8");
+    if (text !== renderMarkdown(owner)) {
+      const outcome = reconcileUntracked(ctx, mirrorDir, path, owner, text);
+      if (outcome === null) continue; // left in place, retried next cycle
+      if (outcome === "applied") applied++;
+      else conflicts++;
+      db.prepare("DELETE FROM mirror_files WHERE path = ?").run(path);
+    }
+    unlinkSync(file);
+  }
+
   // A conflict copy is never walked, so one whose scope is now sealed or whose entry was purged is
   // deleted here with its record: that plaintext must not outlive the entry on disk (#91, Spec 12.1).
   const conflictRows = db.prepare(
@@ -708,6 +727,29 @@ function trackFile(db: Database.Database, path: string, row: MarkdownRow, conten
   db.prepare(
     "INSERT INTO mirror_files (path, entry_id, content_rev, file_hash, written_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(path) DO UPDATE SET entry_id=excluded.entry_id, content_rev=excluded.content_rev, file_hash=excluded.file_hash, written_at=excluded.written_at",
   ).run(path, row.entry_id, row.content_rev, hash(content), nowIso());
+}
+
+/** Mirror-relative paths of journal files under their pre-#99 name, `<scope>/journal/<y>/<m>/<d>.md--<slug>`. */
+function legacyJournalFiles(mirrorDir: string): string[] {
+  const out: string[] = [];
+  const list = (path: string) => {
+    try {
+      return lstatSync(join(mirrorDir, path)).isDirectory() ? readdirSync(join(mirrorDir, path)) : [];
+    } catch {
+      return [];
+    }
+  };
+  for (const scope of list("")) {
+    for (const year of list(join(scope, "journal")).filter((name) => /^\d{4}$/.test(name))) {
+      for (const month of list(join(scope, "journal", year)).filter((name) => /^\d{2}$/.test(name))) {
+        for (const name of list(join(scope, "journal", year, month))) {
+          const path = join(scope, "journal", year, month, name);
+          if (/^\d{2}\.md--[^/\\]+$/.test(name) && !name.endsWith(".conflict.md") && lstatSync(join(mirrorDir, path)).isFile()) out.push(path);
+        }
+      }
+    }
+  }
+  return out;
 }
 
 function walkMarkdown(dir: string): string[] {

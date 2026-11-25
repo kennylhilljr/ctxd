@@ -1071,6 +1071,23 @@ describe("journal mirror files (#99)", () => {
     expect(body(f)).toBe("Original body");
   });
 
+  it("reconciles and removes an untracked journal file under its old name (#99)", () => {
+    for (const edited of [false, true]) {
+      const f = journalFixture();
+      const legacy = toLegacy(f);
+      const legacyFile = join(f.mirror, legacy);
+      f.db.prepare("DELETE FROM mirror_files").run();
+      if (edited) writeFileSync(legacyFile, readFileSync(legacyFile, "utf8").replace("Original body", "Edited legacy body"));
+      expect(syncMirror(f.ctx, f.mirror)).toMatchObject({ conflicts: edited ? 1 : 0 });
+      expect(existsSync(legacyFile)).toBe(false);
+      expect(existsSync(`${legacyFile}.conflict.md`)).toBe(edited);
+      if (edited) expect(readFileSync(`${legacyFile}.conflict.md`, "utf8")).toContain("Edited legacy body");
+      expect(readFileSync(f.file, "utf8")).toContain("Original body");
+      expect(f.db.prepare("SELECT path FROM mirror_files").all()).toEqual([{ path: f.path }]);
+      expect(body(f)).toBe("Original body");
+    }
+  });
+
   it("maps a ctxd:// path to its mirror path (#99)", () => {
     expect(mirrorRelativePath("ctxd://s/journal/2026/11/25.md#abc-123456")).toBe("s/journal/2026/11/25--abc-123456.md");
     expect(mirrorRelativePath("ctxd://s/notes/x-123456.md")).toBe("s/notes/x-123456.md");
