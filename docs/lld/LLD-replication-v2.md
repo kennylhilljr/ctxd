@@ -6,7 +6,7 @@
 | **Date** | 2026-11-24 |
 | **Layer** | L4 low-level design |
 | **Parent** | [Spec v10](../spec/SPEC-v10.md) section 7 |
-| **Implements** | [Replication and offline work](../prd/components/PRD-replication-v6.md) (RP-1 to RP-18); signed events from [Trust and safety](../prd/components/PRD-trust-safety-v5.md) |
+| **Implements** | [Replication and offline work](../prd/components/PRD-replication-v7.md) (RP-1 to RP-18); signed events from [Trust and safety](../prd/components/PRD-trust-safety-v5.md) |
 | **Owner** | A (agent-generated) by persona `component-designer`; human review at Gate 3 for contracts, persisted schema and access paths |
 | **Code** | `src/sync/`, `src/store/materialize.ts` |
 | **Moved from** | Spec v9 sections 7.1 to 7.4 and 7.7 |
@@ -64,7 +64,7 @@ Events for different parts of the same entry never interact: a status change and
 
 ### 7.4 Conflict policies
 
-Implements [PRD-replication-v6](../prd/components/PRD-replication-v6.md) section 5. Policies apply only when two events change the **same part** concurrently.
+Implements [PRD-replication-v7](../prd/components/PRD-replication-v7.md) section 5. Policies apply only when two events change the **same part** concurrently.
 
 | Part and kind | Policy on concurrent updates |
 |---|---|

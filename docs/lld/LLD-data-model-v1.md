@@ -6,7 +6,7 @@
 | **Date** | 2026-10-20 |
 | **Layer** | L4 low-level design |
 | **Parent** | [Spec v10](../spec/SPEC-v10.md) sections 4 and 5 |
-| **Implements** | [Knowledge model](../prd/components/PRD-knowledge-model-v4.md), [Filesystem view](../prd/components/PRD-filesystem-view-v2.md) (paths), [Skills](../prd/components/PRD-skills-v3.md) and [Memory and journal](../prd/components/PRD-memory-journal-v2.md) (kinds), [Replication](../prd/components/PRD-replication-v6.md) (identifiers and clocks) |
+| **Implements** | [Knowledge model](../prd/components/PRD-knowledge-model-v4.md), [Filesystem view](../prd/components/PRD-filesystem-view-v3.md) (paths), [Skills](../prd/components/PRD-skills-v3.md) and [Memory and journal](../prd/components/PRD-memory-journal-v2.md) (kinds), [Replication](../prd/components/PRD-replication-v7.md) (identifiers and clocks) |
 | **Owner** | A (agent-generated) by persona `component-designer`; human review at Gate 3 for contracts, persisted schema and access paths |
 | **Code** | `src/store/schema.ts`, `src/core/`, `src/model/`, `src/fsview/` |
 | **Moved from** | Spec v9 sections 4, 4.1 to 4.3 and 5; Spec v10 draft W5.1, W5.2 and W2 (schema) |
@@ -17,7 +17,7 @@ Section numbers are the Spec's own (for example 9.1), unchanged from Spec v9, so
 
 The **event log is the source of truth**. Entry state, FTS and vectors are materialized from it and can be rebuilt with `ctxd rebuild`.
 
-Names that become path segments are validated when an event materializes, whether it was written locally or arrived from a peer: a `scope_create` name must match the scope grammar (`SCOPE_RE` in `src/fsview/paths.ts`), and an entry create's slug must match the slug grammar and be at most 64 characters, as must a skill name, which skill entries must carry. An event that fails is rejected and not stored. This implements [Filesystem view](../prd/components/PRD-filesystem-view-v2.md) FS-9; criteria FS-AC-6 (scope names), FS-AC-7 (slugs) and FS-AC-8 (skill names).
+Names that become path segments are validated when an event materializes, whether it was written locally or arrived from a peer: a `scope_create` name must match the scope grammar (`SCOPE_RE` in `src/fsview/paths.ts`), and an entry create's slug must match the slug grammar and be at most 64 characters, as must a skill name, which skill entries must carry. An event that fails is rejected and not stored. This implements [Filesystem view](../prd/components/PRD-filesystem-view-v3.md) FS-9; criteria FS-AC-6 (scope names), FS-AC-7 (slugs) and FS-AC-8 (skill names).
 
 The schema below is the executable one, copied from `src/store/schema.ts` at schema version 23. If this block and that file ever disagree, the file is what runs; raise the difference rather than silently diverging (AGENTS.md).
 
@@ -558,7 +558,7 @@ Implements [Knowledge model v4](../prd/components/PRD-knowledge-model-v4.md) sec
 
 ### 4.2 Paths
 
-Implements [Filesystem view](../prd/components/PRD-filesystem-view-v2.md) sections 2 and 3. Paths are computed from entries; the only stored part is `entries.slug`.
+Implements [Filesystem view](../prd/components/PRD-filesystem-view-v3.md) sections 2 and 3. Paths are computed from entries; the only stored part is `entries.slug`.
 
 **Form.** `ctxd://<scope name>/<folder>/<file>`, where the folder and file depend on the kind:
 

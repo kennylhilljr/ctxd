@@ -6,7 +6,7 @@
 | **Date** | 2026-10-20 |
 | **Layer** | L4 low-level design |
 | **Parent** | [Spec v10](../spec/SPEC-v10.md) section 12 |
-| **Implements** | [Trust and safety](../prd/components/PRD-trust-safety-v5.md) (backups, startup checks), [Replication](../prd/components/PRD-replication-v6.md) (hub migration), [Filesystem view](../prd/components/PRD-filesystem-view-v2.md) (mirror, import), [Skills](../prd/components/PRD-skills-v3.md) (native sync) |
+| **Implements** | [Trust and safety](../prd/components/PRD-trust-safety-v5.md) (backups, startup checks), [Replication](../prd/components/PRD-replication-v7.md) (hub migration), [Filesystem view](../prd/components/PRD-filesystem-view-v3.md) (mirror, import), [Skills](../prd/components/PRD-skills-v3.md) (native sync) |
 | **Owner** | A (agent-generated) by persona `sre`; human review at Gate 3 for contracts, persisted schema and access paths |
 | **Code** | `src/cli/`, `src/fsview/`, `src/skills/`, `deploy/` |
 | **Moved from** | Spec v9 section 12; Spec v10 draft W5.4 and W5.5 |
@@ -64,7 +64,7 @@ Section numbers are the Spec's own (for example 9.1), unchanged from Spec v9, so
 
 ### 12.1 Markdown mirror and import
 
-Implements [Filesystem view](../prd/components/PRD-filesystem-view-v2.md) section 5. `ctxd mirror start` runs the mirror inside the server process; it is off by default.
+Implements [Filesystem view](../prd/components/PRD-filesystem-view-v3.md) section 5. `ctxd mirror start` runs the mirror inside the server process; it is off by default.
 
 - **Whose view.** The mirror is written as the human client and shows every scope I can read, except sealed pools, which are never written to disk in plaintext. The mirror directory is under the data directory, so the path guard (9.9) blocks agents from it.
 - **Files.** One file per entry at its path (4.2), plus generated `.abstract.md` and `.overview.md` per folder (read-only). Each entry file has YAML frontmatter, then the body:

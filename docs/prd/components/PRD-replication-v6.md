@@ -111,11 +111,10 @@ When the Mac Studio arrives, moving the hub is a data copy, a configuration chan
 | RP-10 | A lost machine's sync access can be revoked from the hub | [Trust and safety](PRD-trust-safety-v5.md) | P1 |
 | RP-16 | Embedding vectors replicate as event data, tagged with model id and dimension, under the same scope and vendor policy as the entry they describe | FR-20 | P2 |
 | RP-17 | A machine with `semantic_search.compute` off serves hybrid search over vectors it never computed; an entry with no vector yet falls back to full-text search, never an error | FR-20 | P2 |
-| RP-18 | A peer bound to a node id or a public key may deliver only signed events: unsigned new events from it are refused and recorded whatever origin they claim, without stalling the pull; signed events it relays are verified against their origin's pinned key; a peer with neither binding keeps unsigned legacy compatibility | FR-13, [Trust and safety](PRD-trust-safety-v5.md) TS-12 | P0 |
 
 ## 8. Acceptance criteria
 
-> Owner: A (agent-generated) by persona `product-writer`, derived from the requirements above; pending the owner's approval at Gate 1. Verification status per criterion: [test plan](../../test/test-plan-v1.md). RP-18 was stated by the owner in [issue 77](https://github.com/kennylhilljr/ctxd/issues/77); RP-AC-7 to RP-AC-11 derive from it and [LLD: Replication](../../lld/LLD-replication-v2.md) 7.7.
+> Owner: A (agent-generated) by persona `product-writer`, derived from the requirements above; pending the owner's approval at Gate 1. Verification status per criterion: [test plan](../../test/test-plan-v1.md).
 
 | ID | EARS pattern | Acceptance criterion | Traces to |
 |---|---|---|---|
@@ -125,11 +124,6 @@ When the Mac Studio arrives, moving the hub is a data copy, a configuration chan
 | RP-AC-4 | Unwanted behavior | If sync stops mid-transfer and restarts, then ctxd shall neither duplicate nor drop events. | RP-6, RP-8 |
 | RP-AC-5 | Ubiquitous | The partition property suite shall pass with random operations, partitions and delivery orders. | RP-5 |
 | RP-AC-6 | State-driven | While a node has `semantic_search.compute` off and no embedding model, ctxd shall serve hybrid search over vectors synced from a node that computes them. | RP-16, RP-17 |
-| RP-AC-7 | Unwanted behavior | If a peer with a bound node id, a bound public key or both delivers an unsigned event not already stored, then ctxd shall refuse it whatever origin it claims and whatever its operation, and store neither the event nor its effect. | RP-18 |
-| RP-AC-8 | Event-driven | When ctxd refuses an unsigned event from a key-bound peer, it shall record the refusal as a rejected event and continue the page, so the pull's cursor advances past it. | RP-18, RP-8 |
-| RP-AC-9 | Event-driven | When a key-bound peer delivers an event already stored locally, ctxd shall skip it before any signature check, so this node's own older unsigned events echoed back do not stall the pull. | RP-18 |
-| RP-AC-10 | Event-driven | When a key-bound peer relays a signed event from another origin, ctxd shall verify it against that origin's pinned key and apply it if the signature holds. | RP-18 |
-| RP-AC-11 | State-driven | While a peer has neither a bound node id nor a bound public key, ctxd shall keep accepting its unsigned events. | RP-18 |
 
 ## 9. Open questions
 

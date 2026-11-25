@@ -23,7 +23,7 @@
 | Open signal | A blocker, incident, blocking task or open flag, pinned in briefs until resolved | [LLD: Briefs and search](lld/LLD-briefs-search-v1.md) 11.4 |
 | Part | One independently versioned piece of an entry: content, status, relations, claim, meta or embedding | [LLD: Data model](lld/LLD-data-model-v1.md) 4 |
 | Path | A stable `ctxd://<scope>/<folder>/<file>` address for every entry and folder | [LLD: Data model](lld/LLD-data-model-v1.md) 4.2 |
-| Persona pool | A named set of scope grants shared by the agents assigned to it | [Persona pools and access](prd/components/PRD-pools-access-v3.md) |
+| Persona pool | A named set of scope grants shared by the agents assigned to it | [Persona pools and access](prd/components/PRD-pools-access-v4.md) |
 | Persona token | A token that fixes which pools a session may use | [LLD: MCP server](lld/LLD-mcp-server-v1.md) 8.4 |
 | Purge | The one operation that erases content and rewrites stored events, everywhere | [LLD: Context hygiene](lld/LLD-context-hygiene-v1.md) 7.6.6 |
 | Quarantine | Hiding one source's changes over a time window as a batch, for revert or release | [LLD: Context hygiene](lld/LLD-context-hygiene-v1.md) 7.6.2 |

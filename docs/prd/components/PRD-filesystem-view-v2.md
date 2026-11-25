@@ -101,12 +101,10 @@ No new MCP tools are added:
 | FS-6 | Two-way Markdown mirror with frontmatter; edits become human-client changes with revision checks; deletes become archive requests | FR-45 | P2 |
 | FS-7 | Sealed pools never mirrored; mirror folder covered by the path guard | FR-45 | P0 |
 | FS-8 | `ctxd import` of Markdown folders as proposed entries | FR-19 | P2 |
-| FS-9 | Names that become path segments (scope names, entry slugs, skill names) are validated whenever an event materializes, written locally or received from a peer; an invalid one is rejected and its event is not stored | FR-43, NFR-1 | P0 |
-| FS-10 | Every mirror write, rename and unlink, and every file `ctxd export` writes, stays inside its root directory and never passes through a symbolic link below it | FR-45, NFR-1 | P0 |
 
 ## 7. Acceptance criteria
 
-> Owner: A (agent-generated) by persona `product-writer`, derived from the requirements above; pending the owner's approval at Gate 1. Verification status per criterion: [test plan](../../test/test-plan-v1.md). FS-9 and FS-10 were stated by the owner in [issue 77](https://github.com/kennylhilljr/ctxd/issues/77); FS-AC-6 to FS-AC-11 derive from them and [LLD: Data model](../../lld/LLD-data-model-v1.md) section 4 and [LLD: Operations](../../lld/LLD-operations-v1.md) 12.1.
+> Owner: A (agent-generated) by persona `product-writer`, derived from the requirements above; pending the owner's approval at Gate 1. Verification status per criterion: [test plan](../../test/test-plan-v1.md).
 
 | ID | EARS pattern | Acceptance criterion | Traces to |
 |---|---|---|---|
@@ -115,12 +113,6 @@ No new MCP tools are added:
 | FS-AC-3 | Event-driven | When the human edits an entry's status in the mirror, ctxd shall record the change as a human-client event. | FS-6 |
 | FS-AC-4 | Unwanted behavior | If a mirror edit is based on a stale revision, then ctxd shall write a `.conflict.md` file and a review item and apply nothing. | FS-6 |
 | FS-AC-5 | Event-driven | When `context_search` is given `path: "ctxd://<project>/lessons/"`, ctxd shall return only that project's lessons. | FS-4 |
-| FS-AC-6 | Unwanted behavior | If a `scope_create` event, written locally or received from a peer, carries a name outside the scope grammar, then ctxd shall reject it and store neither the scope nor the event. | FS-9 |
-| FS-AC-7 | Unwanted behavior | If an entry create, written locally or received from a peer, carries a slug outside the slug grammar or longer than 64 characters, then ctxd shall reject it and store neither the entry nor the event. | FS-9 |
-| FS-AC-8 | Unwanted behavior | If a skill create, written locally or received from a peer, carries no skill name, one outside the skill-name grammar or one longer than 64 characters, then ctxd shall reject it and store neither the entry nor the event. | FS-9 |
-| FS-AC-9 | Unwanted behavior | If a mirror write, rename or unlink resolves to a path outside the mirror root, then ctxd shall refuse it and leave the outside path untouched. | FS-10 |
-| FS-AC-10 | Unwanted behavior | If a mirror write, rename or unlink would pass through a symbolic link below the mirror root, then ctxd shall refuse it and leave the link's target untouched. | FS-10 |
-| FS-AC-11 | Unwanted behavior | If a file `ctxd export` writes resolves outside the output directory or passes through a symbolic link below it, then ctxd shall refuse the export and write nothing outside the output directory. | FS-10 |
 
 ## 8. Open questions
 

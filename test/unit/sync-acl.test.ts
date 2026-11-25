@@ -364,11 +364,11 @@ describe("replicated names that would escape the Markdown mirror are rejected (i
   });
 
   // FS-AC-8
-  it("rejects a replicated skill create with a missing or traversing skill name", () => {
+  it("rejects a replicated skill create with a missing, traversing or over-64-character skill name", () => {
     const f = setup();
     const scopeId = deterministicId("scope", "sample-app");
     applyEvent(f.db, aclWireEvent(f, scopeId, { action: "scope_create", name: "sample-app", kind: "project", replication: "all", vendor_policy: "any" }));
-    for (const skill_name of [null, "../../escape"]) {
+    for (const skill_name of [null, "../../escape", "a".repeat(65)]) {
       expect(() => applyEvent(f.db, contentCreate(f, scopeId, "skill-note-abc123", { kind: "skill", skill_name }))).toThrow(/invalid skill name/);
     }
     expect(applyEvent(f.db, contentCreate(f, scopeId, "skill-note-abc123", { kind: "skill", skill_name: "sample-skill" })).outcome).toBe("fast-forward");

@@ -139,6 +139,25 @@ describe("peer-bound replication (LLD replication 7.7)", () => {
     expect(target.db.prepare("SELECT 1 FROM events WHERE event_id = ?").get(relayed.eventId)).toBeDefined();
   });
 
+  // RP-AC-10: the relay is verified against the origin's pinned key, not merely accepted because it is signed.
+  it("refuses a signed event a key-bound peer relays when it fails verification against its origin's pinned key", async () => {
+    const target = node("target");
+    const { peerId } = bound(target);
+    const third = node("third");
+    const fourth = node("fourth");
+    const genuine = wroteNote(third, true);
+    pinPublicKey(target.db, third.nodeId, genuine.publicKey!, 0);
+    const tampered: WireEvent = { ...genuine, payload: { ...genuine.payload, title: "Forged" } };
+    const otherKey: WireEvent = { ...wroteNote(third, true), publicKey: wroteNote(fourth, true).publicKey };
+
+    await expect(pull(target, peerId, [tampered, otherKey])).resolves.toMatchObject({ pulled: 0, rejected: 2 });
+    for (const event of [tampered, otherKey]) {
+      expect(rejection(target, event.eventId)).toMatch(/signature|public key|hash/i);
+      expect(target.db.prepare("SELECT 1 FROM events WHERE event_id = ?").get(event.eventId)).toBeUndefined();
+    }
+    expect(target.db.prepare("SELECT 1 FROM entries WHERE entry_id = ?").get(genuine.entryId)).toBeUndefined();
+  });
+
   // RP-AC-9
   it("lets a key-bound peer echo back this node's own older unsigned events", async () => {
     const target = node("target");

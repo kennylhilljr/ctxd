@@ -6,7 +6,7 @@
 | **Owner** | Kenny Hill |
 | **Date** | 2026-10-20 |
 | **Supersedes** | [PRD v7](PRD-v7.md) |
-| **Component PRDs** | [Knowledge model](components/PRD-knowledge-model-v4.md), [Persona pools and access](components/PRD-pools-access-v3.md), [Hooks](components/PRD-hooks-v6.md), [Claims](components/PRD-claims-v4.md), [Trust and safety](components/PRD-trust-safety-v5.md), [Context hygiene](components/PRD-context-hygiene-v2.md), [Replication](components/PRD-replication-v6.md), [Briefs and search](components/PRD-briefs-search-v5.md), [Filesystem view](components/PRD-filesystem-view-v2.md), [Skills](components/PRD-skills-v3.md), [Memory and journal](components/PRD-memory-journal-v2.md), [Feature flags](components/PRD-feature-flags-v2.md) |
+| **Component PRDs** | [Knowledge model](components/PRD-knowledge-model-v4.md), [Persona pools and access](components/PRD-pools-access-v4.md), [Hooks](components/PRD-hooks-v6.md), [Claims](components/PRD-claims-v4.md), [Trust and safety](components/PRD-trust-safety-v5.md), [Context hygiene](components/PRD-context-hygiene-v2.md), [Replication](components/PRD-replication-v7.md), [Briefs and search](components/PRD-briefs-search-v5.md), [Filesystem view](components/PRD-filesystem-view-v3.md), [Skills](components/PRD-skills-v3.md), [Memory and journal](components/PRD-memory-journal-v2.md), [Feature flags](components/PRD-feature-flags-v2.md) |
 | **Companion docs** | [Doc map](../README.md), [Vision v1](../vision/vision-v1.md), [Technical spec v10](../spec/SPEC-v10.md) (HLD) with its [LLDs](../lld/) and [contracts](../contracts/), [Test plan v1](../test/test-plan-v1.md), [Prior art v4](../research/prior-art-v4.md), [ADRs](../adr/) |
 
 ## Changes in v8
@@ -124,14 +124,14 @@ This parent PRD sets the product's goals, scope and cross-cutting requirements. 
 | Component PRD | Covers | Elaborates | Requirement prefix | Spec sections | LLD |
 |---|---|---|---|---|---|
 | [Knowledge model](components/PRD-knowledge-model-v4.md) | What is stored: scopes (including reserved `_me`, `_me.<pool>`, `_hold.<client>`), entry kinds (including `preference`, `skill`, `journal`), statuses, independently versioned parts, references and paths, relationships, history, review-by dates | FR-1, FR-3, FR-29 to FR-32 | KM- | 4, 4.1 to 4.3, 6, 8.2 | [Data model](../lld/LLD-data-model-v1.md), [Write path](../lld/LLD-write-path-v1.md) |
-| [Persona pools and access](components/PRD-pools-access-v3.md) | Who may see and write what: pools, grants, membership by client or tag, per-session personas and persona tokens, profiles, holding scopes, access requests, sealed pools, per-hop checks | FR-10, FR-16, FR-33 to FR-36, FR-42 | PA- | 4, 8.4, 10.5 to 10.7, 11 | [Security and access](../lld/LLD-security-access-v1.md), [MCP server](../lld/LLD-mcp-server-v1.md) |
+| [Persona pools and access](components/PRD-pools-access-v4.md) | Who may see and write what: pools, grants, membership by client or tag, per-session personas and persona tokens, profiles, holding scopes, access requests, sealed pools, per-hop checks | FR-10, FR-16, FR-33 to FR-36, FR-42 | PA- | 4, 8.4, 10.5 to 10.7, 11 | [Security and access](../lld/LLD-security-access-v1.md), [MCP server](../lld/LLD-mcp-server-v1.md) |
 | [Hooks and agent lifecycle](components/PRD-hooks-v6.md) | **When agents read and write**: read moments R1 to R8, write moments W1 to W8 (including automatic journal entries), the Stop-hook nudge, per-client behavior, crash sweep, scope resolution, bypass, path guard, status line | FR-7, FR-8, FR-9, FR-27, FR-28 | HK- | 3, 8.1, 8.3, 9 | [Hooks](../lld/LLD-hooks-v1.md) |
 | [Claims and write intent](components/PRD-claims-v4.md) | Task claims, write intent, overlap policy, drift audit, stale-claim takeover, claim liveness | FR-17, FR-23 to FR-26 | CL- | 4, 7.4, 7.5, 8.2 | [Claims](../lld/LLD-claims-v1.md) |
 | [Trust and safety](components/PRD-trust-safety-v5.md) | Sanitization, capture filters, bypass, path guard, provenance, review queue and remembered approvals, tokens, vendor policy, network exposure, data at rest | FR-11, FR-12, FR-18, FR-21 | TS- | 6, 6.1, 9.9, 10 | [Write path](../lld/LLD-write-path-v1.md), [Security and access](../lld/LLD-security-access-v1.md) |
 | [Context hygiene](components/PRD-context-hygiene-v2.md) | Cleaning bad context: flag, quarantine and revert by source, scope rollback, purge, review-by dates, tidy | FR-37 to FR-41 | CH- | 4, 7.6, 8.2, 11, 13 | [Context hygiene](../lld/LLD-context-hygiene-v1.md) |
-| [Replication and offline work](components/PRD-replication-v6.md) | Per-machine replicas, scope replication, sync over Tailscale, per-part conflicts, idempotent retries, hub migration | FR-4, FR-13 to FR-15 | RP- | 4, 5, 7, 12 | [Replication](../lld/LLD-replication-v1.md) |
+| [Replication and offline work](components/PRD-replication-v7.md) | Per-machine replicas, scope replication, sync over Tailscale, per-part conflicts, idempotent retries, hub migration | FR-4, FR-13 to FR-15 | RP- | 4, 5, 7, 12 | [Replication](../lld/LLD-replication-v1.md) |
 | [Briefs and search](components/PRD-briefs-search-v5.md) | Detail tiers, brief contents and caps (including open signals, the skill catalog and journal highlights), lessons, interrupted-work wording, search scope and filters, tool footprint, agent ergonomics, semantic search | FR-2, FR-5, FR-6, FR-20, FR-56 | BS- | 8.2, 8.5, 11 | [Briefs and search](../lld/LLD-briefs-search-v1.md), [MCP tools contract](../contracts/mcp-tools-v1.md) |
-| [Filesystem view](components/PRD-filesystem-view-v2.md) | `ctxd://` paths, folder summaries, browsing for agents and me, the editable Markdown mirror, import | FR-19, FR-43 to FR-45 | FS- | 4.2, 8.2, 12.1, 13 | [Data model](../lld/LLD-data-model-v1.md) 4.2, [Operations](../lld/LLD-operations-v1.md) 12.1 |
+| [Filesystem view](components/PRD-filesystem-view-v3.md) | `ctxd://` paths, folder summaries, browsing for agents and me, the editable Markdown mirror, import | FR-19, FR-43 to FR-45 | FS- | 4.2, 8.2, 12.1, 13 | [Data model](../lld/LLD-data-model-v1.md) 4.2, [Operations](../lld/LLD-operations-v1.md) 12.1 |
 | [Skills](components/PRD-skills-v3.md) | Shared, versioned, approved procedures; the skill catalog; native sync into Claude Code and Codex | FR-46 to FR-49 | SK- | 4.3, 6, 10.4, 11.1, 12.2, 13 | [Operations](../lld/LLD-operations-v1.md) 12.2, [Data model](../lld/LLD-data-model-v1.md) 4.3 |
 | [Memory and journal](components/PRD-memory-journal-v2.md) | Preferences and the `_me` layout; the journal, digests and time queries; open signals; importance; causal links | FR-50 to FR-55 | MJ- | 4.1, 4.3, 9.2, 11.1 to 11.5, 13 | [Briefs and search](../lld/LLD-briefs-search-v1.md), [Data model](../lld/LLD-data-model-v1.md) 4.3 |
 | [Feature flags](components/PRD-feature-flags-v2.md) | Switching optional behavior off per machine: the registry, layers (default, config, environment), live reload, safety rules, the flag list | FR-57; NFR-11 | FF- | 3.1, 13 | [Configuration](../lld/LLD-configuration-v1.md) 3.1 |
@@ -157,7 +157,7 @@ The full definition is in [Hooks and agent lifecycle](components/PRD-hooks-v6.md
   - **Members:** each agent belongs to zero, one, several, or all pools.
   - **What it sees:** each session assumes one persona through a persona token, and reaches only that pool plus the global `_me`; its other pools are unreachable in that session.
   - **Agents in no pool:** they read the global `_me` and their writes are held privately for me.
-  - **Writing into a pool requires my permission.** That means membership, a temporary grant, or approving an access request ([Persona pools and access](components/PRD-pools-access-v3.md)).
+  - **Writing into a pool requires my permission.** That means membership, a temporary grant, or approving an access request ([Persona pools and access](components/PRD-pools-access-v4.md)).
 - **Bad context is easy to remove.**
   - **Any agent or I can flag an entry**, which pulls it from briefs at once.
   - **I can quarantine everything a misbehaving agent or session wrote**, then revert it or release it.
@@ -178,22 +178,22 @@ The full definition is in [Hooks and agent lifecycle](components/PRD-hooks-v6.md
 | FR-1 | Store typed entries in scopes, with versions, tags, links and provenance (client, session, node, time) | P0 | [Knowledge](components/PRD-knowledge-model-v4.md) |
 | FR-2 | MCP tools: `context_brief`, `context_search`, `context_get`, `context_write`, `context_handoff`, `context_flag`, `context_claim` | P0 | [Briefs](components/PRD-briefs-search-v5.md) |
 | FR-3 | Optimistic concurrency: writes to an existing entry require `expected_rev`; mismatches return the current revision, never overwrite | P0 | [Knowledge](components/PRD-knowledge-model-v4.md) |
-| FR-4 | Idempotent writes via a client-supplied `request_id` with an input fingerprint; reusing an id with different input is refused | P0 | [Replication](components/PRD-replication-v6.md) |
+| FR-4 | Idempotent writes via a client-supplied `request_id` with an input fingerprint; reusing an id with different input is refused | P0 | [Replication](components/PRD-replication-v7.md) |
 | FR-5 | Budgeted briefs at `micro`, `normal`, `full`, assembled deterministically (no model call) | P0 | [Briefs](components/PRD-briefs-search-v5.md) |
 | FR-6 | Full-text search (SQLite FTS5) with ranking by relevance, recency and kind | P0 | [Briefs](components/PRD-briefs-search-v5.md) |
 | FR-7 | `ctxd hook <event>` CLI for Claude Code and Codex hook events (Hooks section 7) | P0 | [Hooks](components/PRD-hooks-v6.md) |
 | FR-8 | Stop-hook nudge rules and guards (Hooks section 6), configurable per scope | P0 | [Hooks](components/PRD-hooks-v6.md) |
 | FR-9 | Scope resolution from the working directory through local bindings (repository identity or path mapping); nothing stored in repositories | P0 | [Hooks](components/PRD-hooks-v6.md) |
-| FR-10 | Per-client tokens; every write attributed; tokens revocable | P0 | [Pools](components/PRD-pools-access-v3.md) |
+| FR-10 | Per-client tokens; every write attributed; tokens revocable | P0 | [Pools](components/PRD-pools-access-v4.md) |
 | FR-11 | Review queue: `proposed` entries listed, approved, edited or rejected via `ctxd review` | P0 | [Trust](components/PRD-trust-safety-v5.md) |
 | FR-12 | Redaction on write: strip `<private>` blocks; strip invisible and bidirectional control characters; reject likely secrets in agent writes; redact in place in mechanical hook captures; sanitize before truncating | P0 | [Trust](components/PRD-trust-safety-v5.md) |
-| FR-13 | Multi-node replication over Tailscale with offline operation and convergence | P1 | [Replication](components/PRD-replication-v6.md) |
-| FR-14 | Conflict policies by kind (spec section 7); conflicted entries surfaced in review | P1 | [Replication](components/PRD-replication-v6.md) |
-| FR-15 | Scope replication policies (`all`, `home`, `local`) enforced during sync | P1 | [Replication](components/PRD-replication-v6.md) |
-| FR-16 | Scope vendor policy (`any`, `local-only`) enforced per client on every read | P1 | [Pools](components/PRD-pools-access-v3.md) |
+| FR-13 | Multi-node replication over Tailscale with offline operation and convergence | P1 | [Replication](components/PRD-replication-v7.md) |
+| FR-14 | Conflict policies by kind (spec section 7); conflicted entries surfaced in review | P1 | [Replication](components/PRD-replication-v7.md) |
+| FR-15 | Scope replication policies (`all`, `home`, `local`) enforced during sync | P1 | [Replication](components/PRD-replication-v7.md) |
+| FR-16 | Scope vendor policy (`any`, `local-only`) enforced per client on every read | P1 | [Pools](components/PRD-pools-access-v4.md) |
 | FR-17 | Leases on tasks with expiry; tentative claims while offline; deterministic tie-break on merge | P1 | [Claims](components/PRD-claims-v4.md) |
 | FR-18 | Encrypted backups (local, optionally copied to Google Drive as ciphertext) | P1 | [Trust](components/PRD-trust-safety-v5.md) |
-| FR-19 | `ctxd export --markdown` for human-readable review and archiving; `ctxd import` of Markdown folders as proposed entries | P2 | [Trust](components/PRD-trust-safety-v5.md), [Filesystem view](components/PRD-filesystem-view-v2.md) |
+| FR-19 | `ctxd export --markdown` for human-readable review and archiving; `ctxd import` of Markdown folders as proposed entries | P2 | [Trust](components/PRD-trust-safety-v5.md), [Filesystem view](components/PRD-filesystem-view-v3.md) |
 | FR-20 | Semantic search (sqlite-vec with a local embedding model) blended with FTS | P2 | [Briefs](components/PRD-briefs-search-v5.md) |
 | FR-21 | Signed events (per-node Ed25519) for tamper evidence | P2 | [Trust](components/PRD-trust-safety-v5.md) |
 | FR-22 | Optional mobile inbox (section 12) | P3 | Section 12 |
@@ -207,19 +207,19 @@ The full definition is in [Hooks and agent lifecycle](components/PRD-hooks-v6.md
 | FR-30 | Stable, citable entry references that follow supersession | P1 | [Knowledge](components/PRD-knowledge-model-v4.md) |
 | FR-31 | Typed relationships between entries, with one-hop retrieval and supersession notices | P1 | [Knowledge](components/PRD-knowledge-model-v4.md) |
 | FR-32 | Full history with prior values per change; rejected writes and access denials recorded as metadata only | P0 | [Knowledge](components/PRD-knowledge-model-v4.md) |
-| FR-33 | Persona pools: scope grants at `read`, `propose` or `write`; membership by client or tag; default deny; holding scopes for writes an agent may not place; access requests approved only by me | P0 | [Pools](components/PRD-pools-access-v3.md) |
-| FR-34 | Global `_me` readable by every agent; optional `_me.<pool>` profiles | P0 | [Pools](components/PRD-pools-access-v3.md) |
-| FR-35 | Each session assumes exactly one persona through a persona token, chosen from local bindings or `CTXD_POOL`; enforced on every call | P0 | [Pools](components/PRD-pools-access-v3.md) |
-| FR-36 | Temporary, expiring grants | P1 | [Pools](components/PRD-pools-access-v3.md) |
+| FR-33 | Persona pools: scope grants at `read`, `propose` or `write`; membership by client or tag; default deny; holding scopes for writes an agent may not place; access requests approved only by me | P0 | [Pools](components/PRD-pools-access-v4.md) |
+| FR-34 | Global `_me` readable by every agent; optional `_me.<pool>` profiles | P0 | [Pools](components/PRD-pools-access-v4.md) |
+| FR-35 | Each session assumes exactly one persona through a persona token, chosen from local bindings or `CTXD_POOL`; enforced on every call | P0 | [Pools](components/PRD-pools-access-v4.md) |
+| FR-36 | Temporary, expiring grants | P1 | [Pools](components/PRD-pools-access-v4.md) |
 | FR-37 | Flag entries as wrong, stale, duplicate or unsafe, by any agent or me; flagged entries leave briefs immediately | P0 | [Hygiene](components/PRD-context-hygiene-v2.md) |
 | FR-38 | Quarantine by agent, session, time window and scope; revert or release, entirely or per entry | P1 | [Hygiene](components/PRD-context-hygiene-v2.md) |
 | FR-39 | Scope rollback to a point in time | P1 | [Hygiene](components/PRD-context-hygiene-v2.md) |
 | FR-40 | Purge: real erasure on every machine, including history and indexes, leaving an audited stub | P0 | [Hygiene](components/PRD-context-hygiene-v2.md) |
 | FR-41 | Review-by dates and `ctxd tidy` | P1 | [Hygiene](components/PRD-context-hygiene-v2.md) |
-| FR-42 | Sealed pools: separate encrypted file, Touch ID protected key, attached only for that persona, replicated only to enrolled machines | P1 | [Pools](components/PRD-pools-access-v3.md) |
-| FR-43 | Stable `ctxd://` paths for entries and folders, with generated folder summaries, filtered by persona | P0 | [Filesystem view](components/PRD-filesystem-view-v2.md) |
-| FR-44 | Paths accepted by `context_get` and `context_search`; CLI `ls`, `tree`, `read`, `grep`, `open` | P1 | [Filesystem view](components/PRD-filesystem-view-v2.md) |
-| FR-45 | Optional two-way Markdown mirror for me, with revision checks; never for sealed pools or agents | P2 | [Filesystem view](components/PRD-filesystem-view-v2.md) |
+| FR-42 | Sealed pools: separate encrypted file, Touch ID protected key, attached only for that persona, replicated only to enrolled machines | P1 | [Pools](components/PRD-pools-access-v4.md) |
+| FR-43 | Stable `ctxd://` paths for entries and folders, with generated folder summaries, filtered by persona | P0 | [Filesystem view](components/PRD-filesystem-view-v3.md) |
+| FR-44 | Paths accepted by `context_get` and `context_search`; CLI `ls`, `tree`, `read`, `grep`, `open` | P1 | [Filesystem view](components/PRD-filesystem-view-v3.md) |
+| FR-45 | Optional two-way Markdown mirror for me, with revision checks; never for sealed pools or agents | P2 | [Filesystem view](components/PRD-filesystem-view-v3.md) |
 | FR-46 | `skill` kind in `SKILL.md` form, scoped to `_me`, pool profiles or projects | P0 | [Skills](components/PRD-skills-v3.md) |
 | FR-47 | Skill catalog in briefs; skills fetched on demand by name | P0 | [Skills](components/PRD-skills-v3.md) |
 | FR-48 | Optional native sync of approved global skills into Claude Code and Codex skill folders | P1 | [Skills](components/PRD-skills-v3.md) |
@@ -290,7 +290,7 @@ The full definition is in [Hooks and agent lifecycle](components/PRD-hooks-v6.md
 | Briefs grow past what clients show inline | SessionStart cap of about 9,500 characters, enforced by test |
 | Lessons encode a wrong habit that every agent then follows | Lessons are proposed by default, advisory only, and attributed |
 | Bad context spreads before anyone notices | Any agent can flag; flags leave briefs at once; quarantine and revert by source ([Context hygiene](components/PRD-context-hygiene-v2.md)) |
-| An over-trusted agent reads or writes everything | Persona pools with default deny; one persona per session via persona tokens; holding scopes and human-approved access requests ([Persona pools and access](components/PRD-pools-access-v3.md)) |
+| An over-trusted agent reads or writes everything | Persona pools with default deny; one persona per session via persona tokens; holding scopes and human-approved access requests ([Persona pools and access](components/PRD-pools-access-v4.md)) |
 | Agents with shell access read ctxd's files directly | Path guard; client sandboxes; sealed pools for the most sensitive context |
 | Real project names leak into the public record | No names in repositories: local bindings only; invented examples in all docs and tests |
 | Pool setup becomes tedious | Tags for membership, pool default policies, `ctxd access` to explain effective access |
@@ -325,9 +325,9 @@ If capturing from phone chat apps proves important, add a minimal cloud inbox, n
 | Q9 | Default claim lease length (currently 120 minutes) and whether the Stop hook should auto-release claims when a session ends cleanly. |
 | Q10 | Minimum supported client versions (Codex SessionEnd needs rust-v0.145.0; sources-used cards need a recent Claude Code). |
 | Q11 | Should ctxd ever use a local model to write summaries or extract lessons automatically (M6), or stay curated only? |
-| Q12 | Initial pool layout (which personas, which scopes in each, which agents where). The example in [Persona pools and access](components/PRD-pools-access-v3.md) section 4 is a starting point. |
+| Q12 | Initial pool layout (which personas, which scopes in each, which agents where). The example in [Persona pools and access](components/PRD-pools-access-v4.md) section 4 is a starting point. |
 | Q13 | Should repeated redaction rejections or flags from one agent quarantine it automatically ([Context hygiene](components/PRD-context-hygiene-v2.md) HQ2-2)? |
-| Q14 | One Markdown mirror tree, or one per persona ([Filesystem view](components/PRD-filesystem-view-v2.md) FQ-1)? |
+| Q14 | One Markdown mirror tree, or one per persona ([Filesystem view](components/PRD-filesystem-view-v3.md) FQ-1)? |
 | Q15 | Journal retention: keep routine entries forever, or roll old ones into monthly digests ([Memory and journal](components/PRD-memory-journal-v2.md) MQ-2)? |
 | Q16 | Allow skill supporting files (references, scripts) later, and under what review ([Skills](components/PRD-skills-v3.md) SQ-1)? |
 
@@ -460,7 +460,7 @@ DataHub's [context management platform post](https://datahub.com/blog/best-conte
 | 1. Breadth of ingestion | Not a goal; ctxd stores curated knowledge and pointers, not a data estate |
 | 2. Metadata and semantic foundation | Typed kinds, parts, relations ([Knowledge model](components/PRD-knowledge-model-v4.md)) |
 | 3. Expert-validated context | Proposed status and the review queue ([Trust and safety](components/PRD-trust-safety-v5.md)) |
-| 4. Freshness through events | Hooks write at session boundaries; event-log sync ([Hooks](components/PRD-hooks-v6.md), [Replication](components/PRD-replication-v6.md)) |
+| 4. Freshness through events | Hooks write at session boundaries; event-log sync ([Hooks](components/PRD-hooks-v6.md), [Replication](components/PRD-replication-v7.md)) |
 | 5. Shareability across agents | Every MCP client, with hooks for Claude Code and Codex |
 | 6. Activation beyond MCP | Hooks, CLI, Desktop project instructions |
 | 7. Provenance, versioning, auditability | Per-client provenance, full history with prior values |
