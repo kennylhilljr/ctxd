@@ -49,8 +49,10 @@
  * event no longer stalls replication from that peer; each is retried on later pulls (LLD 7.1).
  * Bumped to 25: `mirror_skips` records new Markdown mirror files that could not be imported (a
  * sealed scope, an invalid file), so `ctxd status` and `ctxd doctor` can say why (#72, LLD 12.1).
+ * Bumped to 26: `mirror_skips.pending_request_id` holds the request id of a committed import whose
+ * file has not yet moved to its canonical path, so a retry replays it instead of duplicating (#83).
  */
-export const SCHEMA_VERSION = 25;
+export const SCHEMA_VERSION = 26;
 
 export const SCHEMA_SQL = `
 CREATE TABLE nodes (
@@ -403,7 +405,8 @@ CREATE TABLE mirror_skips (            -- local only: new mirror files that coul
   reason           TEXT NOT NULL,
   attempts         INTEGER NOT NULL DEFAULT 1,
   first_skipped_at TEXT NOT NULL,
-  last_skipped_at  TEXT NOT NULL
+  last_skipped_at  TEXT NOT NULL,
+  pending_request_id TEXT              -- a committed import not yet moved to its canonical path (#83)
 );
 
 CREATE TABLE tool_metrics (            -- local only: response metering (8.5)

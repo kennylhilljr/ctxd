@@ -171,6 +171,23 @@ describe("Markdown export and mirror (Spec v9 section 12.1)", () => {
     expect(count(f, "entries")).toBe(2);
   });
 
+  it("imports an identical file put back after a failed partial save as a new entry (#83)", () => {
+    const f = fixture();
+    const content = "---\nkind: \"note\"\ntitle: \"Again\"\n---\n# Again\n\nBody\n";
+    mkdirSync(join(f.mirror, "sample-app"), { recursive: true });
+    const source = join(f.mirror, "sample-app", "again.md");
+    writeFileSync(source, content);
+    syncMirror(f.ctx, f.mirror);
+    writeFileSync(source, content.replace('"note"', '"not-a-kind"'));
+    syncMirror(f.ctx, f.mirror);
+    expect((f.db.prepare("SELECT COUNT(*) AS n FROM mirror_skips").get() as { n: number }).n).toBe(1);
+
+    writeFileSync(source, content);
+    syncMirror(f.ctx, f.mirror);
+    expect(existsSync(source)).toBe(false);
+    expect(count(f, "entries")).toBe(2);
+  });
+
   it("records a skip, not a second entry, when a pending import's entry is archived (#83)", () => {
     const f = fixture();
     mkdirSync(join(f.mirror, "sample-app"), { recursive: true });
