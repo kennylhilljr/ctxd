@@ -128,10 +128,11 @@ function errorsFor(parsed: Extract<ParsedLine, { kind: "message" }>, code: numbe
   return JSON.stringify(parsed.batch ? errors : errors[0]);
 }
 
-/** True for a JSON-RPC 2.0 response (or a batch of them): the launcher forwards these unchanged. */
-function isJsonRpcResponse(value: unknown): boolean {
-  if (Array.isArray(value)) return value.length > 0 && value.every(isJsonRpcResponse);
-  if (typeof value !== "object" || value === null) return false;
+type JsonRpcResponse = { jsonrpc: "2.0"; id: JsonRpcId; result?: unknown; error?: unknown };
+
+/** True for a single JSON-RPC 2.0 response object. */
+function isJsonRpcResponse(value: unknown): value is JsonRpcResponse {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
   const v = value as Record<string, unknown>;
   return v.jsonrpc === "2.0" && "id" in v && ("result" in v || "error" in v);
 }
@@ -150,6 +151,14 @@ function parseSseMessages(raw: string): string[] {
     .filter((msg) => msg.length > 0);
 }
 
+function parseJson(text: string): unknown {
+  try {
+    return text.trim() ? JSON.parse(text) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export interface HttpReply {
   status: number;
   contentType: string;
@@ -158,40 +167,40 @@ export interface HttpReply {
 
 /**
  * The stdout line for one stdin line, given the server's HTTP reply, or null when nothing should be
- * written (#81). A JSON-RPC response passes through unchanged. Anything else (the listener's plain
- * `{ error }` envelope for an auth failure, bad JSON, an oversized body or an internal error, or an
- * empty or non-JSON body) becomes a JSON-RPC error carrying the pending request's id, so the client
- * never sees a message it cannot correlate. A notification never gets an answer.
+ * written (#81). Every request in the line gets exactly one JSON-RPC response carrying its id, and a
+ * notification gets none. JSON-RPC responses from the server (a JSON body, or every event of an SSE
+ * body) are kept; a JSON-RPC error the transport sent with id null is given the pending ids. Anything
+ * else (the listener's plain `{ error }` envelope for an auth failure, bad JSON, an oversized body or
+ * an internal error, or an empty or non-JSON body) becomes a -32603 error for each pending id, with
+ * the HTTP status and the envelope in `data`.
  */
 export function responseFor(line: string, reply: HttpReply): string | null {
   const parsed = parseLine(line);
   if (parsed.kind === "parse-error") return JSON.stringify(jsonRpcError(null, -32700, "Parse error"));
   if (parsed.ids.length === 0) return null;
 
-  let text = reply.body.trim();
-  if (reply.contentType.includes("text/event-stream")) {
-    const messages = parseSseMessages(reply.body);
-    text = messages.length ? messages[messages.length - 1]! : "";
-  }
-  let body: unknown;
-  try {
-    body = text ? JSON.parse(text) : undefined;
-  } catch {
-    body = undefined;
-  }
-  if (isJsonRpcResponse(body)) {
-    // The SDK answers some transport failures with a JSON-RPC error whose id is null; give it the request's id.
-    const b = body as Record<string, unknown>;
-    if (!Array.isArray(body) && b.id === null && "error" in b && !parsed.batch) return JSON.stringify({ ...b, id: parsed.ids[0] });
-    return text;
+  const bodies = reply.contentType.includes("text/event-stream") ? parseSseMessages(reply.body).map(parseJson) : [parseJson(reply.body)];
+  const received = bodies.flatMap((b) => (Array.isArray(b) ? b : [b])).filter(isJsonRpcResponse);
+
+  // The error every request without its own response gets: an id-null transport error if the server sent one, else one built from the reply.
+  const uncorrelated = received.find((r) => r.id === null && "error" in r);
+  let fallback: (id: JsonRpcId) => Record<string, unknown>;
+  if (uncorrelated) fallback = (id) => ({ ...uncorrelated, id });
+  else {
+    const body = bodies.length === 1 ? bodies[0] : undefined;
+    const envelope = (body as { error?: { message?: unknown } } | undefined)?.error;
+    if (!isJsonRpcResponse(body) && typeof envelope === "object" && envelope !== null) {
+      const message = typeof envelope.message === "string" ? envelope.message : `ctxd server error (HTTP ${reply.status})`;
+      fallback = (id) => jsonRpcError(id, -32603, message, { httpStatus: reply.status, ...(body as Record<string, unknown>) });
+    } else {
+      fallback = (id) => jsonRpcError(id, -32603, `ctxd server returned no JSON-RPC response (HTTP ${reply.status})`, { httpStatus: reply.status });
+    }
   }
 
-  const envelope = (body as { error?: { message?: unknown } } | undefined)?.error;
-  if (typeof envelope === "object" && envelope !== null) {
-    const message = typeof envelope.message === "string" ? envelope.message : `ctxd server error (HTTP ${reply.status})`;
-    return errorsFor(parsed, -32603, message, { httpStatus: reply.status, ...(body as Record<string, unknown>) });
-  }
-  return errorsFor(parsed, -32603, `ctxd server returned no JSON-RPC response (HTTP ${reply.status})`, { httpStatus: reply.status });
+  const byId = new Map<JsonRpcId, JsonRpcResponse>();
+  for (const r of received) if (r.id !== null && !byId.has(r.id)) byId.set(r.id, r);
+  const responses = parsed.ids.map((id) => byId.get(id) ?? fallback(id));
+  return JSON.stringify(parsed.batch ? responses : responses[0]);
 }
 
 /** Forward one line (a JSON-RPC message) to the server over loopback; resolves with the raw HTTP reply. */

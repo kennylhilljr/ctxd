@@ -13,7 +13,7 @@ import { startServer } from "../../src/server/mcp.js";
 
 /**
  * #81: the `ctxd mcp` launcher answers every request on stdout with a JSON-RPC response carrying
- * that request's id (SPEC 8.4 step 5, NFR-9). The MCP listener answers transport-level failures
+ * that request's id (SPEC 8.4 step 6, NFR-9). The MCP listener answers transport-level failures
  * (auth, bad JSON, an oversized body, an internal error) with a plain `{ error }` envelope, which
  * the launcher used to forward unchanged; it now wraps it as a JSON-RPC error.
  */
@@ -110,6 +110,24 @@ describe("ctxd mcp launcher: transport errors become JSON-RPC errors (#81)", () 
     const body = JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32000, message: "Not Acceptable" } });
     const out = JSON.parse(responseFor(call(9), { status: 406, contentType: "application/json", body })!);
     expect(out).toEqual({ jsonrpc: "2.0", id: 9, error: { code: -32000, message: "Not Acceptable" } });
+  });
+
+  it("gives an id-null transport error to every request in a batch", () => {
+    const body = JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32000, message: "Not Acceptable" } });
+    const out = JSON.parse(responseFor(`[${call(1)},${call(2)}]`, { status: 406, contentType: "application/json", body })!) as { id: unknown; error: { code: number } }[];
+    expect(out).toEqual([
+      { jsonrpc: "2.0", id: 1, error: { code: -32000, message: "Not Acceptable" } },
+      { jsonrpc: "2.0", id: 2, error: { code: -32000, message: "Not Acceptable" } },
+    ]);
+  });
+
+  it("keeps every event of an SSE reply to a batch, and fills in a request the server did not answer", () => {
+    const one = { jsonrpc: "2.0", id: 1, result: { a: 1 } };
+    const two = { jsonrpc: "2.0", id: 2, result: { b: 2 } };
+    const sse = `event: message\ndata: ${JSON.stringify(one)}\n\nevent: message\ndata: ${JSON.stringify(two)}\n\n`;
+    const out = JSON.parse(responseFor(`[${call(1)},${call(2)},${call(3)}]`, { status: 200, contentType: "text/event-stream", body: sse })!) as { id: unknown }[];
+    expect(out.slice(0, 2)).toEqual([one, two]);
+    expect(out[2]).toMatchObject({ id: 3, error: { code: -32603 } });
   });
 
   it("writes nothing for a notification, even when the server fails", async () => {
