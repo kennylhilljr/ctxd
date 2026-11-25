@@ -39,6 +39,9 @@ export interface Frontmatter {
   tags?: string[];
 }
 
+/** Statuses whose entries the mirror does not show. */
+const UNMIRRORED = new Set(["deleted", "archived", "superseded", "quarantined"]);
+
 const IMMUTABLE = new Set<Kind>(["decision", "handoff", "pointer", "journal"]);
 
 function hash(text: string): string {
@@ -55,7 +58,7 @@ function rows(db: Database.Database, scopeName?: string): MarkdownRow[] {
   return db.prepare(
     `SELECT e.*, s.name AS scope_name, s.kind AS scope_kind, c.name AS author_name
      FROM entries e JOIN scopes s ON s.scope_id = e.scope_id JOIN clients c ON c.client_id = e.updated_by
-     WHERE e.purged_at IS NULL AND e.status NOT IN ('deleted','archived','superseded','quarantined')
+     WHERE e.purged_at IS NULL AND e.status NOT IN (${[...UNMIRRORED].map((s) => `'${s}'`).join(",")})
        AND NOT EXISTS (
          SELECT 1 FROM pool_grants pg JOIN pools p ON p.pool_id = pg.pool_id
          WHERE pg.scope_id = e.scope_id AND p.storage = 'sealed'
@@ -431,6 +434,7 @@ export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: num
       const parsed = parseMarkdown(text, path.replace(/\.md$/, "").split(/[\\/]/).pop() ?? "New note");
       if (parsed.meta.ref) {
         clearSkip(db, path);
+        if (removeInactiveUntracked(db, mirrorDir, path, parsed, text) === "conflict") conflicts++;
         continue;
       }
       const [scope] = path.split(/[\\/]/);
@@ -503,6 +507,44 @@ export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: num
     written++;
   }
   return { written, applied, conflicts, archiveRequests };
+}
+
+/**
+ * Removes an untracked file at the canonical path of the entry its `ref` names, when that entry is no
+ * longer mirrored (#91): ctxd stopped between writing it and tracking it, so the tracked loop never
+ * sees it. A sealed or purged entry's file and conflict copy are deleted unconditionally, as the
+ * tracked loop does (Spec 12.1: sealed pools are never on disk in plaintext). Otherwise a file whose
+ * content differs from the entry's (a user edit) is kept as a conflict copy before the file goes.
+ * A ref'd file anywhere else is left alone. Returns what was done, or null when nothing applies.
+ */
+function removeInactiveUntracked(db: Database.Database, mirrorDir: string, path: string, parsed: ReturnType<typeof parseMarkdown>, text: string): "removed" | "conflict" | null {
+  const entryId = parseRef(String(parsed.meta.ref))?.id;
+  if (!entryId) return null;
+  const row = db.prepare(
+    `SELECT e.*, s.name AS scope_name, s.kind AS scope_kind, '' AS author_name,
+       EXISTS (SELECT 1 FROM pool_grants pg JOIN pools p ON p.pool_id = pg.pool_id
+               WHERE pg.scope_id = e.scope_id AND p.storage = 'sealed') AS sealed
+     FROM entries e JOIN scopes s ON s.scope_id = e.scope_id WHERE e.entry_id = ?`,
+  ).get(entryId) as (MarkdownRow & { sealed: number }) | undefined;
+  // A live entry's file is reconciled and tracked above or rewritten by the export below.
+  if (!row || (!row.sealed && row.purged_at === null && !UNMIRRORED.has(row.status))) return null;
+  let canonical: string;
+  try { canonical = relativePath(row); } catch { return null; } // a purged skill may have lost its name
+  if (canonical !== path) return null;
+  if (row.sealed || row.purged_at !== null) {
+    unlinkSync(insideRoot(mirrorDir, path));
+    const conflict = insideRoot(mirrorDir, path.replace(/\.md$/, ".conflict.md"));
+    if (existsSync(conflict)) unlinkSync(conflict);
+    db.prepare("DELETE FROM mirror_conflicts WHERE path = ?").run(path);
+    return "removed";
+  }
+  // An archive, deletion, supersession or quarantine changes only the status, so an unedited render
+  // still carries the entry's content revision, title, body and tags.
+  const unedited = parsed.meta.rev === row.content_rev && parsed.title === row.title && parsed.body === row.body &&
+    (parsed.meta.tags === undefined || JSON.stringify(parsed.meta.tags) === row.tags);
+  if (!unedited) recordConflict(db, mirrorDir, path, row, parsed.meta.rev, `This entry is no longer mirrored (${row.status}); your edit was not applied.`, text);
+  unlinkSync(insideRoot(mirrorDir, path));
+  return unedited ? "removed" : "conflict";
 }
 
 function sameInode(a: string, b: string): boolean {

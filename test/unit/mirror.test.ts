@@ -11,6 +11,7 @@ import { confirmArchiveRequest, exportMarkdown, importMarkdown, parseMarkdown, s
 import { checkMirrorSkips } from "../../src/cli/doctor.js";
 import { setEntryStatus } from "../../src/store/tidy.js";
 import { formatRef } from "../../src/model/refs.js";
+import { purgeEntry } from "../../src/store/purge.js";
 
 const scratch: string[] = [];
 afterEach(() => { for (const dir of scratch.splice(0)) rmSync(dir, { recursive: true, force: true }); });
@@ -245,6 +246,76 @@ describe("Markdown export and mirror (Spec v9 section 12.1)", () => {
     syncMirror(f.ctx, f.mirror);
     expect(existsSync(file)).toBe(false);
     expect((f.db.prepare("SELECT COUNT(*) AS n FROM mirror_files").get() as { n: number }).n).toBe(0);
+  });
+
+  function mirrorCount(f: ReturnType<typeof fixture>, table: "mirror_files" | "mirror_conflicts"): number {
+    return (f.db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n;
+  }
+
+  function sealScope(f: ReturnType<typeof fixture>): void {
+    const poolId = newId();
+    const scopeId = (f.db.prepare("SELECT scope_id FROM scopes WHERE name = 'sample-app'").get() as { scope_id: string }).scope_id;
+    f.db.prepare("INSERT INTO pools (pool_id, name, storage, sealed_file, created_at) VALUES (?, 'pool-private', 'sealed', ?, ?)").run(poolId, `sealed/${poolId}.db`, new Date().toISOString());
+    f.db.prepare("INSERT INTO pool_grants (pool_id, scope_id, level) VALUES (?, ?, 'write')").run(poolId, scopeId);
+  }
+
+  function entryRef(f: ReturnType<typeof fixture>): string {
+    return formatRef("sample-app", (f.db.prepare("SELECT entry_id FROM entries").get() as { entry_id: string }).entry_id);
+  }
+
+  it("removes an unedited untracked file of an entry archived while it was untracked (#91)", () => {
+    const f = fixture(); const file = writtenButUntracked(f);
+    setEntryStatus(f.ctx, entryRef(f), "archived");
+    expect(syncMirror(f.ctx, f.mirror)).toMatchObject({ applied: 0, conflicts: 0 });
+    expect(existsSync(file)).toBe(false);
+    expect(existsSync(file.replace(/\.md$/, ".conflict.md"))).toBe(false);
+    expect(mirrorCount(f, "mirror_files")).toBe(0);
+    expect(mirrorCount(f, "mirror_conflicts")).toBe(0);
+    expect(syncMirror(f.ctx, f.mirror)).toMatchObject({ written: 0, applied: 0, conflicts: 0 });
+  });
+
+  it("keeps an edit to an untracked file of an entry no longer mirrored as a conflict copy (#91, FS-AC-4)", () => {
+    const f = fixture(); const file = writtenButUntracked(f);
+    writeFileSync(file, readFileSync(file, "utf8").replace("Original body", "Edited while stopped"));
+    setEntryStatus(f.ctx, entryRef(f), "quarantined");
+    expect(syncMirror(f.ctx, f.mirror)).toMatchObject({ applied: 0, conflicts: 1 });
+    expect(existsSync(file)).toBe(false);
+    expect(readFileSync(file.replace(/\.md$/, ".conflict.md"), "utf8")).toContain("Edited while stopped");
+    expect(f.db.prepare("SELECT body, status FROM entries").get()).toEqual({ body: "Original body", status: "quarantined" });
+    expect(mirrorCount(f, "mirror_conflicts")).toBe(1);
+    expect(syncMirror(f.ctx, f.mirror)).toMatchObject({ applied: 0, conflicts: 0 });
+  });
+
+  it("deletes an edited untracked file and its conflict copy when the scope becomes sealed (#91, Spec 12.1)", () => {
+    const f = fixture(); const file = writtenButUntracked(f);
+    writeFileSync(file, readFileSync(file, "utf8").replace("Original body", "Secret plaintext edit"));
+    const conflict = file.replace(/\.md$/, ".conflict.md");
+    writeFileSync(conflict, "Older plaintext");
+    sealScope(f);
+    syncMirror(f.ctx, f.mirror);
+    expect(existsSync(file)).toBe(false);
+    expect(existsSync(conflict)).toBe(false);
+    expect(mirrorCount(f, "mirror_files")).toBe(0);
+  });
+
+  it("deletes an untracked file of a purged entry (#91)", () => {
+    const f = fixture(); const file = writtenButUntracked(f);
+    writeFileSync(file, readFileSync(file, "utf8").replace("Original body", "Edited while stopped"));
+    purgeEntry(f.ctx, entryRef(f), "test");
+    syncMirror(f.ctx, f.mirror);
+    expect(existsSync(file)).toBe(false);
+    expect(existsSync(file.replace(/\.md$/, ".conflict.md"))).toBe(false);
+  });
+
+  it("leaves a copy of an inactive entry's file outside its canonical path alone (#91)", () => {
+    const f = fixture(); const file = writtenButUntracked(f);
+    const copy = join(dirname(file), "my-copy.md");
+    writeFileSync(copy, readFileSync(file, "utf8"));
+    setEntryStatus(f.ctx, entryRef(f), "archived");
+    syncMirror(f.ctx, f.mirror);
+    expect(existsSync(file)).toBe(false);
+    expect(existsSync(copy)).toBe(true);
+    expect(count(f, "entries")).toBe(1);
   });
 
   it("converges to the edited body whether or not the file was tracked before the edit (#88, property)", () => {

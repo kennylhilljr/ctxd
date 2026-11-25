@@ -10,6 +10,8 @@ import { newId } from "../../src/core/ids.js";
 import { openDatabase } from "../../src/store/db.js";
 import type { WriteContext } from "../../src/store/write.js";
 import { syncMirror } from "../../src/mirror/markdown.js";
+import { setEntryStatus } from "../../src/store/tidy.js";
+import { formatRef } from "../../src/model/refs.js";
 
 /**
  * Simulates ctxd stopping in the middle of a mirror import (#85). Every filesystem mutation the mirror
@@ -152,6 +154,34 @@ describe("mirror import survives a stop at any step (#85, FS-6, Spec 12.1)", () 
       ctx.db.close();
     }
     expect(edited).toBeGreaterThan(0); // some stop left the canonical file written but untracked
+  });
+
+  it("removes a written file whose entry stops being mirrored before it is tracked, wherever ctxd stops (#91)", () => {
+    let untrackedRendered = 0;
+    for (const change of ["archive", "seal"] as const) {
+      for (let steps = 0; ; steps++) {
+        const run = importStoppedAt(steps, "sample-app/new-note.md", note("Stopped note", "Body"));
+        if (!run.stopped) break;
+        const ctx = run.ctx!;
+        const entry = ctx.db.prepare("SELECT entry_id FROM entries").get() as { entry_id: string } | undefined;
+        if (!entry) { ctx.db.close(); continue; } // stopped before the import committed: nothing to retire
+        const tracked = new Set((ctx.db.prepare("SELECT path FROM mirror_files").all() as { path: string }[]).map((r) => r.path));
+        const withRef = () => files(run.mirror).filter((p) => readFileSync(join(run.mirror, p), "utf8").includes(`ref: "ctxd:sample-app/${entry.entry_id}"`));
+        if (withRef().some((p) => !tracked.has(p))) untrackedRendered++;
+        if (change === "archive") setEntryStatus(ctx, formatRef("sample-app", entry.entry_id), "archived");
+        else {
+          const poolId = newId();
+          ctx.db.prepare("INSERT INTO pools (pool_id, name, storage, sealed_file, created_at) VALUES (?, 'pool-private', 'sealed', ?, ?)").run(poolId, `sealed/${poolId}.db`, new Date().toISOString());
+          ctx.db.prepare("INSERT INTO pool_grants (pool_id, scope_id, level) SELECT ?, scope_id, 'write' FROM scopes WHERE name = 'sample-app'").run(poolId);
+        }
+        for (let i = 0; i < 2; i++) syncMirror(ctx, run.mirror);
+        expect(withRef()).toEqual([]);
+        expect(count(ctx, "mirror_files")).toBe(0);
+        expect(count(ctx, "mirror_conflicts")).toBe(0); // an unedited render leaves no conflict copy
+        ctx.db.close();
+      }
+    }
+    expect(untrackedRendered).toBeGreaterThan(0); // some stop left the rendered file written but untracked
   });
 
   it("keeps a file whose canonical path differs only in case from where it was saved", () => {
