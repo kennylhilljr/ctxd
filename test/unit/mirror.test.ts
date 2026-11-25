@@ -333,6 +333,30 @@ describe("Markdown export and mirror (Spec v9 section 12.1)", () => {
     expect(existsSync(file.replace(/\.md$/, ".conflict.md"))).toBe(true);
   });
 
+  it("deletes a conflict copy kept for an archived entry once its scope is sealed or it is purged (#91, Spec 12.1)", () => {
+    for (const change of ["sealed", "purged"] as const) {
+      const f = fixture(); const file = writtenButUntracked(f);
+      writeFileSync(file, readFileSync(file, "utf8").replace("Original body", "Edited while stopped"));
+      setEntryStatus(f.ctx, entryRef(f), "archived");
+      syncMirror(f.ctx, f.mirror);
+      const conflict = file.replace(/\.md$/, ".conflict.md");
+      expect(existsSync(conflict)).toBe(true);
+      if (change === "sealed") sealScope(f); else purgeEntry(f.ctx, entryRef(f), "test");
+      syncMirror(f.ctx, f.mirror);
+      expect(existsSync(conflict)).toBe(false);
+      expect(mirrorCount(f, "mirror_conflicts")).toBe(0);
+    }
+  });
+
+  it("recognizes an untracked file saved with Windows line endings and never imports it again (#91)", () => {
+    const f = fixture(); const file = writtenButUntracked(f);
+    writeFileSync(file, readFileSync(file, "utf8").replace(/\n/g, "\r\n"));
+    setEntryStatus(f.ctx, entryRef(f), "archived");
+    syncMirror(f.ctx, f.mirror); syncMirror(f.ctx, f.mirror);
+    expect(existsSync(file)).toBe(false);
+    expect(count(f, "entries")).toBe(1);
+  });
+
   it("keeps an untracked file whose tags line was removed as a conflict copy when its entry is archived (#91)", () => {
     const f = fixture(); const file = writtenButUntracked(f);
     writeFileSync(file, readFileSync(file, "utf8").replace(/\ntags: .*\n/, "\n"));

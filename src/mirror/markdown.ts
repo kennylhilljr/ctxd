@@ -387,6 +387,14 @@ export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: num
     else applied++;
   }
 
+  // A conflict copy is never walked, so one whose scope is now sealed or whose entry was purged is
+  // deleted here with its record: that plaintext must not outlive the entry on disk (#91, Spec 12.1).
+  const conflictRows = db.prepare(
+    "SELECT c.path, e.purged_at FROM mirror_conflicts c LEFT JOIN entries e ON e.entry_id = c.entry_id",
+  ).all() as { path: string; purged_at: string | null }[];
+  for (const conflict of conflictRows) {
+    if (conflict.purged_at !== null || isSealedScope(db, conflict.path.split(/[\\/]/)[0] ?? "")) removeConflict(db, mirrorDir, conflict.path);
+  }
   const untracked = new Set<string>();
   const keep = new Set<string>(); // untracked edits that could not be kept elsewhere: not overwritten this cycle
   // Files at canonical paths come first, so replaying a pending import cannot rewrite an untracked,
@@ -521,7 +529,8 @@ export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: num
  * unclosed block), so a broken or hand-edited file ctxd rendered is still recognized (#91). A `ref:`
  * line in the body after a closed frontmatter block is not read.
  */
-function frontmatterRef(text: string): string | undefined {
+function frontmatterRef(raw: string): string | undefined {
+  const text = raw.replace(/\r\n/g, "\n"); // an editor may have saved it with Windows line endings
   if (!text.startsWith("---\n")) return undefined;
   const end = text.indexOf("\n---\n", 4);
   return /^[ \t]*ref:[ \t]*["']?([^"'\s]+)/m.exec(text.slice(4, end < 0 ? undefined : end))?.[1];
@@ -534,14 +543,18 @@ function isSealedScope(db: Database.Database, scope: string): boolean {
   ).get(scope) !== undefined;
 }
 
+function removeConflict(db: Database.Database, mirrorDir: string, path: string): void {
+  const conflict = insideRoot(mirrorDir, path.replace(/\.md$/, ".conflict.md"));
+  if (existsSync(conflict)) unlinkSync(conflict);
+  db.prepare("DELETE FROM mirror_conflicts WHERE path = ?").run(path);
+}
+
 /**
  * Deletes the mirror file at `path`, its conflict copy and the conflict record. The conflict copy goes
  * first, so a stop in between leaves the file, which the next cycle finds again, never a lone copy.
  */
 function removeWithConflict(db: Database.Database, mirrorDir: string, path: string): void {
-  const conflict = insideRoot(mirrorDir, path.replace(/\.md$/, ".conflict.md"));
-  if (existsSync(conflict)) unlinkSync(conflict);
-  db.prepare("DELETE FROM mirror_conflicts WHERE path = ?").run(path);
+  removeConflict(db, mirrorDir, path);
   const file = insideRoot(mirrorDir, path);
   if (existsSync(file)) unlinkSync(file);
 }
