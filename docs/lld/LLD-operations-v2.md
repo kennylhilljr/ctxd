@@ -72,14 +72,14 @@ Implements [Filesystem view](../prd/components/PRD-filesystem-view-v2.md) sectio
 
 ```markdown
 ---
-ref: ctxd:ctxd/01JABCDEF000000000007K2PQZ
+ref: ctxd:sample-app/01JABCDEF000000000007K2PQZ
 kind: decision
 status: active
 rev: 3-01JABCDEF0
 by: claude-code@laptop
 updated: 2026-10-18T14:02:11Z
 review_after: null
-links: ["[[supersedes::ctxd:ctxd/01JAB...]]"]
+links: ["[[supersedes::ctxd:sample-app/01JAB...]]"]
 ---
 # Use an event log, not cr-sqlite
 ...
