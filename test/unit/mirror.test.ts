@@ -1021,7 +1021,7 @@ describe("journal mirror files (#99)", () => {
     expect(existsSync(f.file)).toBe(true);
   });
 
-  it("keeps an edit to a tracked journal file in a separate conflict copy (#99, FS-AC-4)", () => {
+  it("keeps an edit to a tracked journal file in a separate conflict copy (#99)", () => {
     const f = journalFixture();
     writeFileSync(f.file, readFileSync(f.file, "utf8").replace("Original body", "Edited journal body"));
     expect(syncMirror(f.ctx, f.mirror)).toMatchObject({ applied: 0, conflicts: 1 });
@@ -1071,21 +1071,32 @@ describe("journal mirror files (#99)", () => {
     expect(body(f)).toBe("Original body");
   });
 
-  it("reconciles and removes an untracked journal file under its old name (#99)", () => {
+  it("reconciles an untracked journal file under its old name at its new name (#99)", () => {
     for (const edited of [false, true]) {
       const f = journalFixture();
-      const legacy = toLegacy(f);
-      const legacyFile = join(f.mirror, legacy);
+      const legacyFile = join(f.mirror, toLegacy(f));
       f.db.prepare("DELETE FROM mirror_files").run();
       if (edited) writeFileSync(legacyFile, readFileSync(legacyFile, "utf8").replace("Original body", "Edited legacy body"));
       expect(syncMirror(f.ctx, f.mirror)).toMatchObject({ conflicts: edited ? 1 : 0 });
       expect(existsSync(legacyFile)).toBe(false);
-      expect(existsSync(`${legacyFile}.conflict.md`)).toBe(edited);
-      if (edited) expect(readFileSync(`${legacyFile}.conflict.md`, "utf8")).toContain("Edited legacy body");
+      const conflict = f.file.replace(/\.md$/, ".conflict.md");
+      expect(existsSync(conflict)).toBe(edited);
+      if (edited) expect(readFileSync(conflict, "utf8")).toContain("Edited legacy body");
       expect(readFileSync(f.file, "utf8")).toContain("Original body");
       expect(f.db.prepare("SELECT path FROM mirror_files").all()).toEqual([{ path: f.path }]);
       expect(body(f)).toBe("Original body");
     }
+  });
+
+  it("removes an untracked journal file under its old name once its entry is purged (#99, #91)", () => {
+    const f = journalFixture();
+    const legacyFile = join(f.mirror, toLegacy(f));
+    f.db.prepare("DELETE FROM mirror_files").run();
+    const { entry_id: id } = f.db.prepare("SELECT entry_id FROM entries").get() as { entry_id: string };
+    purgeEntry(f.ctx, formatRef("sample-app", id), "test");
+    syncMirror(f.ctx, f.mirror);
+    expect(existsSync(legacyFile)).toBe(false);
+    expect(existsSync(f.file)).toBe(false);
   });
 
   it("maps a ctxd:// path to its mirror path (#99)", () => {

@@ -468,22 +468,12 @@ export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: num
   }
 
   // A journal file written under its pre-#99 name (`<day>.md--<slug>`) but never tracked is not
-  // walked below (its name does not end in `.md`), so it is reconciled here against the entry now
-  // mirrored at `<day>--<slug>.md`, keeping any edit, and then removed; the export writes the new file.
+  // walked (its name does not end in `.md`), so it is first renamed to `<day>--<slug>.md` and then
+  // handled below like any untracked file there: reconciled, held, imported or removed.
   for (const path of legacyJournalFiles(mirrorDir)) {
     if (trackedPaths.has(path)) continue;
-    const owner = byPath.get(path.replace(/(\d{2})\.md--([^/\\]+)$/, "$1--$2.md"));
-    if (!owner) continue;
-    const file = insideRoot(mirrorDir, path);
-    const text = readFileSync(file, "utf8");
-    if (text !== renderMarkdown(owner)) {
-      const outcome = reconcileUntracked(ctx, mirrorDir, path, owner, text);
-      if (outcome === null) continue; // left in place, retried next cycle
-      if (outcome === "applied") applied++;
-      else conflicts++;
-      db.prepare("DELETE FROM mirror_files WHERE path = ?").run(path);
-    }
-    unlinkSync(file);
+    const target = insideRoot(mirrorDir, path.replace(/(\d{2})\.md--([^/\\]+)$/, "$1--$2.md"));
+    if (!existsSync(target)) renameSync(insideRoot(mirrorDir, path), target);
   }
 
   // A conflict copy is never walked, so one whose scope is now sealed or whose entry was purged is
