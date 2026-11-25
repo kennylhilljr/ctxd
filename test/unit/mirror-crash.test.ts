@@ -2,7 +2,7 @@ import * as realFs from "node:fs";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
-import { join, relative } from "node:path";
+import { dirname, join, relative } from "node:path";
 import fc from "fast-check";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { HlcClock } from "../../src/core/hlc.js";
@@ -45,7 +45,7 @@ function count(ctx: WriteContext, table: "entries" | "events" | "mirror_files" |
 }
 
 /** Runs one import, stopping at mutation step `stopAt`, and returns the restarted state. */
-function importStoppedAt(stopAt: number, title: string, body: string) {
+function importStoppedAt(stopAt: number, sourcePath: string, content: string) {
   const root = mkdtempSync(join(tmpdir(), "ctxd-mirror-crash-")); scratch.push(root);
   const mirror = join(root, "mirror");
   const nodeId = newId(); const clientId = newId();
@@ -53,9 +53,9 @@ function importStoppedAt(stopAt: number, title: string, body: string) {
   ctx.db.prepare("INSERT INTO nodes (node_id, name, role, created_at) VALUES (?, 'node-a', 'home', ?)").run(nodeId, new Date().toISOString());
   ctx.db.prepare("INSERT INTO clients (client_id, name, vendor, node_id, token_hash, created_at) VALUES (?, 'human', 'human', ?, ?, ?)").run(clientId, nodeId, newId(), new Date().toISOString());
   ctx.db.prepare("INSERT INTO scopes (scope_id, name, created_at) VALUES (?, 'sample-app', ?)").run(newId(), new Date().toISOString());
-  mkdirSync(join(mirror, "sample-app"), { recursive: true });
-  const source = join(mirror, "sample-app", "new-note.md");
-  writeFileSync(source, `---\nkind: "note"\ntitle: ${JSON.stringify(title)}\n---\n# ${title}\n\n${body}\n`);
+  const source = join(mirror, sourcePath);
+  mkdirSync(dirname(source), { recursive: true });
+  writeFileSync(source, content);
 
   const snapshot = join(root, "snapshot");
   let step = 0;
@@ -82,28 +82,40 @@ function files(dir: string): string[] {
     .filter((name) => name.endsWith(".md")).map((name) => relative(dir, join(dir, name))).sort();
 }
 
-function expectConverged(ctx: WriteContext, mirror: string, source: string): void {
+function note(title: string, body: string): string {
+  return `---\nkind: "note"\ntitle: ${JSON.stringify(title)}\n---\n# ${title}\n\n${body}\n`;
+}
+
+/** True when this filesystem treats names differing only in case as one file (the macOS default). */
+function caseInsensitive(dir: string): boolean {
+  const probe = join(dir, "case-probe");
+  writeFileSync(probe, "");
+  return existsSync(join(dir, "CASE-PROBE"));
+}
+
+function expectConverged(ctx: WriteContext, mirror: string, source: string | undefined): void {
   for (let i = 0; i < 2; i++) syncMirror(ctx, mirror);
   expect(count(ctx, "entries")).toBe(1);
   expect(count(ctx, "events")).toBe(1);
   expect(count(ctx, "mirror_conflicts")).toBe(0);
   expect(count(ctx, "archive_requests")).toBe(0);
-  expect(existsSync(source)).toBe(false);
+  if (source) expect(existsSync(source)).toBe(false);
   const { entry_id: id } = ctx.db.prepare("SELECT entry_id FROM entries").get() as { entry_id: string };
   const tracked = ctx.db.prepare("SELECT path, entry_id, file_hash FROM mirror_files").all() as { path: string; entry_id: string; file_hash: string }[];
   expect(tracked).toHaveLength(1);
   expect(tracked[0]!.entry_id).toBe(id);
-  expect(files(mirror)).toEqual([tracked[0]!.path]);
+  // A stop just before the case-fixing rename may leave the old case; that name is the same file.
+  expect(files(mirror).map((name) => name.toLowerCase())).toEqual([tracked[0]!.path.toLowerCase()]);
   const text = readFileSync(join(mirror, tracked[0]!.path), "utf8");
   expect(text).toContain(`ref: "ctxd:sample-app/${id}"`);
   expect(createHash("sha256").update(text).digest("hex")).toBe(tracked[0]!.file_hash);
 }
 
-describe("mirror import survives a stop at any step (#85, Spec 12.1)", () => {
+describe("mirror import survives a stop at any step (#85, FS-6, Spec 12.1)", () => {
   it("never imports a new file twice, wherever ctxd stops during its first cycle", () => {
     let steps = 0;
     for (; ; steps++) {
-      const run = importStoppedAt(steps, "Stopped note", "Body");
+      const run = importStoppedAt(steps, "sample-app/new-note.md", note("Stopped note", "Body"));
       if (!run.stopped) break;
       expectConverged(run.ctx!, run.mirror, run.source);
       run.ctx!.db.close();
@@ -114,10 +126,28 @@ describe("mirror import survives a stop at any step (#85, Spec 12.1)", () => {
   it("converges to one entry for any note and any stop point (#85, property)", () => {
     const text = fc.string({ minLength: 1, maxLength: 40 }).map((s) => s.replace(/[\r\n#-]/g, "").trim()).filter((s) => s.length > 0);
     fc.assert(fc.property(fc.nat({ max: 12 }), text, text, (stopAt, title, body) => {
-      const run = importStoppedAt(stopAt, title, `${body}​`); // zero-width space: the sanitizer changes the body
+      const run = importStoppedAt(stopAt, "sample-app/new-note.md", note(title, `${body}\u200b`)); // zero-width space: the sanitizer changes the body
       if (!run.stopped) return;
       expectConverged(run.ctx!, run.mirror, run.source);
       run.ctx!.db.close();
     }), { numRuns: 40 });
+  });
+
+  it("keeps a file whose canonical path differs only in case from where it was saved", () => {
+    const dir = mkdtempSync(join(tmpdir(), "ctxd-case-")); scratch.push(dir);
+    if (!caseInsensitive(dir)) return; // the hazard needs a case-insensitive filesystem
+    const skill = "---\nkind: \"skill\"\ntitle: \"foo\"\n---\n# foo\n\n---\nname: foo\ndescription: Does foo things\n---\nInstructions\n";
+    let steps = 0;
+    for (; ; steps++) {
+      // Saved as skill.md; the canonical path is skills/foo/SKILL.md, the same file here.
+      const run = importStoppedAt(steps, "sample-app/skills/foo/skill.md", skill);
+      if (!run.stopped) {
+        expect(files(run.mirror)).toEqual(["sample-app/skills/foo/SKILL.md"]);
+        break;
+      }
+      expectConverged(run.ctx!, run.mirror, undefined);
+      run.ctx!.db.close();
+    }
+    expect(steps).toBeGreaterThan(2);
   });
 });

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type Database from "better-sqlite3";
 import { entryPath } from "../fsview/paths.js";
@@ -368,9 +368,12 @@ export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: num
         const relTarget = relativePath(created);
         const target = insideRoot(mirrorDir, relTarget);
         const content = renderMarkdown(created);
+        // On a case-insensitive filesystem the source may already be the target under another case.
+        const sameFile = existsSync(target) && sameInode(file, target);
         atomicWrite(target, content);
         trackFile(db, relTarget, created, content);
-        if (resolve(file) !== resolve(target)) unlinkSync(file);
+        if (!sameFile) unlinkSync(file);
+        else if (file !== target) renameSync(file, target); // only fixes the name's case
         applied++;
       }
       clearSkip(db, path);
@@ -394,6 +397,11 @@ export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: num
     written++;
   }
   return { written, applied, conflicts, archiveRequests };
+}
+
+function sameInode(a: string, b: string): boolean {
+  const [x, y] = [statSync(a), statSync(b)];
+  return x.dev === y.dev && x.ino === y.ino;
 }
 
 function trackFile(db: Database.Database, path: string, row: MarkdownRow, content: string): void {
