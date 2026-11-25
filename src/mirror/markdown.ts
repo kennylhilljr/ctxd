@@ -222,6 +222,27 @@ function setReviewAfter(ctx: WriteContext, row: MarkdownRow, value: string | nul
   })();
 }
 
+/**
+ * The request id for importing an untracked mirror file, derived from its path and content (#83).
+ * Ids form a chain: each later import of the same path and content is keyed on the entry the
+ * previous one created. While a failed import of this path is pending (a `mirror_skips` row, which
+ * a failed mkdir or rename leaves behind), the last id in the chain is reused, so the retry replays
+ * that write through writeEntry's idempotency check instead of creating a duplicate entry.
+ * Otherwise the next id is used, so a file put back after a completed import is a new entry.
+ */
+function importRequestId(db: Database.Database, clientId: string, path: string, text: string): string {
+  const idFor = (prior: string) => `mirror-import:${hash(`${path}\0${text}\0${prior}`).slice(0, 48)}`;
+  const priorImport = db.prepare("SELECT entry_id FROM events WHERE client_id = ? AND request_id = ?");
+  const pending = db.prepare("SELECT 1 FROM mirror_skips WHERE path_key = ?").get(skipKey(path)) !== undefined;
+  let last: string | undefined;
+  let next = idFor("");
+  for (let prior; (prior = priorImport.get(clientId, next) as { entry_id: string } | undefined);) {
+    last = next;
+    next = idFor(prior.entry_id);
+  }
+  return pending && last ? last : next;
+}
+
 export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: number; applied: number; conflicts: number; archiveRequests: number } {
   if (!isFlagOn(ctx.flags, "mirror")) return { written: 0, applied: 0, conflicts: 0, archiveRequests: 0 };
   const { db } = ctx;
@@ -307,16 +328,13 @@ export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: num
       if (sealed) throw new CtxdError("SCOPE_FORBIDDEN", `Mirror writes to sealed scope ${scope} are refused`);
       const result = writeEntry(ctx, {
         scope, kind: parsed.meta.kind ?? "note", title: parsed.title, body: parsed.body,
-        // The request id comes from the file's path and content, so a retry after a failed mkdir or
-        // rename replays the earlier write through writeEntry's idempotency check instead of
-        // importing the same file again as a duplicate entry (#83).
-        tags: parsed.meta.tags, request_id: `mirror-import:${hash(`${path}\0${text}`)}`,
+        tags: parsed.meta.tags, request_id: importRequestId(db, ctx.clientId, path, text),
       } as never);
       if (!("held" in result)) {
         const created = rows(db).find((row) => row.entry_id === result.id);
         if (!created) {
-          // A replay of an import whose entry is no longer mirrored (archived, deleted, quarantined):
-          // leave the file and record why, rather than importing it again.
+          // A retried import whose entry is no longer mirrored (archived, deleted, quarantined while
+          // the move was failing): leave the file and record why, rather than importing it again.
           throw new CtxdError("NOT_ALLOWED", "This file was already imported as an entry that is no longer active; edit it to import a new entry");
         }
         const target = insideRoot(mirrorDir, relativePath(created));
