@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -37,6 +37,22 @@ describe("doc map is authoritative for latest LLD versions (issue 90)", () => {
     const listed = links(readme);
     expect(listed.length).toBeGreaterThan(0);
     for (const l of listed) expect(isLatest(l.path, l.name, l.version), l.path).toBe(true);
+  });
+
+  it("the map lists the latest version of every LLD and contract on disk", () => {
+    const mapped = new Set(links(readme).map((l) => l.path));
+    const latest = new Map<string, { path: string; version: number }>();
+    for (const dir of ["lld", "contracts"]) {
+      for (const file of readdirSync(join(root, "docs", dir))) {
+        const m = /^([\w-]+)-v(\d+)\.md$/.exec(file);
+        if (!m) continue;
+        const key = `${dir}/${m[1]}`;
+        const version = Number(m[2]);
+        if ((latest.get(key)?.version ?? 0) < version) latest.set(key, { path: `${dir}/${file}`, version });
+      }
+    }
+    expect(latest.size).toBeGreaterThan(0);
+    for (const { path } of latest.values()) expect(mapped.has(path), `${path} is missing from docs/README.md`).toBe(true);
   });
 
   it("the latest Spec routes every section to the LLD or contract version the map lists", () => {
