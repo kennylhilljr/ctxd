@@ -131,8 +131,8 @@ describe("gatherStatus", () => {
 
 describe("formatStatusLine", () => {
   it("matches the spec's own example shape", () => {
-    const line = formatStatusLine({ healthOk: true, scope: "ctxd", scopeNotice: null, briefAvailable: true, openClaims: 2, unsynced: 3, peerCount: 1, inboxPending: 0 });
-    expect(line).toBe("ctxd ● ctxd · brief ✓ · 2 claims · 3 unsynced");
+    const line = formatStatusLine({ healthOk: true, scope: "sample-app", scopeNotice: null, briefAvailable: true, openClaims: 2, unsynced: 3, peerCount: 1, inboxPending: 0 });
+    expect(line).toBe("ctxd ● sample-app · brief ✓ · 2 claims · 3 unsynced");
   });
 
   it("shows the down indicator and a crossed-out brief when unhealthy and unavailable", () => {
@@ -145,7 +145,7 @@ describe("formatStatusLine", () => {
 
 describe("formatStatusDetail", () => {
   it("shows the real peer count and unsynced count", () => {
-    const detail = formatStatusDetail({ healthOk: true, scope: "ctxd", scopeNotice: null, briefAvailable: true, openClaims: 0, unsynced: 4, peerCount: 2, inboxPending: 0 });
+    const detail = formatStatusDetail({ healthOk: true, scope: "sample-app", scopeNotice: null, briefAvailable: true, openClaims: 0, unsynced: 4, peerCount: 2, inboxPending: 0 });
     expect(detail).toContain("2 peer(s)");
     expect(detail).toContain("4 unsynced");
   });

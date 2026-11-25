@@ -26,7 +26,7 @@ describe("schema (SPEC v6 section 4)", () => {
   it("accepts the v6 kinds and rejects unknown kinds", () => {
     const db = new Database(":memory:");
     db.exec(SCHEMA_SQL);
-    db.prepare("INSERT INTO scopes (scope_id, name, created_at) VALUES ('s1','ctxd','t')").run();
+    db.prepare("INSERT INTO scopes (scope_id, name, created_at) VALUES ('s1','sample-app','t')").run();
     const insert = db.prepare(
       `INSERT INTO entries (entry_id, scope_id, kind, slug, title, summary, body, content_rev, content_version, status, status_rev, relations_rev, created_by, updated_by, created_hlc, updated_hlc)
        VALUES (?, 's1', ?, 't-abcdef', 't', 's', 'b', '1-a', 1, 'proposed', '1-a', '1-a', 'c', 'c', 'h', 'h')`,
