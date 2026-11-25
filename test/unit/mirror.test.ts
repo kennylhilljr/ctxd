@@ -1113,6 +1113,34 @@ describe("journal mirror files (#99)", () => {
     expect(existsSync(f.file)).toBe(false);
   });
 
+  it("converges after moving a journal file from its old name, whatever its tracking, edit and stop point (#99, property)", () => {
+    fc.assert(fc.property(fc.constantFrom("tracked", "untracked", "moved-row"), fc.boolean(), fc.boolean(), fc.nat({ max: 2 }), (tracking, edited, oldConflict, extraCycles) => {
+      const f = journalFixture();
+      const legacy = toLegacy(f);
+      const legacyFile = join(f.mirror, legacy);
+      if (edited) writeFileSync(legacyFile, readFileSync(legacyFile, "utf8").replace("Original body", "Edited legacy body"));
+      if (tracking === "untracked") f.db.prepare("DELETE FROM mirror_files").run();
+      if (tracking === "moved-row") f.db.prepare("UPDATE mirror_files SET path = ?").run(f.path); // a stop before the rename
+      if (oldConflict && tracking === "tracked") {
+        // A review item left by the pre-#99 bug, whose copy was the file itself.
+        const { entry_id: id } = f.db.prepare("SELECT entry_id FROM entries").get() as { entry_id: string };
+        f.db.prepare("INSERT INTO mirror_conflicts (path, entry_id, file_rev, current_rev, reason, created_at) VALUES (?, ?, NULL, '1', 'old', ?)").run(legacy, id, new Date().toISOString());
+      }
+      const events = count(f, "events");
+      expect(syncMirror(f.ctx, f.mirror)).toMatchObject({ applied: 0, conflicts: edited ? 1 : 0, archiveRequests: 0 });
+      for (let i = 0; i < extraCycles; i++) expect(syncMirror(f.ctx, f.mirror)).toMatchObject({ applied: 0, conflicts: 0, archiveRequests: 0 });
+      expect(count(f, "events")).toBe(events);
+      expect(existsSync(legacyFile)).toBe(false);
+      expect(readFileSync(f.file, "utf8")).toContain("Original body");
+      const conflict = f.file.replace(/\.md$/, ".conflict.md");
+      expect(existsSync(conflict)).toBe(edited);
+      if (edited) expect(readFileSync(conflict, "utf8")).toContain("Edited legacy body");
+      expect(f.db.prepare("SELECT path FROM mirror_conflicts").all()).toEqual(edited ? [{ path: f.path }] : []);
+      expect(f.db.prepare("SELECT path FROM mirror_files").all()).toEqual([{ path: f.path }]);
+      expect(body(f)).toBe("Original body");
+    }), { numRuns: 30 });
+  });
+
   it("maps a ctxd:// path to its mirror path (#99)", () => {
     expect(mirrorRelativePath("ctxd://s/journal/2026/11/25.md#abc-123456")).toBe("s/journal/2026/11/25--abc-123456.md");
     expect(mirrorRelativePath("ctxd://s/notes/x-123456.md")).toBe("s/notes/x-123456.md");

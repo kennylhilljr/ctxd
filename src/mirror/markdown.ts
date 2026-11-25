@@ -429,15 +429,19 @@ export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: num
   // A journal file under its pre-#99 name (`<day>.md--<slug>`, never walked: it does not end in `.md`)
   // moves to `<day>--<slug>.md` first, and is then handled there like any file, tracked or not. Its
   // tracking moves before the file does, so a stop in between leaves an untracked legacy file with a
-  // tracked target, which the next cycle renames; never a tracked file that reads as deleted.
-  const trackedPath = db.prepare("SELECT 1 FROM mirror_files WHERE path = ?");
+  // tracked target, which the next cycle renames; never a tracked file that reads as deleted. Tracking
+  // is matched ignoring letter case, as on a case-insensitive filesystem. A conflict record at the old
+  // name is dropped: before #99 its copy was the file itself, overwritten by the export.
+  const trackedAs = db.prepare("SELECT path FROM mirror_files WHERE lower(path) = lower(?)");
   for (const path of legacyJournalFiles(mirrorDir)) {
     const newPath = path.replace(/(\d{2})\.md--([^/\\]+)$/, "$1--$2.md");
     const target = insideRoot(mirrorDir, newPath);
     if (existsSync(target)) continue;
-    if (trackedPath.get(path)) {
-      if (trackedPath.get(newPath)) continue;
-      db.prepare("UPDATE mirror_files SET path = ? WHERE path = ?").run(newPath, path);
+    const trackedLegacy = (trackedAs.get(path) as { path: string } | undefined)?.path;
+    if (trackedLegacy !== undefined) {
+      if (trackedAs.get(newPath)) continue;
+      db.prepare("UPDATE mirror_files SET path = ? WHERE path = ?").run(newPath, trackedLegacy);
+      db.prepare("DELETE FROM mirror_conflicts WHERE lower(path) = lower(?)").run(path);
     }
     renameSync(insideRoot(mirrorDir, path), target);
   }
