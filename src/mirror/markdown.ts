@@ -264,6 +264,7 @@ export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: num
 
   const tracked = db.prepare("SELECT path, entry_id, file_hash FROM mirror_files").all() as { path: string; entry_id: string; file_hash: string }[];
   const trackedPaths = new Set(tracked.map((state) => state.path));
+  const trackedByCase = new Map(tracked.map((state) => [state.path.toLowerCase(), state.path]));
   for (const state of tracked) {
     const row = byId.get(state.entry_id);
     const file = insideRoot(mirrorDir, state.path);
@@ -322,6 +323,16 @@ export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: num
   for (const file of walkMarkdown(mirrorDir)) {
     const path = relative(resolve(mirrorDir), file);
     if (trackedPaths.has(path)) continue;
+    // A tracked file seen under another letter case (a stop before the case-fixing rename below, on a
+    // case-insensitive filesystem) is that file, not a new note: restore its canonical name (#85).
+    const alias = trackedByCase.get(path.toLowerCase());
+    if (alias !== undefined) {
+      const canonical = insideRoot(mirrorDir, alias);
+      if (existsSync(canonical) && sameInode(file, canonical)) {
+        renameSync(file, canonical);
+        continue;
+      }
+    }
     untracked.add(skipKey(path));
     try {
       const text = readFileSync(file, "utf8");

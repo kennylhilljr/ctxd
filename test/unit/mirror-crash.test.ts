@@ -104,8 +104,7 @@ function expectConverged(ctx: WriteContext, mirror: string, source: string | und
   const tracked = ctx.db.prepare("SELECT path, entry_id, file_hash FROM mirror_files").all() as { path: string; entry_id: string; file_hash: string }[];
   expect(tracked).toHaveLength(1);
   expect(tracked[0]!.entry_id).toBe(id);
-  // A stop just before the case-fixing rename may leave the old case; that name is the same file.
-  expect(files(mirror).map((name) => name.toLowerCase())).toEqual([tracked[0]!.path.toLowerCase()]);
+  expect(files(mirror)).toEqual([tracked[0]!.path]); // a case alias left by a stop is renamed back
   const text = readFileSync(join(mirror, tracked[0]!.path), "utf8");
   expect(text).toContain(`ref: "ctxd:sample-app/${id}"`);
   expect(createHash("sha256").update(text).digest("hex")).toBe(tracked[0]!.file_hash);
@@ -146,6 +145,10 @@ describe("mirror import survives a stop at any step (#85, FS-6, Spec 12.1)", () 
         break;
       }
       expectConverged(run.ctx!, run.mirror, undefined);
+      // A partial save without frontmatter is a conflict on the tracked file, never a second entry.
+      writeFileSync(join(run.mirror, "sample-app/skills/foo/SKILL.md"), "# foo\n\npartial");
+      syncMirror(run.ctx!, run.mirror);
+      expect(count(run.ctx!, "entries")).toBe(1);
       run.ctx!.db.close();
     }
     expect(steps).toBeGreaterThan(2);
