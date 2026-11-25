@@ -149,6 +149,15 @@ export function migrateSchema(db: Database.Database): void {
       db.pragma("user_version = 25");
     })();
   }
+  const pendingImportVersion = db.pragma("user_version", { simple: true }) as number;
+  if (pendingImportVersion === 25 && SCHEMA_VERSION >= 26) {
+    db.transaction(() => {
+      // A database first created at a newer layout and labeled older already has the column.
+      const columns = db.prepare("SELECT name FROM pragma_table_info('mirror_skips')").all() as { name: string }[];
+      if (!columns.some((column) => column.name === "pending_request_id")) db.exec("ALTER TABLE mirror_skips ADD COLUMN pending_request_id TEXT");
+      db.pragma("user_version = 26");
+    })();
+  }
   const sequenceVersion = db.pragma("user_version", { simple: true }) as number;
   if (sequenceVersion !== SCHEMA_VERSION) {
     db.close();

@@ -1,6 +1,7 @@
-import { mkdtempSync, readFileSync, readdirSync, writeFileSync, existsSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
+import { chmodSync, lstatSync, mkdtempSync, readFileSync, readdirSync, writeFileSync, existsSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import fc from "fast-check";
 import { afterEach, describe, expect, it } from "vitest";
 import { HlcClock } from "../../src/core/hlc.js";
 import { newId } from "../../src/core/ids.js";
@@ -8,6 +9,8 @@ import { openDatabase } from "../../src/store/db.js";
 import { writeEntry, type WriteContext } from "../../src/store/write.js";
 import { confirmArchiveRequest, exportMarkdown, importMarkdown, parseMarkdown, syncMirror } from "../../src/mirror/markdown.js";
 import { checkMirrorSkips } from "../../src/cli/doctor.js";
+import { setEntryStatus } from "../../src/store/tidy.js";
+import { formatRef } from "../../src/model/refs.js";
 
 const scratch: string[] = [];
 afterEach(() => { for (const dir of scratch.splice(0)) rmSync(dir, { recursive: true, force: true }); });
@@ -21,6 +24,10 @@ function fixture() {
   db.prepare("INSERT INTO scopes (scope_id, name, created_at) VALUES (?, 'sample-app', ?)").run(scopeId, new Date().toISOString());
   const ctx: WriteContext = { db, clock: new HlcClock(nodeId), nodeId, clientId: humanId, flags: new Map([["mirror", true]]) };
   return { root, mirror: join(root, "mirror"), db, ctx };
+}
+
+function count(f: ReturnType<typeof fixture>, table: "entries" | "events"): number {
+  return (f.db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n;
 }
 
 function createNote(f: ReturnType<typeof fixture>, kind: "note" | "decision" = "note") {
@@ -96,6 +103,130 @@ describe("Markdown export and mirror (Spec v9 section 12.1)", () => {
     expect(f.db.prepare("SELECT status FROM entries WHERE entry_id = ?").get(entryId)).toEqual({ status: "archived" });
     expect((f.db.prepare("SELECT COUNT(*) AS n FROM archive_requests").get() as { n: number }).n).toBe(0);
     expect(f.db.prepare("SELECT op FROM events ORDER BY origin_seq DESC LIMIT 1").get()).toEqual({ op: "status" });
+  });
+
+  it("imports a new file once when moving it to its canonical path fails (#83)", () => {
+    const f = fixture();
+    mkdirSync(join(f.mirror, "sample-app"), { recursive: true });
+    const source = join(f.mirror, "sample-app", "new-note.md");
+    writeFileSync(source, "---\nkind: \"note\"\ntitle: \"Retry note\"\n---\n# Retry note\n\nBody\n");
+    // A regular file where the canonical notes/ folder belongs makes mkdir (and the export) fail.
+    const blocker = join(f.mirror, "sample-app", "notes");
+    writeFileSync(blocker, "not a directory");
+    for (let i = 0; i < 3; i++) {
+      try { syncMirror(f.ctx, f.mirror); } catch { /* blocked canonical folder */ }
+    }
+    expect(count(f, "entries")).toBe(1);
+    expect(count(f, "events")).toBe(1);
+    expect(existsSync(source)).toBe(true);
+
+    rmSync(blocker);
+    syncMirror(f.ctx, f.mirror);
+    expect(count(f, "entries")).toBe(1);
+    expect(count(f, "events")).toBe(1);
+    expect(existsSync(source)).toBe(false);
+    expect(f.db.prepare("SELECT title FROM entries").get()).toEqual({ title: "Retry note" });
+    syncMirror(f.ctx, f.mirror);
+    expect(count(f, "entries")).toBe(1);
+  });
+
+  it("reuses the first entry when the rename itself fails once (#83)", () => {
+    const f = fixture();
+    const notes = join(f.mirror, "sample-app", "notes");
+    mkdirSync(notes, { recursive: true });
+    const source = join(f.mirror, "sample-app", "renamed.md");
+    writeFileSync(source, "---\nkind: \"note\"\ntitle: \"Rename retry\"\n---\n# Rename retry\n\nBody\n");
+    // A read-only notes/ folder lets mkdir succeed but makes the rename into it fail.
+    chmodSync(notes, 0o555);
+    try {
+      try { syncMirror(f.ctx, f.mirror); } catch { /* read-only canonical folder */ }
+      expect(existsSync(source)).toBe(true);
+      expect(count(f, "entries")).toBe(1);
+    } finally {
+      chmodSync(notes, 0o755);
+    }
+    const [first] = f.db.prepare("SELECT entry_id FROM entries").all() as { entry_id: string }[];
+    syncMirror(f.ctx, f.mirror);
+    expect(existsSync(source)).toBe(false);
+    expect(f.db.prepare("SELECT entry_id FROM entries").all()).toEqual([first]);
+    expect(count(f, "events")).toBe(1);
+  });
+
+  it("imports an identical file put back after a completed import as a new entry (#83)", () => {
+    const f = fixture();
+    const content = "---\nkind: \"note\"\ntitle: \"Again\"\n---\n# Again\n\nBody\n";
+    mkdirSync(join(f.mirror, "sample-app"), { recursive: true });
+    const source = join(f.mirror, "sample-app", "again.md");
+    writeFileSync(source, content);
+    syncMirror(f.ctx, f.mirror);
+    const { entry_id: first } = f.db.prepare("SELECT entry_id FROM entries").get() as { entry_id: string };
+    setEntryStatus(f.ctx, formatRef("sample-app", first), "archived");
+
+    writeFileSync(source, content);
+    syncMirror(f.ctx, f.mirror);
+    expect(existsSync(source)).toBe(false);
+    const live = f.db.prepare("SELECT entry_id FROM entries WHERE status = 'active'").all() as { entry_id: string }[];
+    expect(live).toHaveLength(1);
+    expect(live[0]!.entry_id).not.toBe(first);
+    expect(count(f, "entries")).toBe(2);
+  });
+
+  it("imports an identical file put back after a failed partial save as a new entry (#83)", () => {
+    const f = fixture();
+    const content = "---\nkind: \"note\"\ntitle: \"Again\"\n---\n# Again\n\nBody\n";
+    mkdirSync(join(f.mirror, "sample-app"), { recursive: true });
+    const source = join(f.mirror, "sample-app", "again.md");
+    writeFileSync(source, content);
+    syncMirror(f.ctx, f.mirror);
+    writeFileSync(source, content.replace('"note"', '"not-a-kind"'));
+    syncMirror(f.ctx, f.mirror);
+    expect((f.db.prepare("SELECT COUNT(*) AS n FROM mirror_skips").get() as { n: number }).n).toBe(1);
+
+    writeFileSync(source, content);
+    syncMirror(f.ctx, f.mirror);
+    expect(existsSync(source)).toBe(false);
+    expect(count(f, "entries")).toBe(2);
+  });
+
+  it("records a skip, not a second entry, when a pending import's entry is archived (#83)", () => {
+    const f = fixture();
+    mkdirSync(join(f.mirror, "sample-app"), { recursive: true });
+    const source = join(f.mirror, "sample-app", "pending.md");
+    writeFileSync(source, "---\nkind: \"note\"\ntitle: \"Pending\"\n---\n# Pending\n\nBody\n");
+    const blocker = join(f.mirror, "sample-app", "notes");
+    writeFileSync(blocker, "not a directory");
+    try { syncMirror(f.ctx, f.mirror); } catch { /* blocked canonical folder */ }
+    const { entry_id: first } = f.db.prepare("SELECT entry_id FROM entries").get() as { entry_id: string };
+    setEntryStatus(f.ctx, formatRef("sample-app", first), "archived");
+    rmSync(blocker);
+
+    syncMirror(f.ctx, f.mirror);
+    syncMirror(f.ctx, f.mirror);
+    expect(count(f, "entries")).toBe(1);
+    expect(existsSync(source)).toBe(true);
+    expect(f.db.prepare("SELECT code FROM mirror_skips").get()).toEqual({ code: "NOT_ALLOWED" });
+  });
+
+  it("converges to one entry per file however often the move fails (#83, property)", () => {
+    fc.assert(fc.property(fc.array(fc.boolean(), { minLength: 1, maxLength: 8 }), (blockedCycles) => {
+      const f = fixture();
+      mkdirSync(join(f.mirror, "sample-app"), { recursive: true });
+      const source = join(f.mirror, "sample-app", "flaky.md");
+      writeFileSync(source, "---\nkind: \"note\"\ntitle: \"Flaky\"\n---\n# Flaky\n\nBody\n");
+      const blocker = join(f.mirror, "sample-app", "notes");
+      for (const blocked of blockedCycles) {
+        if (blocked && !existsSync(blocker)) writeFileSync(blocker, "not a directory");
+        if (!blocked && existsSync(blocker) && !lstatSync(blocker).isDirectory()) rmSync(blocker);
+        try { syncMirror(f.ctx, f.mirror); } catch { /* blocked canonical folder */ }
+        expect(count(f, "entries")).toBe(1);
+      }
+      if (existsSync(blocker) && !lstatSync(blocker).isDirectory()) rmSync(blocker);
+      syncMirror(f.ctx, f.mirror);
+      expect(count(f, "entries")).toBe(1);
+      expect(count(f, "events")).toBe(1);
+      expect(existsSync(source)).toBe(false);
+      f.db.close();
+    }), { numRuns: 40 });
   });
 
   it("creates an entry from a new file in a scope folder", () => {

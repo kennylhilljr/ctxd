@@ -200,6 +200,16 @@ function recordSkip(db: Database.Database, path: string, err: unknown): void {
   ).run(skipKey(path), sanitizeCapture(path, 1000), code, reason, at, at);
 }
 
+/** Records a committed import whose file has not moved yet; a failed move then records its reason. */
+function markImportPending(db: Database.Database, path: string, requestId: string): void {
+  const at = nowIso();
+  db.prepare(
+    `INSERT INTO mirror_skips (path_key, path, code, reason, attempts, first_skipped_at, last_skipped_at, pending_request_id)
+     VALUES (?, ?, 'PENDING_MOVE', 'Imported; not yet moved to its canonical path', 0, ?, ?, ?)
+     ON CONFLICT(path_key) DO UPDATE SET code = excluded.code, reason = excluded.reason, pending_request_id = excluded.pending_request_id`,
+  ).run(skipKey(path), sanitizeCapture(path, 1000), at, at, requestId);
+}
+
 function clearSkip(db: Database.Database, path: string): void {
   db.prepare("DELETE FROM mirror_skips WHERE path_key = ?").run(skipKey(path));
 }
@@ -220,6 +230,28 @@ function setReviewAfter(ctx: WriteContext, row: MarkdownRow, value: string | nul
     signStoredEvent(ctx.db, eventId, ctx.flags);
     applyEvent(ctx.db, { eventId, scopeId: row.scope_id, entryId: row.entry_id, op: "status", part: "status", rev, clientId: ctx.clientId, hlc, payload, prev });
   })();
+}
+
+/**
+ * The request id for importing an untracked mirror file, derived from its path and content (#83).
+ * Ids form a chain: each later import of the same path and content is keyed on the entry the
+ * previous one created. If this path has a committed import that has not moved yet (its
+ * `mirror_skips.pending_request_id`) and it is in this chain, that id is reused, so the retry
+ * replays the write through writeEntry's idempotency check instead of creating a duplicate entry.
+ * Otherwise the next id is used, so a file put back after a completed import is a new entry.
+ */
+function importRequestId(db: Database.Database, clientId: string, path: string, text: string): string {
+  const idFor = (prior: string) => `mirror-import:${hash(`${path}\0${text}\0${prior}`).slice(0, 48)}`;
+  const priorImport = db.prepare("SELECT entry_id FROM events WHERE client_id = ? AND request_id = ?");
+  const pending = (db.prepare("SELECT pending_request_id FROM mirror_skips WHERE path_key = ?").get(skipKey(path)) as
+    | { pending_request_id: string | null }
+    | undefined)?.pending_request_id;
+  let next = idFor("");
+  for (let prior; (prior = priorImport.get(clientId, next) as { entry_id: string } | undefined);) {
+    if (next === pending) return next;
+    next = idFor(prior.entry_id);
+  }
+  return next;
 }
 
 export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: number; applied: number; conflicts: number; archiveRequests: number } {
@@ -292,7 +324,8 @@ export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: num
     if (trackedPaths.has(path)) continue;
     untracked.add(skipKey(path));
     try {
-      const parsed = parseMarkdown(readFileSync(file, "utf8"), path.replace(/\.md$/, "").split(/[\\/]/).pop() ?? "New note");
+      const text = readFileSync(file, "utf8");
+      const parsed = parseMarkdown(text, path.replace(/\.md$/, "").split(/[\\/]/).pop() ?? "New note");
       if (parsed.meta.ref) {
         clearSkip(db, path);
         continue;
@@ -304,17 +337,34 @@ export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: num
          WHERE s.name = ? AND p.storage = 'sealed' LIMIT 1`,
       ).get(scope);
       if (sealed) throw new CtxdError("SCOPE_FORBIDDEN", `Mirror writes to sealed scope ${scope} are refused`);
-      const result = writeEntry(ctx, {
+      const input = {
         scope, kind: parsed.meta.kind ?? "note", title: parsed.title, body: parsed.body,
-        tags: parsed.meta.tags, request_id: newId(),
-      } as never);
+        tags: parsed.meta.tags, request_id: importRequestId(db, ctx.clientId, path, text),
+      };
+      // The import and its pending mark commit together, so a crash before the move still replays it.
+      // A refused write commits its rejection record and is rethrown outside the transaction.
+      const outcome = db.transaction(() => {
+        let written: ReturnType<typeof writeEntry>;
+        try {
+          written = writeEntry(ctx, input as never);
+        } catch (error) {
+          return { error };
+        }
+        markImportPending(db, path, input.request_id);
+        return { written };
+      })();
+      if ("error" in outcome) throw outcome.error;
+      const result = outcome.written;
       if (!("held" in result)) {
         const created = rows(db).find((row) => row.entry_id === result.id);
-        if (created) {
-          const target = insideRoot(mirrorDir, relativePath(created));
-          mkdirSync(dirname(target), { recursive: true });
-          if (resolve(file) !== resolve(target)) renameSync(file, target);
+        if (!created) {
+          // A retried import whose entry is no longer mirrored (archived, deleted, quarantined while
+          // the move was failing): leave the file and record why, rather than importing it again.
+          throw new CtxdError("NOT_ALLOWED", "This file was already imported as an entry that is no longer active; edit it to import a new entry");
         }
+        const target = insideRoot(mirrorDir, relativePath(created));
+        mkdirSync(dirname(target), { recursive: true });
+        if (resolve(file) !== resolve(target)) renameSync(file, target);
         applied++;
       }
       clearSkip(db, path);
