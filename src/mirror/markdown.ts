@@ -354,6 +354,12 @@ export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: num
   }
   const byPathCase = new Map<string, string | null>();
   for (const path of byPath.keys()) byPathCase.set(path.toLowerCase(), byPathCase.has(path.toLowerCase()) ? null : path);
+  // Canonical paths of entries in sealed scopes: a file there is plaintext that must not stay on disk
+  // (Spec 12.1), whatever it holds, so it is removed even when its ref was edited or it cannot be parsed (#91).
+  const sealedPaths = new Set<string>();
+  for (const row of sealedRows(db)) {
+    try { sealedPaths.add(relativePath(row)); } catch { /* no path without a skill name */ }
+  }
   let applied = 0;
   let conflicts = 0;
   let archiveRequests = 0;
@@ -365,11 +371,8 @@ export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: num
     const row = byId.get(state.entry_id);
     const file = insideRoot(mirrorDir, state.path);
     if (!row) {
-      if (existsSync(file)) unlinkSync(file);
-      const conflict = file.replace(/\.md$/, ".conflict.md");
-      if (existsSync(conflict)) unlinkSync(conflict);
+      removeWithConflict(db, mirrorDir, state.path);
       db.prepare("DELETE FROM mirror_files WHERE path = ?").run(state.path);
-      db.prepare("DELETE FROM mirror_conflicts WHERE path = ?").run(state.path);
       db.prepare("DELETE FROM archive_requests WHERE entry_id = ?").run(state.entry_id);
       continue;
     }
@@ -410,6 +413,11 @@ export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: num
     }
     untracked.add(skipKey(path));
     try {
+      if (sealedPaths.has(path) && !byPath.has(path)) {
+        removeWithConflict(db, mirrorDir, path);
+        clearSkip(db, path);
+        continue;
+      }
       const text = readFileSync(file, "utf8");
       // A file at a live entry's canonical path with no mirror_files row was written but never
       // tracked (ctxd stopped in between), so it may hold a user edit (#88). Reconcile it against
@@ -509,39 +517,56 @@ export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: num
   return { written, applied, conflicts, archiveRequests };
 }
 
+/** Entries in sealed scopes, which the mirror never shows. */
+function sealedRows(db: Database.Database): MarkdownRow[] {
+  return db.prepare(
+    `SELECT e.*, s.name AS scope_name, s.kind AS scope_kind, '' AS author_name
+     FROM entries e JOIN scopes s ON s.scope_id = e.scope_id
+     WHERE EXISTS (SELECT 1 FROM pool_grants pg JOIN pools p ON p.pool_id = pg.pool_id
+                   WHERE pg.scope_id = e.scope_id AND p.storage = 'sealed')`,
+  ).all() as MarkdownRow[];
+}
+
+/**
+ * Deletes the mirror file at `path`, its conflict copy and the conflict record. The conflict copy goes
+ * first, so a stop in between leaves the file, which the next cycle finds again, never a lone copy.
+ */
+function removeWithConflict(db: Database.Database, mirrorDir: string, path: string): void {
+  const conflict = insideRoot(mirrorDir, path.replace(/\.md$/, ".conflict.md"));
+  if (existsSync(conflict)) unlinkSync(conflict);
+  db.prepare("DELETE FROM mirror_conflicts WHERE path = ?").run(path);
+  const file = insideRoot(mirrorDir, path);
+  if (existsSync(file)) unlinkSync(file);
+}
+
 /**
  * Removes an untracked file at the canonical path of the entry its `ref` names, when that entry is no
  * longer mirrored (#91): ctxd stopped between writing it and tracking it, so the tracked loop never
- * sees it. A sealed or purged entry's file and conflict copy are deleted unconditionally, as the
- * tracked loop does (Spec 12.1: sealed pools are never on disk in plaintext). Otherwise a file whose
- * content differs from the entry's (a user edit) is kept as a conflict copy before the file goes.
- * A ref'd file anywhere else is left alone. Returns what was done, or null when nothing applies.
+ * sees it. A purged entry's file and conflict copy are deleted unconditionally, as the tracked loop
+ * does (sealed scopes are handled by path before parsing). Otherwise a file whose content differs
+ * from the entry's (a user edit) is kept as a conflict copy before the file goes. A ref'd file
+ * anywhere else is left alone. Returns what was done, or null when nothing applies.
  */
 function removeInactiveUntracked(db: Database.Database, mirrorDir: string, path: string, parsed: ReturnType<typeof parseMarkdown>, text: string): "removed" | "conflict" | null {
   const entryId = parseRef(String(parsed.meta.ref))?.id;
   if (!entryId) return null;
   const row = db.prepare(
-    `SELECT e.*, s.name AS scope_name, s.kind AS scope_kind, '' AS author_name,
-       EXISTS (SELECT 1 FROM pool_grants pg JOIN pools p ON p.pool_id = pg.pool_id
-               WHERE pg.scope_id = e.scope_id AND p.storage = 'sealed') AS sealed
+    `SELECT e.*, s.name AS scope_name, s.kind AS scope_kind, '' AS author_name
      FROM entries e JOIN scopes s ON s.scope_id = e.scope_id WHERE e.entry_id = ?`,
-  ).get(entryId) as (MarkdownRow & { sealed: number }) | undefined;
+  ).get(entryId) as MarkdownRow | undefined;
   // A live entry's file is reconciled and tracked above or rewritten by the export below.
-  if (!row || (!row.sealed && row.purged_at === null && !UNMIRRORED.has(row.status))) return null;
+  if (!row || (row.purged_at === null && !UNMIRRORED.has(row.status))) return null;
   let canonical: string;
-  try { canonical = relativePath(row); } catch { return null; } // a purged skill may have lost its name
+  try { canonical = relativePath(row); } catch { return null; } // a rebuilt purge stub has no skill name
   if (canonical !== path) return null;
-  if (row.sealed || row.purged_at !== null) {
-    unlinkSync(insideRoot(mirrorDir, path));
-    const conflict = insideRoot(mirrorDir, path.replace(/\.md$/, ".conflict.md"));
-    if (existsSync(conflict)) unlinkSync(conflict);
-    db.prepare("DELETE FROM mirror_conflicts WHERE path = ?").run(path);
+  if (row.purged_at !== null) {
+    removeWithConflict(db, mirrorDir, path);
     return "removed";
   }
   // An archive, deletion, supersession or quarantine changes only the status, so an unedited render
-  // still carries the entry's content revision, title, body and tags.
+  // still carries the entry's content revision, title, body and tags (every render writes tags).
   const unedited = parsed.meta.rev === row.content_rev && parsed.title === row.title && parsed.body === row.body &&
-    (parsed.meta.tags === undefined || JSON.stringify(parsed.meta.tags) === row.tags);
+    JSON.stringify(parsed.meta.tags) === row.tags;
   if (!unedited) recordConflict(db, mirrorDir, path, row, parsed.meta.rev, `This entry is no longer mirrored (${row.status}); your edit was not applied.`, text);
   unlinkSync(insideRoot(mirrorDir, path));
   return unedited ? "removed" : "conflict";

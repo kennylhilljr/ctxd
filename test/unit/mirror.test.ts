@@ -298,6 +298,27 @@ describe("Markdown export and mirror (Spec v9 section 12.1)", () => {
     expect(mirrorCount(f, "mirror_files")).toBe(0);
   });
 
+  it("deletes an untracked sealed-scope file even with its ref edited or its frontmatter broken (#91, Spec 12.1)", () => {
+    for (const edit of [(t: string) => t.replace(/ref: "[^"]+"/, 'ref: "ctxd:sample-app/01JABCDEF000000000007K2PQZ"'), (t: string) => t.replace(/\n---\n/, "\n")]) {
+      const f = fixture(); const file = writtenButUntracked(f);
+      writeFileSync(file, edit(readFileSync(file, "utf8")));
+      sealScope(f);
+      syncMirror(f.ctx, f.mirror);
+      expect(existsSync(file)).toBe(false);
+      expect(count(f, "entries")).toBe(1);
+      expect((f.db.prepare("SELECT COUNT(*) AS n FROM mirror_skips").get() as { n: number }).n).toBe(0);
+    }
+  });
+
+  it("keeps an untracked file whose tags line was removed as a conflict copy when its entry is archived (#91)", () => {
+    const f = fixture(); const file = writtenButUntracked(f);
+    writeFileSync(file, readFileSync(file, "utf8").replace(/\ntags: .*\n/, "\n"));
+    setEntryStatus(f.ctx, entryRef(f), "archived");
+    expect(syncMirror(f.ctx, f.mirror)).toMatchObject({ conflicts: 1 });
+    expect(existsSync(file)).toBe(false);
+    expect(existsSync(file.replace(/\.md$/, ".conflict.md"))).toBe(true);
+  });
+
   it("deletes an untracked file of a purged entry (#91)", () => {
     const f = fixture(); const file = writtenButUntracked(f);
     writeFileSync(file, readFileSync(file, "utf8").replace("Original body", "Edited while stopped"));
