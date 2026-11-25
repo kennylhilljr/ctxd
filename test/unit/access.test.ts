@@ -12,7 +12,7 @@ import {
 
 const scopes: Record<string, ScopeInfo> = {
   me: { id: "me", kind: "me", vendorPolicy: "any" },
-  ctxd: { id: "ctxd", kind: "project", vendorPolicy: "any" },
+  sampleApp: { id: "sample-app", kind: "project", vendorPolicy: "any" },
   sharedTools: { id: "shared-tools", kind: "project", vendorPolicy: "any" },
   projectB: { id: "project-b", kind: "project", vendorPolicy: "any" },
   notes: { id: "notes", kind: "project", vendorPolicy: "any" },
@@ -24,7 +24,7 @@ const scopes: Record<string, ScopeInfo> = {
 
 const snapshot: AccessSnapshot = {
   grants: [
-    { poolId: "pool-dev", scopeId: "ctxd", level: "write" },
+    { poolId: "pool-dev", scopeId: "sample-app", level: "write" },
     { poolId: "pool-dev", scopeId: "shared-tools", level: "write" },
     { poolId: "pool-ops", scopeId: "project-b", level: "write" },
     { poolId: "pool-ops", scopeId: "shared-tools", level: "read" },
@@ -38,7 +38,7 @@ const snapshot: AccessSnapshot = {
     ["pool-private", ["client:local@studio"]],
   ]),
   poolVendorDefaults: new Map([["pool-private", "local-only"]]),
-  temporary: [{ clientId: "claude-desktop@laptop", scopeId: "ctxd", level: "propose", expiresAt: 2_000 }],
+  temporary: [{ clientId: "claude-desktop@laptop", scopeId: "sample-app", level: "propose", expiresAt: 2_000 }],
 };
 
 const codex: ClientInfo = { id: "codex@laptop", vendor: "openai", tags: ["coding"] };
@@ -50,7 +50,7 @@ const human: ClientInfo = { id: "human", vendor: "human", tags: [] };
 describe("access evaluation (SPEC v4 10.5)", () => {
   it("grants through tag membership and denies by default", () => {
     expect(poolsOf(codex, snapshot)).toEqual(["pool-dev"]);
-    expect(accessLevel(codex, scopes.ctxd!, snapshot, 0)).toBe("write");
+    expect(accessLevel(codex, scopes.sampleApp!, snapshot, 0)).toBe("write");
     expect(accessLevel(codex, scopes.projectB!, snapshot, 0)).toBe("none");
     expect(accessLevel(codex, scopes.notes!, snapshot, 0)).toBe("none");
   });
@@ -61,8 +61,8 @@ describe("access evaluation (SPEC v4 10.5)", () => {
   });
 
   it("honors temporary grants only until they expire", () => {
-    expect(accessLevel(desktop, scopes.ctxd!, snapshot, 1_000)).toBe("propose");
-    expect(accessLevel(desktop, scopes.ctxd!, snapshot, 3_000)).toBe("none");
+    expect(accessLevel(desktop, scopes.sampleApp!, snapshot, 1_000)).toBe("propose");
+    expect(accessLevel(desktop, scopes.sampleApp!, snapshot, 3_000)).toBe("none");
   });
 
   it("lets every agent read global _me, writing only at propose", () => {
@@ -72,7 +72,7 @@ describe("access evaluation (SPEC v4 10.5)", () => {
 
   it("holds every write from an unassigned agent outside its own holding scope", () => {
     expect(poolsOf(cursor, snapshot)).toEqual([]);
-    expect(decideWrite(accessLevel(cursor, scopes.ctxd!, snapshot, 0), false)).toEqual({ kind: "hold" });
+    expect(decideWrite(accessLevel(cursor, scopes.sampleApp!, snapshot, 0), false)).toEqual({ kind: "hold" });
     expect(accessLevel(cursor, scopes.holdCursor!, snapshot, 0)).toBe("propose");
     expect(accessLevel(codex, scopes.holdCursor!, snapshot, 0)).toBe("none");
   });
@@ -104,7 +104,7 @@ describe("session working set (SPEC v4 10.5)", () => {
 
   it("gives an out-of-pool or unassigned agent only global _me", () => {
     expect(workingSet(codex, scopes.notes!, all, snapshot, undefined, 0)).toEqual(["me"]);
-    expect(workingSet(cursor, scopes.ctxd!, all, snapshot, undefined, 0)).toEqual(["me"]);
+    expect(workingSet(cursor, scopes.sampleApp!, all, snapshot, undefined, 0)).toEqual(["me"]);
   });
 
   it("honors an explicit pool override", () => {
@@ -112,7 +112,7 @@ describe("session working set (SPEC v4 10.5)", () => {
   });
 
   it("includes the profile of each pool that grants the session scope", () => {
-    expect(workingSet(codex, scopes.ctxd!, all, snapshot, undefined, 0)).toEqual(["ctxd", "me", "meDev"]);
+    expect(workingSet(codex, scopes.sampleApp!, all, snapshot, undefined, 0)).toEqual(["me", "meDev", "sample-app"]);
   });
 });
 

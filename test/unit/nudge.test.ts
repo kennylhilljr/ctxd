@@ -23,31 +23,31 @@ function obs(over: Partial<StopObservation> = {}): StopObservation {
 
 describe("stop-hook nudge", () => {
   it("nudges when HEAD changed and no recent handoff", () => {
-    const d = evaluateStop(initialSessionState("ctxd", "old"), obs(), config);
+    const d = evaluateStop(initialSessionState("sample-app", "old"), obs(), config);
     expect(d.block).toBe(true);
-    expect(d.reason).toContain('scope "ctxd"');
+    expect(d.reason).toContain('scope "sample-app"');
     expect(d.state.nudgePending).toBe(true);
   });
 
   it("never blocks twice in a row", () => {
-    const first = evaluateStop(initialSessionState("ctxd", "old"), obs(), config);
+    const first = evaluateStop(initialSessionState("sample-app", "old"), obs(), config);
     const second = evaluateStop(first.state, obs({ head: "newer" }), config);
     expect(second.block).toBe(false);
     expect(second.state.nudgePending).toBe(false);
   });
 
   it("respects the client's stop-hook-active flag", () => {
-    const d = evaluateStop(initialSessionState("ctxd", "old"), obs({ stopHookActive: true }), config);
+    const d = evaluateStop(initialSessionState("sample-app", "old"), obs({ stopHookActive: true }), config);
     expect(d.block).toBe(false);
   });
 
   it("skips when a handoff was written recently", () => {
-    const d = evaluateStop(initialSessionState("ctxd", "old"), obs({ latestHandoffAt: 95 * MIN }), config);
+    const d = evaluateStop(initialSessionState("sample-app", "old"), obs({ latestHandoffAt: 95 * MIN }), config);
     expect(d.block).toBe(false);
   });
 
   it("rate-limits nudges", () => {
-    const first = evaluateStop(initialSessionState("ctxd", "old"), obs(), config);
+    const first = evaluateStop(initialSessionState("sample-app", "old"), obs(), config);
     const released = evaluateStop(first.state, obs(), config);
     const again = evaluateStop(released.state, obs({ now: 110 * MIN, head: "changed-again" }), config);
     expect(again.block).toBe(false);
@@ -57,7 +57,7 @@ describe("stop-hook nudge", () => {
 
   it("nudges on a completion marker even without git changes", () => {
     const d = evaluateStop(
-      initialSessionState("ctxd", "abc"),
+      initialSessionState("sample-app", "abc"),
       obs({ lastAssistantMessage: "All done. Tests pass." }),
       config,
     );
@@ -65,7 +65,7 @@ describe("stop-hook nudge", () => {
   });
 
   it("does nothing when disabled", () => {
-    const d = evaluateStop(initialSessionState("ctxd", "old"), obs(), { ...config, enabled: false });
+    const d = evaluateStop(initialSessionState("sample-app", "old"), obs(), { ...config, enabled: false });
     expect(d.block).toBe(false);
   });
 });

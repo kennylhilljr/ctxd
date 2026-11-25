@@ -144,7 +144,7 @@ export function scopeName(db: Database.Database, scopeId: string): string {
   return (db.prepare("SELECT name FROM scopes WHERE scope_id = ?").get(scopeId) as { name: string } | undefined)?.name ?? scopeId;
 }
 
-/** Provenance line (SPEC v6 section 8.2), e.g. "[ctxd:ctxd/01JAB... | decision | proposed | by codex@laptop | 2026-10-16]". */
+/** Provenance line (SPEC v6 section 8.2), e.g. "[ctxd:sample-app/01JAB... | decision | proposed | by codex@laptop | 2026-10-16]". */
 export function provenanceLine(db: Database.Database, ref: string, row: Pick<EntryRow, "kind" | "status" | "updated_by" | "updated_hlc">): string {
   const date = new Date(hlcToMs(row.updated_hlc)).toISOString().slice(0, 10);
   return `[${ref} | ${row.kind} | ${row.status} | by ${clientName(db, row.updated_by)} | ${date}]`;
