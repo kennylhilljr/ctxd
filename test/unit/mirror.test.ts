@@ -1,6 +1,6 @@
 import { chmodSync, lstatSync, mkdtempSync, readFileSync, readdirSync, writeFileSync, existsSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import fc from "fast-check";
 import { afterEach, describe, expect, it } from "vitest";
 import { HlcClock } from "../../src/core/hlc.js";
@@ -88,6 +88,180 @@ describe("Markdown export and mirror (Spec v9 section 12.1)", () => {
     expect(result.conflicts).toBe(1);
     expect(existsSync(file.replace(/\.md$/, ".conflict.md"))).toBe(true);
     expect(f.db.prepare("SELECT body FROM entries").get()).toEqual({ body: "Original body" });
+  });
+
+  // Simulates a stop after the export loop wrote the file but before it recorded it in mirror_files.
+  function writtenButUntracked(f: ReturnType<typeof fixture>, kind: "note" | "decision" = "note"): string {
+    createNote(f, kind); syncMirror(f.ctx, f.mirror);
+    const state = f.db.prepare("SELECT path FROM mirror_files").get() as { path: string };
+    f.db.prepare("DELETE FROM mirror_files").run();
+    return join(f.mirror, state.path);
+  }
+
+  it("keeps an edit to a written but untracked mirror file after a stop (#88)", () => {
+    const f = fixture(); const file = writtenButUntracked(f);
+    writeFileSync(file, readFileSync(file, "utf8").replace("Original body", "Edited while stopped"));
+    expect(syncMirror(f.ctx, f.mirror)).toMatchObject({ applied: 1, conflicts: 0 });
+    expect(f.db.prepare("SELECT body FROM entries").get()).toEqual({ body: "Edited while stopped" });
+    expect(readFileSync(file, "utf8")).toContain("Edited while stopped");
+    expect(count(f, "entries")).toBe(1);
+    expect((f.db.prepare("SELECT COUNT(*) AS n FROM mirror_files").get() as { n: number }).n).toBe(1);
+  });
+
+  it("re-tracks an unedited untracked mirror file without new events (#88)", () => {
+    const f = fixture(); const file = writtenButUntracked(f);
+    expect(syncMirror(f.ctx, f.mirror)).toMatchObject({ applied: 0, conflicts: 0 });
+    expect(count(f, "events")).toBe(1);
+    expect(existsSync(file)).toBe(true);
+    expect((f.db.prepare("SELECT COUNT(*) AS n FROM mirror_files").get() as { n: number }).n).toBe(1);
+  });
+
+  it("keeps a conflict copy when the entry changed while an untracked file was edited (#88, FS-AC-4)", () => {
+    const f = fixture(); const file = writtenButUntracked(f);
+    const row = f.db.prepare("SELECT entry_id, content_rev FROM entries").get() as { entry_id: string; content_rev: string };
+    writeEntry(f.ctx, { scope: "sample-app", id: row.entry_id, expected_rev: row.content_rev, kind: "note", title: "Mirror entry", body: "Changed elsewhere", request_id: newId() } as never);
+    writeFileSync(file, readFileSync(file, "utf8").replace("Original body", "Edited while stopped"));
+    expect(syncMirror(f.ctx, f.mirror)).toMatchObject({ applied: 0, conflicts: 1 });
+    expect(f.db.prepare("SELECT body FROM entries").get()).toEqual({ body: "Changed elsewhere" });
+    expect(readFileSync(file.replace(/\.md$/, ".conflict.md"), "utf8")).toContain("Edited while stopped");
+  });
+
+  it("keeps a conflict copy for an untracked edit to an immutable entry (#88)", () => {
+    const f = fixture(); const file = writtenButUntracked(f, "decision");
+    writeFileSync(file, readFileSync(file, "utf8").replace("Original body", "Edited while stopped"));
+    expect(syncMirror(f.ctx, f.mirror)).toMatchObject({ applied: 0, conflicts: 1 });
+    expect(f.db.prepare("SELECT body FROM entries").get()).toEqual({ body: "Original body" });
+    expect(existsSync(file.replace(/\.md$/, ".conflict.md"))).toBe(true);
+  });
+
+  it("finds an untracked file's entry by its path, ignoring an edited ref (#88)", () => {
+    const f = fixture(); const file = writtenButUntracked(f);
+    const text = readFileSync(file, "utf8");
+    const ref = parseMarkdown(text, "fallback").meta.ref!;
+    writeFileSync(file, text.replace(ref, "ctxd:sample-app/01ARZ3NDEKTSV4RRFFQ69G5FAV").replace("Original body", "Edited while stopped"));
+    expect(syncMirror(f.ctx, f.mirror)).toMatchObject({ applied: 1, conflicts: 0 });
+    expect(f.db.prepare("SELECT body FROM entries").get()).toEqual({ body: "Edited while stopped" });
+    expect(readFileSync(file, "utf8")).toContain(`ref: ${JSON.stringify(ref)}`);
+  });
+
+  it("keeps a refused untracked edit as a conflict copy (#88)", () => {
+    const f = fixture(); const file = writtenButUntracked(f);
+    writeFileSync(file, readFileSync(file, "utf8").replace("Original body", "Edited while stopped").replace(/^tags: .*$/m, "tags: 5"));
+    expect(syncMirror(f.ctx, f.mirror)).toMatchObject({ applied: 0, conflicts: 1 });
+    expect(f.db.prepare("SELECT body FROM entries").get()).toEqual({ body: "Original body" });
+    expect(readFileSync(file.replace(/\.md$/, ".conflict.md"), "utf8")).toContain("Edited while stopped");
+    expect(f.db.prepare("SELECT reason FROM mirror_conflicts").get()).toMatchObject({ reason: expect.stringContaining("could not be applied") });
+  });
+
+  it("applies none of an untracked edit that is refused part way (#88)", () => {
+    const f = fixture(); const file = writtenButUntracked(f);
+    writeFileSync(file, readFileSync(file, "utf8").replace("Original body", "Edited while stopped").replace("review_after: null", 'review_after: {"bad":1}'));
+    expect(syncMirror(f.ctx, f.mirror)).toMatchObject({ applied: 0, conflicts: 1 });
+    expect(f.db.prepare("SELECT body, review_after FROM entries").get()).toEqual({ body: "Original body", review_after: null });
+    expect(count(f, "events")).toBe(1);
+    expect(readFileSync(file.replace(/\.md$/, ".conflict.md"), "utf8")).toContain("Edited while stopped");
+  });
+
+  it("keeps the write path's rejection record for a refused untracked edit (#88)", () => {
+    const f = fixture(); const file = writtenButUntracked(f);
+    writeFileSync(file, readFileSync(file, "utf8").replace("Original body", "AKIAABCDEFGHIJKLMNOP is our access key"));
+    expect(syncMirror(f.ctx, f.mirror)).toMatchObject({ applied: 0, conflicts: 1 });
+    expect(f.db.prepare("SELECT body FROM entries").get()).toEqual({ body: "Original body" });
+    expect(f.db.prepare("SELECT code FROM rejections").all()).toEqual([{ code: "REDACTED_SECRET" }]);
+  });
+
+  it("surfaces a tracked edit's write refusal as the original error (#88)", () => {
+    const f = fixture(); createNote(f); syncMirror(f.ctx, f.mirror);
+    const state = f.db.prepare("SELECT path FROM mirror_files").get() as { path: string };
+    const file = join(f.mirror, state.path);
+    writeFileSync(file, readFileSync(file, "utf8").replace("Original body", "AKIAABCDEFGHIJKLMNOP is our access key"));
+    expect(() => syncMirror(f.ctx, f.mirror)).toThrow(expect.objectContaining({ code: "REDACTED_SECRET", message: "Content matched a secret detector" }));
+    expect(f.db.prepare("SELECT code FROM rejections").all()).toEqual([{ code: "REDACTED_SECRET" }]);
+    expect(f.db.prepare("SELECT body FROM entries").get()).toEqual({ body: "Original body" });
+  });
+
+  it("reconciles an untracked edit with its ref removed instead of importing a duplicate (#88)", () => {
+    const f = fixture(); const file = writtenButUntracked(f);
+    writeFileSync(file, readFileSync(file, "utf8").replace(/^ref: .*\n/m, "").replace("Original body", "Edited while stopped"));
+    expect(syncMirror(f.ctx, f.mirror)).toMatchObject({ applied: 1, conflicts: 0 });
+    expect(count(f, "entries")).toBe(1);
+    expect(f.db.prepare("SELECT body FROM entries").get()).toEqual({ body: "Edited while stopped" });
+  });
+
+  it("keeps an unparseable untracked edit as a conflict copy (#88)", () => {
+    const f = fixture(); const file = writtenButUntracked(f);
+    const broken = readFileSync(file, "utf8").replace("\n---\n", "\n").replace("Original body", "Half saved");
+    writeFileSync(file, broken);
+    expect(syncMirror(f.ctx, f.mirror)).toMatchObject({ applied: 0, conflicts: 1 });
+    expect(count(f, "entries")).toBe(1);
+    expect(readFileSync(file.replace(/\.md$/, ".conflict.md"), "utf8")).toContain("Half saved");
+    expect(readFileSync(file, "utf8")).toContain("Original body");
+  });
+
+  it("leaves an untracked edit in place when its conflict copy cannot be written (#88)", () => {
+    const f = fixture(); const file = writtenButUntracked(f);
+    mkdirSync(file.replace(/\.md$/, ".conflict.md"));
+    const edited = readFileSync(file, "utf8").replace(/^rev: .*$/m, 'rev: "1-stale"').replace("Original body", "Edited while stopped");
+    writeFileSync(file, edited);
+    syncMirror(f.ctx, f.mirror);
+    expect(readFileSync(file, "utf8")).toBe(edited);
+    expect((f.db.prepare("SELECT COUNT(*) AS n FROM mirror_files").get() as { n: number }).n).toBe(0);
+    rmSync(file.replace(/\.md$/, ".conflict.md"), { recursive: true });
+    expect(syncMirror(f.ctx, f.mirror)).toMatchObject({ conflicts: 1 });
+    expect(readFileSync(file.replace(/\.md$/, ".conflict.md"), "utf8")).toContain("Edited while stopped");
+  });
+
+  it("reconciles an untracked edit saved under another letter case (#88)", () => {
+    const f = fixture(); const file = writtenButUntracked(f);
+    const probe = join(f.root, "case-probe"); writeFileSync(probe, "");
+    if (!existsSync(join(f.root, "CASE-PROBE"))) return; // the hazard needs a case-insensitive filesystem
+    const alias = join(dirname(file), basename(file, ".md").toUpperCase() + ".md");
+    const text = readFileSync(file, "utf8").replace("Original body", "Edited while stopped");
+    rmSync(file); writeFileSync(alias, text);
+    expect(syncMirror(f.ctx, f.mirror)).toMatchObject({ applied: 1, conflicts: 0 });
+    expect(count(f, "entries")).toBe(1);
+    expect(f.db.prepare("SELECT body FROM entries").get()).toEqual({ body: "Edited while stopped" });
+    expect(readdirSync(dirname(file))).toEqual([basename(file)]);
+  });
+
+  it("never reconciles an untracked file against one of two entries sharing its path (#88)", () => {
+    const f = fixture(); createNote(f); const second = createNote(f);
+    const { slug } = f.db.prepare("SELECT slug FROM entries WHERE entry_id != ?").get(second.id) as { slug: string };
+    f.db.prepare("UPDATE entries SET slug = ? WHERE entry_id = ?").run(slug, second.id); // an offline slug collision
+    syncMirror(f.ctx, f.mirror);
+    const state = f.db.prepare("SELECT path FROM mirror_files").get() as { path: string };
+    f.db.prepare("DELETE FROM mirror_files").run();
+    const file = join(f.mirror, state.path);
+    writeFileSync(file, readFileSync(file, "utf8").replace("Original body", "Edited while stopped"));
+    expect(syncMirror(f.ctx, f.mirror)).toMatchObject({ applied: 0 });
+    expect(f.db.prepare("SELECT DISTINCT body FROM entries").all()).toEqual([{ body: "Original body" }]);
+  });
+
+  it("removes an untracked file whose edit archived its entry (#88)", () => {
+    const f = fixture(); const file = writtenButUntracked(f);
+    writeFileSync(file, readFileSync(file, "utf8").replace('status: "active"', 'status: "archived"'));
+    expect(syncMirror(f.ctx, f.mirror)).toMatchObject({ applied: 1, conflicts: 0 });
+    expect(f.db.prepare("SELECT status FROM entries").get()).toEqual({ status: "archived" });
+    syncMirror(f.ctx, f.mirror);
+    expect(existsSync(file)).toBe(false);
+    expect((f.db.prepare("SELECT COUNT(*) AS n FROM mirror_files").get() as { n: number }).n).toBe(0);
+  });
+
+  it("converges to the edited body whether or not the file was tracked before the edit (#88, property)", () => {
+    fc.assert(fc.property(fc.boolean(), fc.stringMatching(/^[A-Za-z0-9][A-Za-z0-9 ]{0,38}[A-Za-z0-9]$/), (stopped, body) => {
+      const f = fixture(); createNote(f); syncMirror(f.ctx, f.mirror);
+      const state = f.db.prepare("SELECT path FROM mirror_files").get() as { path: string };
+      if (stopped) f.db.prepare("DELETE FROM mirror_files").run();
+      const file = join(f.mirror, state.path);
+      writeFileSync(file, readFileSync(file, "utf8").replace("Original body", body));
+      syncMirror(f.ctx, f.mirror);
+      const afterFirst = count(f, "events");
+      syncMirror(f.ctx, f.mirror);
+      expect(count(f, "entries")).toBe(1);
+      expect(count(f, "events")).toBe(afterFirst);
+      expect(f.db.prepare("SELECT body FROM entries").get()).toEqual({ body });
+      expect(readFileSync(file, "utf8")).toContain(`\n${body}\n`);
+    }), { numRuns: 25 });
   });
 
   it("restores a deleted mirror file and records an archive request", () => {

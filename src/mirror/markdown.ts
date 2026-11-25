@@ -254,10 +254,103 @@ function importRequestId(db: Database.Database, clientId: string, path: string, 
   return next;
 }
 
+/** A refusal by writeEntry, which runs before reconcileEdit changes anything else. */
+class WriteRefused extends Error {
+  constructor(override readonly cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause));
+  }
+}
+
+/**
+ * Applies a user edit of the mirror file at `path` (text `text`) to its entry `row`, or records a
+ * conflict copy when the edit is against a stale revision or changes an immutable entry.
+ */
+function reconcileEdit(ctx: WriteContext, mirrorDir: string, path: string, row: MarkdownRow, text: string): "applied" | "conflict" {
+  const { db } = ctx;
+  const parsed = parseMarkdown(text, row.title);
+  const contentChanged = parsed.title !== row.title || parsed.body !== row.body ||
+    (parsed.meta.tags !== undefined && JSON.stringify(parsed.meta.tags) !== row.tags);
+  const statusChanged = (parsed.meta.status !== undefined && parsed.meta.status !== row.status) ||
+    (parsed.meta.review_after !== undefined && parsed.meta.review_after !== row.review_after);
+  if (contentChanged && parsed.meta.rev !== row.content_rev) {
+    recordConflict(db, mirrorDir, path, row, parsed.meta.rev, "The entry changed after this mirror revision.", text);
+    return "conflict";
+  }
+  if (contentChanged && IMMUTABLE.has(row.kind)) {
+    recordConflict(db, mirrorDir, path, row, parsed.meta.rev, `${row.kind} entries are immutable; create a superseding entry.`, text);
+    return "conflict";
+  }
+  if (statusChanged && parsed.meta.status_rev !== row.status_rev) {
+    recordConflict(db, mirrorDir, path, row, parsed.meta.status_rev, "The entry status changed after this mirror revision.", text);
+    return "conflict";
+  }
+  if (contentChanged) {
+    try {
+      writeEntry(ctx, {
+        scope: row.scope_name, id: row.entry_id, expected_rev: row.content_rev, kind: row.kind,
+        title: parsed.title, body: parsed.body, tags: parsed.meta.tags, request_id: newId(),
+      } as never);
+    } catch (error) {
+      throw new WriteRefused(error);
+    }
+  }
+  if (parsed.meta.status && parsed.meta.status !== row.status && STATUSES.includes(parsed.meta.status as (typeof STATUSES)[number])) {
+    setEntryStatus(ctx, formatRef(row.scope_name, row.entry_id), parsed.meta.status);
+  }
+  if (parsed.meta.review_after !== undefined && parsed.meta.review_after !== row.review_after) {
+    setReviewAfter(ctx, row, parsed.meta.review_after);
+  }
+  return "applied";
+}
+
+/**
+ * Reconciles an untracked file at `row`'s canonical path (#88): applies the edit, or keeps it as a
+ * conflict copy when it is stale, unparseable or refused, and only then tracks the file. Returns
+ * null, leaving the file untracked, when the edit could be neither applied nor kept.
+ */
+function reconcileUntracked(ctx: WriteContext, mirrorDir: string, path: string, row: MarkdownRow, text: string): "applied" | "conflict" | null {
+  const { db } = ctx;
+  let outcome: "applied" | "conflict";
+  try {
+    try {
+      // One transaction, so an edit refused part way (say a valid body with an invalid review date)
+      // leaves the entry unchanged and is kept whole in the conflict copy. A refusal by the write
+      // path comes before any change and commits, so its rejection record is kept.
+      const result = db.transaction(() => {
+        try {
+          return reconcileEdit(ctx, mirrorDir, path, row, text);
+        } catch (err) {
+          if (err instanceof WriteRefused) return err;
+          throw err;
+        }
+      })();
+      if (result instanceof WriteRefused) throw result.cause;
+      outcome = result;
+    } catch (err) {
+      const reason = sanitizeCapture(`This edit could not be applied: ${err instanceof Error ? err.message : String(err)}`, 500);
+      recordConflict(db, mirrorDir, path, row, undefined, reason, text);
+      outcome = "conflict";
+    }
+  } catch {
+    return null;
+  }
+  trackFile(db, path, row, text);
+  return outcome;
+}
+
 export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: number; applied: number; conflicts: number; archiveRequests: number } {
   if (!isFlagOn(ctx.flags, "mirror")) return { written: 0, applied: 0, conflicts: 0, archiveRequests: 0 };
   const { db } = ctx;
   const byId = new Map(rows(db).map((row) => [row.entry_id, row]));
+  // Canonical path -> entry, for files written but never tracked (#88). A path two entries share (an
+  // offline slug collision) is left out, so it never resolves to an arbitrary entry.
+  const byPath = new Map<string, MarkdownRow | null>();
+  for (const row of byId.values()) {
+    const path = relativePath(row);
+    byPath.set(path, byPath.has(path) ? null : row);
+  }
+  const byPathCase = new Map<string, string | null>();
+  for (const path of byPath.keys()) byPathCase.set(path.toLowerCase(), byPathCase.has(path.toLowerCase()) ? null : path);
   let applied = 0;
   let conflicts = 0;
   let archiveRequests = 0;
@@ -284,43 +377,22 @@ export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: num
     }
     const text = readFileSync(file, "utf8");
     if (hash(text) === state.file_hash) continue;
-    const parsed = parseMarkdown(text, row.title);
-    const contentChanged = parsed.title !== row.title || parsed.body !== row.body ||
-      (parsed.meta.tags !== undefined && JSON.stringify(parsed.meta.tags) !== row.tags);
-    const statusChanged = (parsed.meta.status !== undefined && parsed.meta.status !== row.status) ||
-      (parsed.meta.review_after !== undefined && parsed.meta.review_after !== row.review_after);
-    if (contentChanged && parsed.meta.rev !== row.content_rev) {
-      recordConflict(db, mirrorDir, state.path, row, parsed.meta.rev, "The entry changed after this mirror revision.", text);
-      conflicts++;
-      continue;
+    let outcome: "applied" | "conflict";
+    try {
+      outcome = reconcileEdit(ctx, mirrorDir, state.path, row, text);
+    } catch (err) {
+      throw err instanceof WriteRefused ? err.cause : err;
     }
-    if (contentChanged && IMMUTABLE.has(row.kind)) {
-      recordConflict(db, mirrorDir, state.path, row, parsed.meta.rev, `${row.kind} entries are immutable; create a superseding entry.`, text);
-      conflicts++;
-      continue;
-    }
-    if (statusChanged && parsed.meta.status_rev !== row.status_rev) {
-      recordConflict(db, mirrorDir, state.path, row, parsed.meta.status_rev, "The entry status changed after this mirror revision.", text);
-      conflicts++;
-      continue;
-    }
-    if (contentChanged) {
-      writeEntry(ctx, {
-        scope: row.scope_name, id: row.entry_id, expected_rev: row.content_rev, kind: row.kind,
-        title: parsed.title, body: parsed.body, tags: parsed.meta.tags, request_id: newId(),
-      } as never);
-    }
-    if (parsed.meta.status && parsed.meta.status !== row.status && STATUSES.includes(parsed.meta.status as (typeof STATUSES)[number])) {
-      setEntryStatus(ctx, formatRef(row.scope_name, row.entry_id), parsed.meta.status);
-    }
-    if (parsed.meta.review_after !== undefined && parsed.meta.review_after !== row.review_after) {
-      setReviewAfter(ctx, row, parsed.meta.review_after);
-    }
-    applied++;
+    if (outcome === "conflict") conflicts++;
+    else applied++;
   }
 
   const untracked = new Set<string>();
-  for (const file of walkMarkdown(mirrorDir)) {
+  const keep = new Set<string>(); // untracked edits that could not be kept elsewhere: not overwritten this cycle
+  // Files at canonical paths come first, so replaying a pending import cannot rewrite an untracked,
+  // edited canonical file before it is reconciled (#88).
+  const atCanonical = (file: string) => byPathCase.has(relative(resolve(mirrorDir), file).toLowerCase());
+  for (const file of walkMarkdown(mirrorDir).sort((a, b) => Number(!atCanonical(a)) - Number(!atCanonical(b)))) {
     const path = relative(resolve(mirrorDir), file);
     if (trackedPaths.has(path)) continue;
     // A tracked file seen under another letter case (a stop before the case-fixing rename below, on a
@@ -336,6 +408,26 @@ export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: num
     untracked.add(skipKey(path));
     try {
       const text = readFileSync(file, "utf8");
+      // A file at a live entry's canonical path with no mirror_files row was written but never
+      // tracked (ctxd stopped in between), so it may hold a user edit (#88). Reconcile it against
+      // the entry at that path, whatever its `ref` says, before the export below rewrites it.
+      // On a case-insensitive filesystem it may be the canonical file under another case: same inode.
+      let ownerPath: string | undefined = byPath.get(path) ? path : undefined;
+      if (ownerPath === undefined) {
+        const alias = byPathCase.get(path.toLowerCase());
+        if (alias && byPath.get(alias) && sameInode(file, insideRoot(mirrorDir, alias))) ownerPath = alias;
+      }
+      const owner = ownerPath === undefined ? undefined : byPath.get(ownerPath);
+      if (owner && ownerPath !== undefined) {
+        clearSkip(db, path);
+        if (ownerPath !== path) renameSync(file, insideRoot(mirrorDir, ownerPath)); // only fixes the name's case
+        if (text === renderMarkdown(owner)) continue;
+        const outcome = reconcileUntracked(ctx, mirrorDir, ownerPath, owner, text);
+        if (outcome === "applied") applied++;
+        else if (outcome === "conflict") conflicts++;
+        else keep.add(ownerPath);
+        continue;
+      }
       const parsed = parseMarkdown(text, path.replace(/\.md$/, "").split(/[\\/]/).pop() ?? "New note");
       if (parsed.meta.ref) {
         clearSkip(db, path);
@@ -377,6 +469,8 @@ export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: num
         // so a stop at any point leaves either the pending source (replayed next cycle) or a file that
         // already names its entry, never an untracked copy without a ref that would import again (#85).
         const relTarget = relativePath(created);
+        // An untracked edit at the target that could not be kept this cycle is not overwritten (#88).
+        if (keep.has(relTarget)) continue;
         const target = insideRoot(mirrorDir, relTarget);
         const content = renderMarkdown(created);
         // On a case-insensitive filesystem the source may already be the target under another case.
@@ -402,6 +496,7 @@ export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: num
   let written = 0;
   for (const row of rows(db)) {
     const path = relativePath(row);
+    if (keep.has(path)) continue;
     const content = renderMarkdown(row);
     atomicWrite(insideRoot(mirrorDir, path), content);
     trackFile(db, path, row, content);

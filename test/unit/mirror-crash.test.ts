@@ -132,6 +132,28 @@ describe("mirror import survives a stop at any step (#85, FS-6, Spec 12.1)", () 
     }), { numRuns: 40 });
   });
 
+  it("keeps an edit to the canonical file written before a stop, even with the import still pending (#88)", () => {
+    let edited = 0;
+    for (let steps = 0; ; steps++) {
+      const run = importStoppedAt(steps, "sample-app/new-note.md", note("Stopped note", "Body"));
+      if (!run.stopped) break;
+      const ctx = run.ctx!;
+      const tracked = new Set((ctx.db.prepare("SELECT path FROM mirror_files").all() as { path: string }[]).map((r) => r.path));
+      const untracked = files(run.mirror).filter((p) => p !== "sample-app/new-note.md" && !tracked.has(p));
+      for (const path of untracked) {
+        const file = join(run.mirror, path);
+        writeFileSync(file, readFileSync(file, "utf8").replace("\nBody\n", "\nEdited after stop\n"));
+        edited++;
+      }
+      for (let i = 0; i < 2; i++) syncMirror(ctx, run.mirror);
+      expect(count(ctx, "entries")).toBe(1);
+      expect(existsSync(run.source)).toBe(false);
+      if (untracked.length > 0) expect(ctx.db.prepare("SELECT body FROM entries").get()).toEqual({ body: "Edited after stop" });
+      ctx.db.close();
+    }
+    expect(edited).toBeGreaterThan(0); // some stop left the canonical file written but untracked
+  });
+
   it("keeps a file whose canonical path differs only in case from where it was saved", () => {
     const dir = mkdtempSync(join(tmpdir(), "ctxd-case-")); scratch.push(dir);
     if (!caseInsensitive(dir)) return; // the hazard needs a case-insensitive filesystem
