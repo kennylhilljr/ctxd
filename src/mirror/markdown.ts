@@ -234,8 +234,8 @@ function setReviewAfter(ctx: WriteContext, row: MarkdownRow, value: string | nul
 /**
  * The request id for importing an untracked mirror file, derived from its path and content (#83).
  * Ids form a chain: each later import of the same path and content is keyed on the entry the
- * previous one created. While an import of this path is pending (a `mirror_skips` row, written
- * before the import commits and kept by a failed mkdir or rename), the last id in the chain is reused, so the retry replays
+ * previous one created. While an import of this path is pending (a `mirror_skips` row, committed
+ * with the import and kept by a failed mkdir or rename), the last id in the chain is reused, so the retry replays
  * that write through writeEntry's idempotency check instead of creating a duplicate entry.
  * Otherwise the next id is used, so a file put back after a completed import is a new entry.
  */
@@ -335,13 +335,23 @@ export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: num
          WHERE s.name = ? AND p.storage = 'sealed' LIMIT 1`,
       ).get(scope);
       if (sealed) throw new CtxdError("SCOPE_FORBIDDEN", `Mirror writes to sealed scope ${scope} are refused`);
-      const requestId = importRequestId(db, ctx.clientId, path, text);
-      // Mark the import pending before it commits, so a crash before the move still replays it.
-      markImportPending(db, path);
-      const result = writeEntry(ctx, {
+      const input = {
         scope, kind: parsed.meta.kind ?? "note", title: parsed.title, body: parsed.body,
-        tags: parsed.meta.tags, request_id: requestId,
-      } as never);
+        tags: parsed.meta.tags, request_id: importRequestId(db, ctx.clientId, path, text),
+      };
+      // The import and its pending mark commit together, so a crash before the move still replays it.
+      // A refused write commits its rejection record and is rethrown outside the transaction.
+      const outcome = db.transaction(() => {
+        try {
+          const written = writeEntry(ctx, input as never);
+          markImportPending(db, path);
+          return { written };
+        } catch (error) {
+          return { error };
+        }
+      })();
+      if ("error" in outcome) throw outcome.error;
+      const result = outcome.written;
       if (!("held" in result)) {
         const created = rows(db).find((row) => row.entry_id === result.id);
         if (!created) {
