@@ -35,7 +35,7 @@ const filesWithExamples = [
 // ("<path or remote>" = "<scope>").
 const SCOPE_PATTERNS = [
   /ctxd:(?!\/\/)([^\s/`"'\]|]+)\//g,
-  /ctxd:\/\/([^\s/`"'\]|),.]+)/g,
+  /ctxd:\/\/([\w@-]+(?:\.[\w@-]+)*)/g,
   /"scope"\s*:\s*"([^"]+)"/g,
   /^\s*scope\s*=\s*"([^"]+)"/gm,
   /^\s*"[^"]+"\s*=\s*"([^"]+)"/gm,
@@ -51,6 +51,7 @@ describe("docs example scopes", () => {
       `ctxd:${projectName}/01JAB...`,
       `ctxd://${projectName}/decisions/x.md`,
       `ctxd://${projectName}`,
+      `<ctxd://${projectName}>;`,
       `{ "scope": "${projectName}" }`,
       `scope = "${projectName}"`,
       `"~/code/x" = "${projectName}"`,
