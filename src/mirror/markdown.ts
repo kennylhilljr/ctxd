@@ -122,7 +122,26 @@ function relativePath(row: MarkdownRow): string {
     skillName: row.skill_name ?? undefined,
     createdAt: new Date(decodeHlc(row.created_hlc).physical),
   });
-  return uri.slice("ctxd://".length).replace("#", "--");
+  return mirrorRelativePath(uri);
+}
+
+/**
+ * The mirror path, relative to the mirror root, of the entry at ctxd:// `uri`. A journal entry
+ * (`<scope>/journal/<y>/<m>/<d>.md#<slug>`) gets `<d>--<slug>.md`, so its file ends in `.md` like
+ * every other mirror file: it is read back, and its conflict copy is a separate file (#99).
+ */
+export function mirrorRelativePath(uri: string): string {
+  const path = uri.slice("ctxd://".length);
+  const hashAt = path.indexOf("#");
+  if (hashAt < 0) return path;
+  const before = path.slice(0, hashAt);
+  const slug = path.slice(hashAt + 1);
+  return `${before.endsWith(".md") ? before.slice(0, -3) : before}--${slug}.md`;
+}
+
+/** The conflict copy of the mirror file at `path`, never `path` itself (#99). */
+function conflictPathFor(path: string): string {
+  return path.endsWith(".md") ? `${path.slice(0, -3)}.conflict.md` : `${path}.conflict.md`;
 }
 
 /** `path` with a lowercase entry id inserted before its `.md` extension (appended when it has none). */
@@ -215,7 +234,7 @@ export function confirmArchiveRequest(ctx: WriteContext, ref: string): void {
 }
 
 function recordConflict(db: Database.Database, dir: string, path: string, row: MarkdownRow, fileRev: string | undefined, reason: string, text: string): void {
-  const conflictPath = path.replace(/\.md$/, ".conflict.md");
+  const conflictPath = conflictPathFor(path);
   atomicWrite(insideRoot(dir, conflictPath), `<!-- ${reason} -->\n${text}`);
   db.prepare(
     "INSERT INTO mirror_conflicts (path, entry_id, file_rev, current_rev, reason, created_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(path) DO UPDATE SET entry_id=excluded.entry_id, file_rev=excluded.file_rev, current_rev=excluded.current_rev, reason=excluded.reason, created_at=excluded.created_at",
@@ -406,6 +425,26 @@ export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: num
   let applied = 0;
   let conflicts = 0;
   let archiveRequests = 0;
+
+  // A journal file under its pre-#99 name (`<day>.md--<slug>`, never walked: it does not end in `.md`)
+  // moves to `<day>--<slug>.md` first, and is then handled there like any file, tracked or not. Its
+  // tracking moves before the file does, so a stop in between leaves an untracked legacy file with a
+  // tracked target, which the next cycle renames; never a tracked file that reads as deleted. Tracking
+  // is matched ignoring letter case, as on a case-insensitive filesystem. A conflict record at the old
+  // name is dropped: before #99 its copy was the file itself, overwritten by the export.
+  const trackedAs = db.prepare("SELECT path FROM mirror_files WHERE lower(path) = lower(?)");
+  for (const path of legacyJournalFiles(mirrorDir)) {
+    const newPath = path.replace(/(\d{2})\.md--([^/\\]+)$/, "$1--$2.md");
+    const target = insideRoot(mirrorDir, newPath);
+    if (existsSync(target)) continue;
+    const trackedLegacy = (trackedAs.get(path) as { path: string } | undefined)?.path;
+    if (trackedLegacy !== undefined && trackedAs.get(newPath)) continue;
+    db.transaction(() => {
+      if (trackedLegacy !== undefined) db.prepare("UPDATE mirror_files SET path = ? WHERE path = ?").run(newPath, trackedLegacy);
+      db.prepare("DELETE FROM mirror_conflicts WHERE lower(path) = lower(?)").run(path);
+    })();
+    renameSync(insideRoot(mirrorDir, path), target);
+  }
 
   const tracked = db.prepare("SELECT path, entry_id, file_hash FROM mirror_files").all() as { path: string; entry_id: string; file_hash: string }[];
   const trackedPaths = new Set(tracked.map((state) => state.path));
@@ -626,7 +665,7 @@ function isSealedScope(db: Database.Database, scope: string): boolean {
 }
 
 function removeConflict(db: Database.Database, mirrorDir: string, path: string): void {
-  const conflict = insideRoot(mirrorDir, path.replace(/\.md$/, ".conflict.md"));
+  const conflict = insideRoot(mirrorDir, conflictPathFor(path));
   if (existsSync(conflict)) unlinkSync(conflict);
   db.prepare("DELETE FROM mirror_conflicts WHERE path = ?").run(path);
 }
@@ -689,6 +728,29 @@ function trackFile(db: Database.Database, path: string, row: MarkdownRow, conten
   db.prepare(
     "INSERT INTO mirror_files (path, entry_id, content_rev, file_hash, written_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(path) DO UPDATE SET entry_id=excluded.entry_id, content_rev=excluded.content_rev, file_hash=excluded.file_hash, written_at=excluded.written_at",
   ).run(path, row.entry_id, row.content_rev, hash(content), nowIso());
+}
+
+/** Mirror-relative paths of journal files under their pre-#99 name, `<scope>/journal/<y>/<m>/<d>.md--<slug>`. */
+function legacyJournalFiles(mirrorDir: string): string[] {
+  const out: string[] = [];
+  const list = (path: string) => {
+    try {
+      return lstatSync(join(mirrorDir, path)).isDirectory() ? readdirSync(join(mirrorDir, path)) : [];
+    } catch {
+      return [];
+    }
+  };
+  for (const scope of list("")) {
+    for (const year of list(join(scope, "journal")).filter((name) => /^\d{4}$/.test(name))) {
+      for (const month of list(join(scope, "journal", year)).filter((name) => /^\d{2}$/.test(name))) {
+        for (const name of list(join(scope, "journal", year, month))) {
+          const path = join(scope, "journal", year, month, name);
+          if (/^\d{2}\.md--[^/\\]+$/.test(name) && !name.endsWith(".conflict.md") && lstatSync(join(mirrorDir, path)).isFile()) out.push(path);
+        }
+      }
+    }
+  }
+  return out;
 }
 
 function walkMarkdown(dir: string): string[] {

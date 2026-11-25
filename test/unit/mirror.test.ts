@@ -7,7 +7,7 @@ import { HlcClock } from "../../src/core/hlc.js";
 import { newId } from "../../src/core/ids.js";
 import { openDatabase } from "../../src/store/db.js";
 import { writeEntry, type WriteContext } from "../../src/store/write.js";
-import { collidingMirrorFiles, confirmArchiveRequest, exportMarkdown, importMarkdown, parseMarkdown, syncMirror } from "../../src/mirror/markdown.js";
+import { collidingMirrorFiles, confirmArchiveRequest, exportMarkdown, importMarkdown, mirrorRelativePath, parseMarkdown, syncMirror } from "../../src/mirror/markdown.js";
 import { checkMirrorSkips } from "../../src/cli/doctor.js";
 import { setEntryStatus } from "../../src/store/tidy.js";
 import { formatRef } from "../../src/model/refs.js";
@@ -1000,5 +1000,149 @@ describe("mirror paths stay inside the mirror directory (issue 68)", () => {
     f.db.prepare("UPDATE entries SET status = 'deleted' WHERE entry_id = ?").run(id);
     expect(() => syncMirror(f.ctx, f.mirror)).toThrow(/Symbolic links are not allowed in the mirror/);
     expect(readFileSync(victim, "utf8")).toBe("keep me\n");
+  });
+});
+
+describe("journal mirror files (#99)", () => {
+  function journalFixture() {
+    const f = fixture();
+    const result = writeEntry(f.ctx, { scope: "sample-app", kind: "journal", significance: "routine", title: "Journal entry", body: "Original body", request_id: newId() } as never);
+    if ("held" in result) throw new Error("unexpected held write");
+    syncMirror(f.ctx, f.mirror);
+    // Read from mirror_files rather than computed: the journal date uses the local time zone.
+    const { path } = f.db.prepare("SELECT path FROM mirror_files").get() as { path: string };
+    return { ...f, path, file: join(f.mirror, path) };
+  }
+  const body = (f: ReturnType<typeof fixture>) => (f.db.prepare("SELECT body FROM entries").get() as { body: string }).body;
+
+  it("names a journal entry's mirror file <day>--<slug>.md", () => {
+    const f = journalFixture();
+    expect(f.path).toMatch(/^sample-app[/\\]journal[/\\]\d{4}[/\\]\d{2}[/\\]\d{2}--[a-z0-9-]+\.md$/);
+    expect(existsSync(f.file)).toBe(true);
+  });
+
+  it("keeps an edit to a tracked journal file in a separate conflict copy (#99)", () => {
+    const f = journalFixture();
+    writeFileSync(f.file, readFileSync(f.file, "utf8").replace("Original body", "Edited journal body"));
+    expect(syncMirror(f.ctx, f.mirror)).toMatchObject({ applied: 0, conflicts: 1 });
+    expect(body(f)).toBe("Original body");
+    expect(readFileSync(f.file.replace(/\.md$/, ".conflict.md"), "utf8")).toContain("Edited journal body");
+    expect(readFileSync(f.file, "utf8")).toContain("Original body");
+    expect(f.db.prepare("SELECT path FROM mirror_conflicts").all()).toEqual([{ path: f.path }]);
+  });
+
+  it("reads back an edited journal file that was written but not tracked (#99)", () => {
+    const f = journalFixture();
+    f.db.prepare("DELETE FROM mirror_files").run();
+    writeFileSync(f.file, readFileSync(f.file, "utf8").replace("Original body", "Edited journal body"));
+    expect(syncMirror(f.ctx, f.mirror)).toMatchObject({ conflicts: 1 });
+    expect(readFileSync(f.file.replace(/\.md$/, ".conflict.md"), "utf8")).toContain("Edited journal body");
+    expect(body(f)).toBe("Original body");
+  });
+
+  /** Moves the tracked journal file to its pre-#99 name, `<day>.md--<slug>`. */
+  function toLegacy(f: ReturnType<typeof journalFixture>): string {
+    const legacy = f.path.replace(/(\d{2})--([a-z0-9-]+)\.md$/, "$1.md--$2");
+    expect(legacy).not.toBe(f.path);
+    renameSync(f.file, join(f.mirror, legacy));
+    f.db.prepare("UPDATE mirror_files SET path = ? WHERE path = ?").run(legacy, f.path);
+    return legacy;
+  }
+
+  it("moves a journal file tracked under its old name to the new name (#99)", () => {
+    const f = journalFixture();
+    const legacy = toLegacy(f);
+    syncMirror(f.ctx, f.mirror);
+    expect(existsSync(join(f.mirror, legacy))).toBe(false);
+    expect(existsSync(f.file)).toBe(true);
+    expect(f.db.prepare("SELECT path FROM mirror_files").all()).toEqual([{ path: f.path }]);
+    expect(f.db.prepare("SELECT COUNT(*) AS n FROM archive_requests").get()).toEqual({ n: 0 });
+  });
+
+  it("moves a journal file under its old name and keeps its edit as a conflict copy (#99)", () => {
+    const f = journalFixture();
+    const legacy = toLegacy(f);
+    const legacyFile = join(f.mirror, legacy);
+    writeFileSync(legacyFile, readFileSync(legacyFile, "utf8").replace("Original body", "Edited legacy body"));
+    expect(syncMirror(f.ctx, f.mirror)).toMatchObject({ conflicts: 1 });
+    expect(readFileSync(f.file.replace(/\.md$/, ".conflict.md"), "utf8")).toContain("Edited legacy body");
+    expect(existsSync(`${legacyFile}.conflict.md`)).toBe(false);
+    expect(existsSync(legacyFile)).toBe(false);
+    expect(f.db.prepare("SELECT path FROM mirror_conflicts").all()).toEqual([{ path: f.path }]);
+    expect(readFileSync(f.file, "utf8")).toContain("Original body");
+    expect(body(f)).toBe("Original body");
+  });
+
+  it("finishes moving a journal file whose tracking moved before a stop (#99)", () => {
+    const f = journalFixture();
+    const legacyFile = join(f.mirror, toLegacy(f));
+    writeFileSync(legacyFile, readFileSync(legacyFile, "utf8").replace("Original body", "Edited legacy body"));
+    f.db.prepare("UPDATE mirror_files SET path = ?").run(f.path); // the stop came before the rename
+    expect(syncMirror(f.ctx, f.mirror)).toMatchObject({ conflicts: 1, archiveRequests: 0 });
+    expect(existsSync(legacyFile)).toBe(false);
+    expect(readFileSync(f.file.replace(/\.md$/, ".conflict.md"), "utf8")).toContain("Edited legacy body");
+    expect(f.db.prepare("SELECT path FROM mirror_conflicts").all()).toEqual([{ path: f.path }]);
+    expect(syncMirror(f.ctx, f.mirror)).toMatchObject({ applied: 0, conflicts: 0 });
+  });
+
+  it("reconciles an untracked journal file under its old name at its new name (#99)", () => {
+    for (const edited of [false, true]) {
+      const f = journalFixture();
+      const legacyFile = join(f.mirror, toLegacy(f));
+      f.db.prepare("DELETE FROM mirror_files").run();
+      if (edited) writeFileSync(legacyFile, readFileSync(legacyFile, "utf8").replace("Original body", "Edited legacy body"));
+      expect(syncMirror(f.ctx, f.mirror)).toMatchObject({ conflicts: edited ? 1 : 0 });
+      expect(existsSync(legacyFile)).toBe(false);
+      const conflict = f.file.replace(/\.md$/, ".conflict.md");
+      expect(existsSync(conflict)).toBe(edited);
+      if (edited) expect(readFileSync(conflict, "utf8")).toContain("Edited legacy body");
+      expect(readFileSync(f.file, "utf8")).toContain("Original body");
+      expect(f.db.prepare("SELECT path FROM mirror_files").all()).toEqual([{ path: f.path }]);
+      expect(body(f)).toBe("Original body");
+    }
+  });
+
+  it("removes an untracked journal file under its old name once its entry is purged (#99, #91)", () => {
+    const f = journalFixture();
+    const legacyFile = join(f.mirror, toLegacy(f));
+    f.db.prepare("DELETE FROM mirror_files").run();
+    const { entry_id: id } = f.db.prepare("SELECT entry_id FROM entries").get() as { entry_id: string };
+    purgeEntry(f.ctx, formatRef("sample-app", id), "test");
+    syncMirror(f.ctx, f.mirror);
+    expect(existsSync(legacyFile)).toBe(false);
+    expect(existsSync(f.file)).toBe(false);
+  });
+
+  it("converges after moving a journal file from its old name, whatever its tracking, edit and stop point (#99, property)", () => {
+    fc.assert(fc.property(fc.constantFrom("tracked", "untracked", "moved-row"), fc.boolean(), fc.boolean(), fc.nat({ max: 2 }), (tracking, edited, oldConflict, extraCycles) => {
+      const f = journalFixture();
+      const legacy = toLegacy(f);
+      const legacyFile = join(f.mirror, legacy);
+      if (edited) writeFileSync(legacyFile, readFileSync(legacyFile, "utf8").replace("Original body", "Edited legacy body"));
+      if (tracking === "untracked") f.db.prepare("DELETE FROM mirror_files").run();
+      if (tracking === "moved-row") f.db.prepare("UPDATE mirror_files SET path = ?").run(f.path); // a stop before the rename
+      if (oldConflict) {
+        // A review item left by the pre-#99 bug, whose copy was the file itself.
+        const { entry_id: id } = f.db.prepare("SELECT entry_id FROM entries").get() as { entry_id: string };
+        f.db.prepare("INSERT INTO mirror_conflicts (path, entry_id, file_rev, current_rev, reason, created_at) VALUES (?, ?, NULL, '1', 'old', ?)").run(legacy, id, new Date().toISOString());
+      }
+      const events = count(f, "events");
+      expect(syncMirror(f.ctx, f.mirror)).toMatchObject({ applied: 0, conflicts: edited ? 1 : 0, archiveRequests: 0 });
+      for (let i = 0; i < extraCycles; i++) expect(syncMirror(f.ctx, f.mirror)).toMatchObject({ applied: 0, conflicts: 0, archiveRequests: 0 });
+      expect(count(f, "events")).toBe(events);
+      expect(existsSync(legacyFile)).toBe(false);
+      expect(readFileSync(f.file, "utf8")).toContain("Original body");
+      const conflict = f.file.replace(/\.md$/, ".conflict.md");
+      expect(existsSync(conflict)).toBe(edited);
+      if (edited) expect(readFileSync(conflict, "utf8")).toContain("Edited legacy body");
+      expect(f.db.prepare("SELECT path FROM mirror_conflicts").all()).toEqual(edited ? [{ path: f.path }] : []);
+      expect(f.db.prepare("SELECT path FROM mirror_files").all()).toEqual([{ path: f.path }]);
+      expect(body(f)).toBe("Original body");
+    }), { numRuns: 30 });
+  });
+
+  it("maps a ctxd:// path to its mirror path (#99)", () => {
+    expect(mirrorRelativePath("ctxd://s/journal/2026/11/25.md#abc-123456")).toBe("s/journal/2026/11/25--abc-123456.md");
+    expect(mirrorRelativePath("ctxd://s/notes/x-123456.md")).toBe("s/notes/x-123456.md");
   });
 });
