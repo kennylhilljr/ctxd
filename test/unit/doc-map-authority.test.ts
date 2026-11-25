@@ -59,8 +59,13 @@ describe("doc map is authoritative for latest LLD versions (issue 90)", () => {
 
   it("the latest Spec routes every section to the LLD or contract version the map lists", () => {
     const spec = read(latestSpec());
-    // From the section table to the open issues: routing tables and section summaries, not the change list.
-    const routing = spec.slice(spec.indexOf("## How this spec is organized"), spec.search(/^## 16\. /m));
+    // Routing tables and section summaries: everything from the section table on, except the change list
+    // above it and section 16 (open issues), whose resolved items record history.
+    const start = spec.indexOf("## How this spec is organized");
+    const openIssues = spec.search(/^## 16\. /m);
+    const afterOpenIssues = spec.slice(openIssues + 1).search(/^## \d+\. /m);
+    const routing =
+      spec.slice(start, openIssues) + (afterOpenIssues < 0 ? "" : spec.slice(openIssues + 1 + afterOpenIssues));
     const mapped = new Set(links(map).map((l) => l.path));
     const routed = links(routing);
     expect(routed.length).toBeGreaterThan(0);
