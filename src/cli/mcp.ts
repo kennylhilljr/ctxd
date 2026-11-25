@@ -93,16 +93,23 @@ function resolveToken(configPath: string, clientName: string, poolIds: readonly 
 type JsonRpcId = string | number | null;
 
 /**
- * What a stdin line asks for: `parse-error` if it is not JSON, otherwise the ids of the requests in
- * it (a notification has no id, so a line of notifications yields none). A batch array yields one
- * id per request in it.
+ * What a stdin line asks for: `parse-error` if it is not JSON, otherwise the ids that each need one
+ * response, in order. A request contributes its id. A notification (a method, no id) and a response
+ * the client is sending back (no method, a result or error) contribute none. Anything else is an
+ * invalid request, answered with id null as JSON-RPC 2.0 requires. An empty batch is one invalid
+ * request, answered with a single object rather than an array.
  */
 type ParsedLine = { kind: "parse-error" } | { kind: "message"; ids: JsonRpcId[]; batch: boolean };
 
-function requestIdOf(message: unknown): JsonRpcId | undefined {
-  if (typeof message !== "object" || message === null || Array.isArray(message) || !("id" in message)) return undefined;
-  const id = (message as { id: unknown }).id;
-  return typeof id === "string" || typeof id === "number" || id === null ? id : undefined;
+function pendingIdOf(message: unknown): JsonRpcId | undefined {
+  if (typeof message !== "object" || message === null || Array.isArray(message)) return null;
+  const m = message as Record<string, unknown>;
+  if (typeof m.method === "string") {
+    if (!("id" in m)) return undefined; // a notification
+    return typeof m.id === "string" || typeof m.id === "number" || m.id === null ? m.id : null;
+  }
+  if ("id" in m && ("result" in m || "error" in m)) return undefined; // the client answering a server request
+  return null;
 }
 
 function parseLine(line: string): ParsedLine {
@@ -112,8 +119,9 @@ function parseLine(line: string): ParsedLine {
   } catch {
     return { kind: "parse-error" };
   }
+  if (Array.isArray(parsed) && parsed.length === 0) return { kind: "message", ids: [null], batch: false };
   const messages = Array.isArray(parsed) ? parsed : [parsed];
-  const ids = messages.map(requestIdOf).filter((id): id is JsonRpcId => id !== undefined);
+  const ids = messages.map(pendingIdOf).filter((id): id is JsonRpcId => id !== undefined);
   return { kind: "message", ids, batch: Array.isArray(parsed) };
 }
 
@@ -182,7 +190,7 @@ export function responseFor(line: string, reply: HttpReply): string | null {
   const bodies = reply.contentType.includes("text/event-stream") ? parseSseMessages(reply.body).map(parseJson) : [parseJson(reply.body)];
   const received = bodies.flatMap((b) => (Array.isArray(b) ? b : [b])).filter(isJsonRpcResponse);
 
-  // The error every request without its own response gets: an id-null transport error if the server sent one, else one built from the reply.
+  // The error every request without its own response gets: an id-null error if the server sent one, else one built from the reply.
   const uncorrelated = received.find((r) => r.id === null && "error" in r);
   let fallback: (id: JsonRpcId) => Record<string, unknown>;
   if (uncorrelated) fallback = (id) => ({ ...uncorrelated, id });
@@ -198,7 +206,7 @@ export function responseFor(line: string, reply: HttpReply): string | null {
   }
 
   const byId = new Map<JsonRpcId, JsonRpcResponse>();
-  for (const r of received) if (r.id !== null && !byId.has(r.id)) byId.set(r.id, r);
+  for (const r of received) if (!byId.has(r.id)) byId.set(r.id, r);
   const responses = parsed.ids.map((id) => byId.get(id) ?? fallback(id));
   return JSON.stringify(parsed.batch ? responses : responses[0]);
 }

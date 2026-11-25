@@ -130,6 +130,24 @@ describe("ctxd mcp launcher: transport errors become JSON-RPC errors (#81)", () 
     expect(out[2]).toMatchObject({ id: 3, error: { code: -32603 } });
   });
 
+  it("writes nothing for a response the client sends back to the server (HTTP 202, empty body)", () => {
+    const clientResponse = JSON.stringify({ jsonrpc: "2.0", id: 8, result: {} });
+    expect(responseFor(clientResponse, { status: 202, contentType: "", body: "" })).toBeNull();
+  });
+
+  it("passes through the server's result for a request with an explicit null id", () => {
+    const result = { jsonrpc: "2.0", id: null, result: { tools: [] } };
+    expect(JSON.parse(responseFor(call(null), { status: 200, contentType: "application/json", body: JSON.stringify(result) })!)).toEqual(result);
+  });
+
+  it.each([
+    ["an object with neither method nor result", "{}"],
+    ["an empty batch", "[]"],
+  ])("answers %s as one invalid request with id null", (_label, line) => {
+    const out = JSON.parse(responseFor(line, { status: 400, contentType: "application/json", body: "" })!);
+    expect(out).toMatchObject({ jsonrpc: "2.0", id: null, error: { code: -32603 } });
+  });
+
   it("writes nothing for a notification, even when the server fails", async () => {
     const { listen } = await fakeServer(replyWith(500, JSON.stringify({ error: { code: "VALIDATION", message: "Internal error" } })));
     expect(await proxyLine(listen, "t", notification)).toBeNull();
