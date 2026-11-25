@@ -200,6 +200,15 @@ function recordSkip(db: Database.Database, path: string, err: unknown): void {
   ).run(skipKey(path), sanitizeCapture(path, 1000), code, reason, at, at);
 }
 
+/** A pending import (attempts 0) until it moves or fails; a failure then records the real reason. */
+function markImportPending(db: Database.Database, path: string): void {
+  const at = nowIso();
+  db.prepare(
+    `INSERT OR IGNORE INTO mirror_skips (path_key, path, code, reason, attempts, first_skipped_at, last_skipped_at)
+     VALUES (?, ?, 'PENDING_MOVE', 'Imported; not yet moved to its canonical path', 0, ?, ?)`,
+  ).run(skipKey(path), sanitizeCapture(path, 1000), at, at);
+}
+
 function clearSkip(db: Database.Database, path: string): void {
   db.prepare("DELETE FROM mirror_skips WHERE path_key = ?").run(skipKey(path));
 }
@@ -225,8 +234,8 @@ function setReviewAfter(ctx: WriteContext, row: MarkdownRow, value: string | nul
 /**
  * The request id for importing an untracked mirror file, derived from its path and content (#83).
  * Ids form a chain: each later import of the same path and content is keyed on the entry the
- * previous one created. While a failed import of this path is pending (a `mirror_skips` row, which
- * a failed mkdir or rename leaves behind), the last id in the chain is reused, so the retry replays
+ * previous one created. While an import of this path is pending (a `mirror_skips` row, written
+ * before the import commits and kept by a failed mkdir or rename), the last id in the chain is reused, so the retry replays
  * that write through writeEntry's idempotency check instead of creating a duplicate entry.
  * Otherwise the next id is used, so a file put back after a completed import is a new entry.
  */
@@ -326,9 +335,12 @@ export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: num
          WHERE s.name = ? AND p.storage = 'sealed' LIMIT 1`,
       ).get(scope);
       if (sealed) throw new CtxdError("SCOPE_FORBIDDEN", `Mirror writes to sealed scope ${scope} are refused`);
+      const requestId = importRequestId(db, ctx.clientId, path, text);
+      // Mark the import pending before it commits, so a crash before the move still replays it.
+      markImportPending(db, path);
       const result = writeEntry(ctx, {
         scope, kind: parsed.meta.kind ?? "note", title: parsed.title, body: parsed.body,
-        tags: parsed.meta.tags, request_id: importRequestId(db, ctx.clientId, path, text),
+        tags: parsed.meta.tags, request_id: requestId,
       } as never);
       if (!("held" in result)) {
         const created = rows(db).find((row) => row.entry_id === result.id);
