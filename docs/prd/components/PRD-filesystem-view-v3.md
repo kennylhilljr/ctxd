@@ -7,7 +7,7 @@
 | **Supersedes** | [v2](PRD-filesystem-view-v2.md) |
 | **Parent** | [ctxd PRD v8](../PRD-v8.md) |
 | **Siblings** | [Knowledge model](PRD-knowledge-model-v4.md), [Skills](PRD-skills-v3.md), [Memory and journal](PRD-memory-journal-v2.md), [Persona pools and access](PRD-pools-access-v4.md), [Hooks and agent lifecycle](PRD-hooks-v6.md), [Claims and write intent](PRD-claims-v4.md), [Trust and safety](PRD-trust-safety-v5.md), [Context hygiene](PRD-context-hygiene-v2.md), [Replication](PRD-replication-v7.md), [Briefs and search](PRD-briefs-search-v5.md) |
-| **Spec** | [Spec v10](../../spec/SPEC-v10.md) (HLD) sections 4.2, 8.2 (`path`), 12.1 and 13; detail in [LLD: Data model](../../lld/LLD-data-model-v1.md), [LLD: Operations](../../lld/LLD-operations-v1.md) |
+| **Spec** | [Spec v10](../../spec/SPEC-v10.md) (HLD) sections 4.2, 8.2 (`path`), 12.1 and 13; detail in [LLD: Data model](../../lld/LLD-data-model-v1.md), [LLD: Operations](../../lld/LLD-operations-v2.md) |
 | **Acceptance tests** | [Test plan v1](../../test/test-plan-v1.md), FS section |
 | **Parent requirements elaborated** | FR-19, FR-43 to FR-45; NFR-1 |
 | **Adapted from** | [OpenViking](https://github.com/volcengine/OpenViking) `viking://` filesystem and L0/L1/L2 directory tiers; [memory-journal-mcp](https://github.com/neverinfamous/memory-journal-mcp) Markdown round trip |
@@ -16,7 +16,7 @@
 
 Earlier changes are listed in [v2](PRD-filesystem-view-v2.md) and before.
 
-- **Name validation and mirror containment.** New requirements FS-9 and FS-10, stated by the owner in [issue 77](https://github.com/kennylhilljr/ctxd/issues/77), and criteria FS-AC-6 to FS-AC-11, derived from them, [LLD: Data model](../../lld/LLD-data-model-v1.md) section 4 and [LLD: Operations](../../lld/LLD-operations-v1.md) 12.1. The 5 earlier criteria are unchanged; there are now 11.
+- **Name validation and mirror containment.** New requirements FS-9 and FS-10, stated by the owner in [issue 77](https://github.com/kennylhilljr/ctxd/issues/77), and criteria FS-AC-6 to FS-AC-11, derived from them, [LLD: Data model](../../lld/LLD-data-model-v1.md) section 4 and [LLD: Operations](../../lld/LLD-operations-v2.md) 12.1. The 5 earlier criteria are unchanged; there are now 11.
 - **Links.** The header names NFR-1, which FS-9 and FS-10 also trace to; sibling links point to current versions.
 
 ## 1. Purpose
@@ -106,7 +106,7 @@ No new MCP tools are added:
 
 ## 7. Acceptance criteria
 
-> Owner: A (agent-generated) by persona `product-writer`, derived from the requirements above; pending the owner's approval at Gate 1. Verification status per criterion: [test plan](../../test/test-plan-v1.md). FS-9 and FS-10 were stated by the owner in [issue 77](https://github.com/kennylhilljr/ctxd/issues/77); FS-AC-6 to FS-AC-11 derive from them and [LLD: Data model](../../lld/LLD-data-model-v1.md) section 4 and [LLD: Operations](../../lld/LLD-operations-v1.md) 12.1.
+> Owner: A (agent-generated) by persona `product-writer`, derived from the requirements above; pending the owner's approval at Gate 1. Verification status per criterion: [test plan](../../test/test-plan-v1.md). FS-9 and FS-10 were stated by the owner in [issue 77](https://github.com/kennylhilljr/ctxd/issues/77); FS-AC-6 to FS-AC-11 derive from them and [LLD: Data model](../../lld/LLD-data-model-v1.md) section 4 and [LLD: Operations](../../lld/LLD-operations-v2.md) 12.1.
 
 | ID | EARS pattern | Acceptance criterion | Traces to |
 |---|---|---|---|
