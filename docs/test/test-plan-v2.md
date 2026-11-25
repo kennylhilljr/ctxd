@@ -7,7 +7,7 @@
 | **Layer** | L4 verification: maps every acceptance criterion to the tests that verify it |
 | **Owner** | A (agent-generated) by persona `test-architect`; the owner reviews coverage, not each case, at Gate 3 |
 | **Inputs** | Acceptance criteria in the current component PRDs ([PRD v8](../prd/PRD-v8.md) section 6.1 lists them); tests in `test/unit/` and `test/conformance/` |
-| **Supersedes** | [v1](test-plan-v1.md), which later changes updated in place as criteria and tests were added (for example #77, #83, #88, #91, #95). v2 publishes those mappings; the rows, statuses and counts are v1 as it stands (#102) |
+| **Supersedes** | [v1](test-plan-v1.md). Later changes amended v1 in place as criteria and tests were added (for example #77, #83, #88, #91, #95), against the versioning rule. v2 carries v1 as it stands, with the same rows, statuses and counts; v1 keeps the amended text for history and is not reconstructed (#102) |
 | **Strategy** | [Spec v10](../spec/SPEC-v10.md) section 14 (test layers and tooling) |
 
 Every acceptance criterion in the component PRDs has an ID (`<prefix>-AC-n`). This plan maps each ID to the tests that verify it. It was first mapped at commit `9ffeea9` and updated as the W1 to W6 workstreams merged; each link is re-resolved by test title, so line numbers stay current. Counts: **106 criteria**; Covered: 53, Diverges: 1, Gap: 8, Partial: 44.
