@@ -372,7 +372,8 @@ CREATE TABLE mirror_skips (            -- local only: new mirror files that coul
   reason           TEXT NOT NULL,
   attempts         INTEGER NOT NULL DEFAULT 1,
   first_skipped_at TEXT NOT NULL,
-  last_skipped_at  TEXT NOT NULL
+  last_skipped_at  TEXT NOT NULL,
+  pending_request_id TEXT              -- a committed import not yet moved to its canonical path (#83)
 );
 
 CREATE TABLE tool_metrics (            -- local only: response metering (8.5)

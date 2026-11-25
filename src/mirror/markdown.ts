@@ -206,7 +206,7 @@ function markImportPending(db: Database.Database, path: string, requestId: strin
   db.prepare(
     `INSERT INTO mirror_skips (path_key, path, code, reason, attempts, first_skipped_at, last_skipped_at, pending_request_id)
      VALUES (?, ?, 'PENDING_MOVE', 'Imported; not yet moved to its canonical path', 0, ?, ?, ?)
-     ON CONFLICT(path_key) DO UPDATE SET pending_request_id = excluded.pending_request_id`,
+     ON CONFLICT(path_key) DO UPDATE SET code = excluded.code, reason = excluded.reason, pending_request_id = excluded.pending_request_id`,
   ).run(skipKey(path), sanitizeCapture(path, 1000), at, at, requestId);
 }
 
