@@ -362,9 +362,15 @@ export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: num
           // the move was failing): leave the file and record why, rather than importing it again.
           throw new CtxdError("NOT_ALLOWED", "This file was already imported as an entry that is no longer active; edit it to import a new entry");
         }
-        const target = insideRoot(mirrorDir, relativePath(created));
-        mkdirSync(dirname(target), { recursive: true });
-        if (resolve(file) !== resolve(target)) renameSync(file, target);
+        // Write the entry, with its ref, at the canonical path and track it before removing the source,
+        // so a stop at any point leaves either the pending source (replayed next cycle) or a file that
+        // already names its entry, never an untracked copy without a ref that would import again (#85).
+        const relTarget = relativePath(created);
+        const target = insideRoot(mirrorDir, relTarget);
+        const content = renderMarkdown(created);
+        atomicWrite(target, content);
+        trackFile(db, relTarget, created, content);
+        if (resolve(file) !== resolve(target)) unlinkSync(file);
         applied++;
       }
       clearSkip(db, path);
@@ -384,12 +390,16 @@ export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: num
     const path = relativePath(row);
     const content = renderMarkdown(row);
     atomicWrite(insideRoot(mirrorDir, path), content);
-    db.prepare(
-      "INSERT INTO mirror_files (path, entry_id, content_rev, file_hash, written_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(path) DO UPDATE SET entry_id=excluded.entry_id, content_rev=excluded.content_rev, file_hash=excluded.file_hash, written_at=excluded.written_at",
-    ).run(path, row.entry_id, row.content_rev, hash(content), nowIso());
+    trackFile(db, path, row, content);
     written++;
   }
   return { written, applied, conflicts, archiveRequests };
+}
+
+function trackFile(db: Database.Database, path: string, row: MarkdownRow, content: string): void {
+  db.prepare(
+    "INSERT INTO mirror_files (path, entry_id, content_rev, file_hash, written_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(path) DO UPDATE SET entry_id=excluded.entry_id, content_rev=excluded.content_rev, file_hash=excluded.file_hash, written_at=excluded.written_at",
+  ).run(path, row.entry_id, row.content_rev, hash(content), nowIso());
 }
 
 function walkMarkdown(dir: string): string[] {
