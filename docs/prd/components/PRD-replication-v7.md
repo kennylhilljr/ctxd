@@ -46,11 +46,11 @@ Each machine runs its own ctxd with a full copy of the scopes it may hold. Agent
 
 **Embeddings replicate** ([ADR 0004](../../adr/0004-embeddings-replicate.md), new in v5). A machine with the `semantic_search.compute` flag on computes a vector for each entry revision it writes, using a small, fixed, CPU-friendly local model, and tags it with the model's id and dimension. The vector is carried through sync exactly like any other part of the entry, under the same scope replication and vendor policy. Any machine can serve hybrid search over whatever vectors have already arrived, whether or not it computed them itself: this is what lets the temporary Intel Air hub serve search without ever running the model, and lets the eventual Mac Studio hub take over computing once it arrives, with no change needed on other machines. A revision with no vector yet (nothing with `semantic_search.compute` on has processed it) is not an error; search for it falls back to full-text only, same as `semantic_search` off does everywhere.
 
-**Access metadata.** Pools, grants, memberships, tags and temporary grants replicate to every machine, so an agent has the same access everywhere ([Persona pools and access](PRD-pools-access-v3.md)). Only changes made by the human client are accepted.
+**Access metadata.** Pools, grants, memberships, tags and temporary grants replicate to every machine, so an agent has the same access everywhere ([Persona pools and access](PRD-pools-access-v4.md)). Only changes made by the human client are accepted.
 
 **Holding scopes** (`_hold.<client>`) replicate only to home machines, never to the roaming laptop.
 
-**Sealed pools** ([Persona pools and access](PRD-pools-access-v3.md) section 7.1) replicate only to machines I enroll for them. Their changes are encrypted with the pool key before they leave the machine, so a machine that relays them without the key, or a backup, holds only ciphertext. Embeddings for a sealed scope's entries are exactly as restricted: encrypted the same way, never computed or stored outside the enrolled machines.
+**Sealed pools** ([Persona pools and access](PRD-pools-access-v4.md) section 7.1) replicate only to machines I enroll for them. Their changes are encrypted with the pool key before they leave the machine, so a machine that relays them without the key, or a backup, holds only ciphertext. Embeddings for a sealed scope's entries are exactly as restricted: encrypted the same way, never computed or stored outside the enrolled machines.
 
 **Persona tokens.** Token hashes, rotations and revocations replicate, so a revoked token stops working everywhere. Token secrets never leave the Keychain of the machine where they were issued; each machine issues its own.
 

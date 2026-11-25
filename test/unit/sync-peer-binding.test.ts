@@ -127,6 +127,25 @@ describe("peer-bound replication (LLD replication 7.7)", () => {
     expect(target.db.prepare("SELECT 1 FROM entries WHERE entry_id = ?").get(unsigned.entryId)).toBeUndefined();
   });
 
+  // RP-AC-7: an unsigned purge is refused too, and the entry it targets keeps its content.
+  it("refuses an unsigned purge event a key-bound peer relays, leaving the entry intact", async () => {
+    const target = node("target");
+    const { peerId } = bound(target);
+    const note = wroteNote(target, false);
+    const eventId = newId();
+    const originNode = newId();
+    const purge: WireEvent = {
+      eventId, originNode, originSeq: 1, hlc: encodeHlc({ physical: Date.now(), counter: 0, node: originNode }),
+      scopeId: target.scopeId, entryId: note.entryId, op: "purge", part: "meta", parentRevs: [], rev: makeRev(1, eventId),
+      clientId: target.humanId, sessionRef: null, requestId: null, requestHash: null,
+      payload: { fingerprint: "deadbeef", reason: "forged", scope_id: target.scopeId, kind: "note", slug: "note" }, prev: null,
+    };
+    await expect(pull(target, peerId, [purge])).resolves.toMatchObject({ rejected: 1 });
+    expect(rejection(target, eventId)).toMatch(/refused unsigned event/);
+    expect(target.db.prepare("SELECT 1 FROM events WHERE event_id = ?").get(eventId)).toBeUndefined();
+    expect(target.db.prepare("SELECT title, purged_at FROM entries WHERE entry_id = ?").get(note.entryId)).toEqual({ title: "Note", purged_at: null });
+  });
+
   // RP-AC-10
   it("applies a signed event a key-bound peer relays from another pinned origin", async () => {
     const target = node("target");

@@ -481,7 +481,7 @@ describe("locally written names that would escape the Markdown mirror are reject
   });
 
   // FS-AC-8
-  it("rejects a local skill write whose name is traversing or over 64 characters, storing no event", () => {
+  it("rejects a local skill write whose name is missing, traversing or over 64 characters, storing no event", () => {
     const f = setup();
     appendAclEvent(local(f), deterministicId("scope", "sample-app"), { action: "scope_create", name: "sample-app", kind: "project", replication: "all", vendor_policy: "any" });
     const events = () => (f.db.prepare("SELECT COUNT(*) AS n FROM events").get() as { n: number }).n;
@@ -490,6 +490,9 @@ describe("locally written names that would escape the Markdown mirror are reject
       const body = `---\nname: ${title}\ndescription: A sample skill\n---\nSteps`;
       expect(() => writeEntry(local(f), { scope: "sample-app", kind: "skill", title, body, request_id: newId() } as never)).toThrow(/title must be the skill name/);
     }
+    // Missing: no title, or a SKILL.md with no name in its frontmatter.
+    expect(() => writeEntry(local(f), { scope: "sample-app", kind: "skill", title: "", body: "---\ndescription: A sample skill\n---\nSteps", request_id: newId() } as never)).toThrow();
+    expect(() => writeEntry(local(f), { scope: "sample-app", kind: "skill", title: "sample-skill", body: "---\ndescription: A sample skill\n---\nSteps", request_id: newId() } as never)).toThrow(/frontmatter needs name/);
     expect(events()).toBe(before);
     expect(f.db.prepare("SELECT COUNT(*) AS n FROM entries WHERE kind = 'skill'").get()).toEqual({ n: 0 });
   });

@@ -55,6 +55,21 @@ describe("test plan traceability", () => {
     expect(stale).toEqual([]);
   });
 
+  it("links every file-only test reference to a file that declares a test with the quoted title", () => {
+    const links = [...plan.matchAll(/\[`[\w.-]+\.test\.tsx?`\]\(\.\.\/\.\.\/(test\/[\w/.-]+)\) ([^<|]+)/g)];
+    const stale: string[] = [];
+    for (const [, path, title] of links) {
+      if (!existsSync(join(root, path!))) {
+        stale.push(path!);
+        continue;
+      }
+      const quoted = title!.replaceAll("`", "").trim().slice(0, 40);
+      const declared = read(path!).split("\n").some((l) => /\b(it|test|describe)(\.\w+)?\(/.test(l) && l.includes(quoted));
+      if (!declared) stale.push(`${path} ${quoted}`);
+    }
+    expect(stale).toEqual([]);
+  });
+
   it("cites each security hardening criterion from issue 77 in at least one test", () => {
     const tests = ["sealed-key-transfer-http", "sync-peer-binding", "sync-acl", "mirror"].map((f) => read(`test/unit/${f}.test.ts`)).join("\n");
     const ids = [
