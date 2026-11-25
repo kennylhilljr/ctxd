@@ -276,7 +276,7 @@ describe("Markdown export and mirror (Spec v9 section 12.1)", () => {
     expect(syncMirror(f.ctx, f.mirror)).toMatchObject({ written: 0, applied: 0, conflicts: 0 });
   });
 
-  it("keeps an edit to an untracked file of an entry no longer mirrored as a conflict copy (#91, FS-AC-4)", () => {
+  it("keeps an edit to an untracked file of an entry no longer mirrored as a conflict copy (#91)", () => {
     const f = fixture(); const file = writtenButUntracked(f);
     writeFileSync(file, readFileSync(file, "utf8").replace("Original body", "Edited while stopped"));
     setEntryStatus(f.ctx, entryRef(f), "quarantined");
@@ -310,6 +310,27 @@ describe("Markdown export and mirror (Spec v9 section 12.1)", () => {
       expect(count(f, "entries")).toBe(1);
       expect((f.db.prepare("SELECT COUNT(*) AS n FROM mirror_skips").get() as { n: number }).n).toBe(0);
     }
+  });
+
+  it("keeps a sealed-scope note whose body only mentions a ref, and removes one with an indented single-quoted ref (#91)", () => {
+    const f = fixture(); createNote(f); syncMirror(f.ctx, f.mirror);
+    sealScope(f);
+    const note = join(f.mirror, "sample-app", "notes", "plain.md");
+    const quoted = join(f.mirror, "sample-app", "notes", "quoted.md");
+    writeFileSync(note, '---\nkind: "note"\n---\n# Plain\n\nref: "ctxd:sample-app/01JABCDEF000000000007K2PQZ"\n');
+    writeFileSync(quoted, "---\n  ref: 'ctxd:sample-app/01JABCDEF000000000007K2PQZ'\nkind: note\n# Quoted\n\nBody\n");
+    syncMirror(f.ctx, f.mirror);
+    expect(existsSync(note)).toBe(true); // a new note, refused and skipped (#72)
+    expect(existsSync(quoted)).toBe(false);
+  });
+
+  it("keeps an untracked file with broken frontmatter as a conflict copy when its entry is archived (#91)", () => {
+    const f = fixture(); const file = writtenButUntracked(f);
+    writeFileSync(file, readFileSync(file, "utf8").replace(/\n---\n/, "\n"));
+    setEntryStatus(f.ctx, entryRef(f), "archived");
+    expect(syncMirror(f.ctx, f.mirror)).toMatchObject({ conflicts: 1 });
+    expect(existsSync(file)).toBe(false);
+    expect(existsSync(file.replace(/\.md$/, ".conflict.md"))).toBe(true);
   });
 
   it("keeps an untracked file whose tags line was removed as a conflict copy when its entry is archived (#91)", () => {
@@ -363,7 +384,9 @@ describe("Markdown export and mirror (Spec v9 section 12.1)", () => {
       if (change === "purged") purgeEntry(f.ctx, entryRef(f), "test");
       else if (change === "sealed") sealScope(f);
       else f.db.prepare("UPDATE entries SET status = ?").run(change); // the status alone decides mirroring
+      const events = count(f, "events");
       syncMirror(f.ctx, f.mirror);
+      expect(count(f, "events")).toBe(events); // cleanup records no events
       const after = readdirSync(f.mirror, { recursive: true }).sort();
       for (let i = 0; i < extraCycles; i++) expect(syncMirror(f.ctx, f.mirror)).toEqual({ written: 0, applied: 0, conflicts: 0, archiveRequests: 0 });
       expect(readdirSync(f.mirror, { recursive: true }).sort()).toEqual(after);

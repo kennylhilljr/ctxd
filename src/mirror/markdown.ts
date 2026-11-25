@@ -411,7 +411,8 @@ export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: num
       // A file ctxd rendered (it has a `ref` line) in a sealed scope's folder is plaintext that must
       // not stay on disk (Spec 12.1). Sealing erases the scope's entries from this database, so the
       // file is matched by folder, not by entry, and removed even if its frontmatter is broken (#91).
-      if (/^ref:\s*"?ctxd:/m.test(text) && isSealedScope(db, path.split(/[\\/]/)[0] ?? "")) {
+      const ref = frontmatterRef(text);
+      if (ref !== undefined && isSealedScope(db, path.split(/[\\/]/)[0] ?? "")) {
         removeWithConflict(db, mirrorDir, path);
         clearSkip(db, path);
         continue;
@@ -436,10 +437,15 @@ export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: num
         else keep.add(ownerPath);
         continue;
       }
+      const removed = ref === undefined ? null : removeInactiveUntracked(db, mirrorDir, path, ref, text);
+      if (removed) {
+        clearSkip(db, path);
+        if (removed === "conflict") conflicts++;
+        continue;
+      }
       const parsed = parseMarkdown(text, path.replace(/\.md$/, "").split(/[\\/]/).pop() ?? "New note");
       if (parsed.meta.ref) {
         clearSkip(db, path);
-        if (removeInactiveUntracked(db, mirrorDir, path, parsed, text) === "conflict") conflicts++;
         continue;
       }
       const [scope] = path.split(/[\\/]/);
@@ -510,6 +516,17 @@ export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: num
   return { written, applied, conflicts, archiveRequests };
 }
 
+/**
+ * The `ref` value in a file's leading frontmatter, read tolerantly (indented, either quote, or an
+ * unclosed block), so a broken or hand-edited file ctxd rendered is still recognized (#91). A `ref:`
+ * line in the body after a closed frontmatter block is not read.
+ */
+function frontmatterRef(text: string): string | undefined {
+  if (!text.startsWith("---\n")) return undefined;
+  const end = text.indexOf("\n---\n", 4);
+  return /^[ \t]*ref:[ \t]*["']?([^"'\s]+)/m.exec(text.slice(4, end < 0 ? undefined : end))?.[1];
+}
+
 function isSealedScope(db: Database.Database, scope: string): boolean {
   return db.prepare(
     `SELECT 1 FROM scopes s JOIN pool_grants pg ON pg.scope_id = s.scope_id JOIN pools p ON p.pool_id = pg.pool_id
@@ -537,8 +554,8 @@ function removeWithConflict(db: Database.Database, mirrorDir: string, path: stri
  * from the entry's (a user edit) is kept as a conflict copy before the file goes. A ref'd file
  * anywhere else is left alone. Returns what was done, or null when nothing applies.
  */
-function removeInactiveUntracked(db: Database.Database, mirrorDir: string, path: string, parsed: ReturnType<typeof parseMarkdown>, text: string): "removed" | "conflict" | null {
-  const entryId = parseRef(String(parsed.meta.ref))?.id;
+function removeInactiveUntracked(db: Database.Database, mirrorDir: string, path: string, ref: string, text: string): "removed" | "conflict" | null {
+  const entryId = parseRef(ref)?.id;
   if (!entryId) return null;
   const row = db.prepare(
     `SELECT e.*, s.name AS scope_name, s.kind AS scope_kind, '' AS author_name
@@ -558,9 +575,12 @@ function removeInactiveUntracked(db: Database.Database, mirrorDir: string, path:
   }
   // An archive, deletion, supersession or quarantine changes only the status, so an unedited render
   // still carries the entry's content revision, title, body and tags (every render writes tags).
-  const unedited = parsed.meta.rev === row.content_rev && parsed.title === row.title && parsed.body === row.body &&
-    JSON.stringify(parsed.meta.tags) === row.tags;
-  if (!unedited) recordConflict(db, mirrorDir, path, row, parsed.meta.rev, `This entry is no longer mirrored (${row.status}); your edit was not applied.`, text);
+  // A file that no longer parses (a partial save) counts as edited, so it is kept.
+  let parsed: ReturnType<typeof parseMarkdown> | undefined;
+  try { parsed = parseMarkdown(text, row.title); } catch { /* kept as a conflict copy below */ }
+  const unedited = parsed !== undefined && parsed.meta.rev === row.content_rev && parsed.title === row.title &&
+    parsed.body === row.body && JSON.stringify(parsed.meta.tags) === row.tags;
+  if (!unedited) recordConflict(db, mirrorDir, path, row, parsed?.meta.rev, `This entry is no longer mirrored (${row.status}); your edit was not applied.`, text);
   unlinkSync(insideRoot(mirrorDir, path));
   return unedited ? "removed" : "conflict";
 }
