@@ -8,7 +8,8 @@ const files = ["docs/lld/LLD-write-path-v1.md", "docs/lld/LLD-briefs-search-v1.m
 const inventedScopes = new Set(["sample-app", "notes", "project-b", "shared-tools", "private-a"]);
 
 function exampleScopes(text: string): string[] {
-  return [...text.matchAll(/ctxd:([a-z0-9-]+)\//g)].map((match) => match[1]);
+  // Capture the whole segment before "/" (any scope SCOPE_RE allows); skip ctxd:// URIs.
+  return [...text.matchAll(/ctxd:(?!\/\/)([^\s/`"'\]|]+)\//g)].map((match) => match[1]);
 }
 
 describe("docs example ref scopes", () => {
