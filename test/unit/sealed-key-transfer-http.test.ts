@@ -140,6 +140,7 @@ async function sourceWithTwoPeers() {
 }
 
 describe("key transfer is bound to the authenticated peer", () => {
+  // PA-AC-16
   it("refuses a fetch by a different peer without consuming the transfer, then serves the real requester", async () => {
     const { db, dbPath, nodeId, poolId, requester, other } = await sourceWithTwoPeers();
     const res = await post("/v1/key-transfer/request", requester.token, { poolId, requesterPrekey: requester.prekey });
@@ -155,6 +156,7 @@ describe("key transfer is bound to the authenticated peer", () => {
     expect(real.status).toBe(200);
   });
 
+  // PA-AC-15
   it("refuses a request that replays another node's signed prekey", async () => {
     const { db, poolId, requester, other } = await sourceWithTwoPeers();
     const res = await post("/v1/key-transfer/request", other.token, { poolId, requesterPrekey: requester.prekey });
@@ -162,6 +164,7 @@ describe("key transfer is bound to the authenticated peer", () => {
     expect((db.prepare("SELECT COUNT(*) AS n FROM sealed_key_transfers").get() as { n: number }).n).toBe(0);
   });
 
+  // PA-AC-14
   it("refuses both endpoints for a peer token with no pinned node identity", async () => {
     const { db, poolId, requester } = await sourceWithTwoPeers();
     const legacyToken = newId();
@@ -174,6 +177,7 @@ describe("key transfer is bound to the authenticated peer", () => {
     expect((await post("/v1/key-transfer/fetch", legacyToken, { transferId: newId() })).status).toBe(403);
   });
 
+  // PA-AC-17, PA-AC-18
   it("caps pending transfers per peer at five and drops expired pending rows", async () => {
     const { db, poolId, requester, other } = await sourceWithTwoPeers();
     for (let i = 0; i < 5; i++) {

@@ -17,7 +17,7 @@ Section numbers are the Spec's own (for example 9.1), unchanged from Spec v9, so
 
 The **event log is the source of truth**. Entry state, FTS and vectors are materialized from it and can be rebuilt with `ctxd rebuild`.
 
-Names that become path segments are validated when an event materializes, whether it was written locally or arrived from a peer: a `scope_create` name must match the scope grammar (`SCOPE_RE` in `src/fsview/paths.ts`), and an entry create's slug must match the slug grammar and be at most 64 characters, as must a skill name, which skill entries must carry. An event that fails is rejected and not stored.
+Names that become path segments are validated when an event materializes, whether it was written locally or arrived from a peer: a `scope_create` name must match the scope grammar (`SCOPE_RE` in `src/fsview/paths.ts`), and an entry create's slug must match the slug grammar and be at most 64 characters, as must a skill name, which skill entries must carry. An event that fails is rejected and not stored. This implements [Filesystem view](../prd/components/PRD-filesystem-view-v2.md) FS-9; criteria FS-AC-6 (scope names), FS-AC-7 (slugs) and FS-AC-8 (skill names).
 
 The schema below is the executable one, copied from `src/store/schema.ts` at schema version 23. If this block and that file ever disagree, the file is what runs; raise the difference rather than silently diverging (AGENTS.md).
 

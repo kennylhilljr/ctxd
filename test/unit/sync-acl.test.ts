@@ -4,12 +4,14 @@ import { join } from "node:path";
 import type Database from "better-sqlite3";
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
-import { encodeHlc } from "../../src/core/hlc.js";
+import { encodeHlc, HlcClock } from "../../src/core/hlc.js";
 import { deterministicId, makeRev, newId } from "../../src/core/ids.js";
 import { SYSTEM_SCOPE_ID } from "../../src/core/kinds.js";
 import { openDatabase } from "../../src/store/db.js";
 import { rebuild } from "../../src/store/rebuild.js";
 import { applyEvent, type WireEvent } from "../../src/sync/apply.js";
+import { appendAclEvent } from "../../src/store/acl.js";
+import { writeEntry, type WriteContext } from "../../src/store/write.js";
 
 /** Tests for Spec v8 4's acl events (M3 slice 6): scope/pool creation, grants and membership travel as events in the reserved _system scope, materialized via src/store/materialize.ts's applyAclEvent. */
 
@@ -326,6 +328,7 @@ function contentCreate(f: Fixture, scopeId: string, slug: string, extra: Record<
 }
 
 describe("replicated names that would escape the Markdown mirror are rejected (issue 68)", () => {
+  // FS-AC-6
   it("rejects a scope_create whose name contains a path separator, storing neither the scope nor the event", () => {
     const f = setup();
     const scopeId = deterministicId("scope", "../../escape");
@@ -335,6 +338,7 @@ describe("replicated names that would escape the Markdown mirror are rejected (i
     expect(f.db.prepare("SELECT COUNT(*) AS n FROM events WHERE event_id = ?").get(event.eventId)).toEqual({ n: 0 });
   });
 
+  // FS-AC-7
   it("rejects a replicated entry create whose slug contains ../, and accepts the same event with a valid slug", () => {
     const f = setup();
     const scopeId = deterministicId("scope", "sample-app");
@@ -359,6 +363,7 @@ describe("replicated names that would escape the Markdown mirror are rejected (i
     expect(f.db.prepare("SELECT COUNT(*) AS n FROM entries").get()).toEqual({ n: 1 });
   });
 
+  // FS-AC-8
   it("rejects a replicated skill create with a missing or traversing skill name", () => {
     const f = setup();
     const scopeId = deterministicId("scope", "sample-app");
@@ -369,6 +374,7 @@ describe("replicated names that would escape the Markdown mirror are rejected (i
     expect(applyEvent(f.db, contentCreate(f, scopeId, "skill-note-abc123", { kind: "skill", skill_name: "sample-skill" })).outcome).toBe("fast-forward");
   });
 
+  // FS-AC-7, FS-AC-8
   it("property: any mix of valid and invalid content and skill creates, applied in any order, materializes the same state of exactly the valid ones, and a rebuild agrees", () => {
     // [slug, extra payload, valid?]
     const cases: [string, Record<string, unknown>, boolean][] = [
@@ -415,6 +421,7 @@ describe("replicated names that would escape the Markdown mirror are rejected (i
     );
   }, 60_000);
 
+  // FS-AC-6
   it("rejects a scope_create whose name is path-safe but outside the scope grammar", () => {
     const f = setup();
     for (const name of ["Sample-App", "-private", "has space", "."]) {
@@ -424,6 +431,7 @@ describe("replicated names that would escape the Markdown mirror are rejected (i
     expect(f.db.prepare("SELECT COUNT(*) AS n FROM scopes WHERE kind = 'project'").get()).toEqual({ n: 0 });
   });
 
+  // FS-AC-6
   it("property: any mix of valid and invalid scope_create events, in any order, converges on exactly the valid scopes, and a rebuild agrees", () => {
     const names = ["sample-app", "project-b", "notes", "../escape", "a/b", "Sample-App", "..", "x\\y"];
     const valid = new Set(["sample-app", "project-b", "notes"]);
@@ -453,4 +461,36 @@ describe("replicated names that would escape the Markdown mirror are rejected (i
       { numRuns: 15 },
     );
   }, 60_000);
+});
+
+describe("locally written names that would escape the Markdown mirror are rejected (issue 77)", () => {
+  function local(f: Fixture): WriteContext {
+    const nodeId = (f.db.prepare("SELECT node_id FROM nodes").get() as { node_id: string }).node_id;
+    return { db: f.db, clock: new HlcClock(nodeId), nodeId, clientId: f.humanId, flags: new Map() };
+  }
+
+  // FS-AC-6: the local materialize path refuses the name even past the `ctxd scope add` check.
+  it("rejects a locally appended scope_create with an invalid name, storing neither the scope nor the event", () => {
+    const f = setup();
+    for (const name of ["../escape", "Sample-App"]) {
+      expect(() => appendAclEvent(local(f), deterministicId("scope", name), { action: "scope_create", name, kind: "project", replication: "all", vendor_policy: "any" }))
+        .toThrow(/invalid scope name/);
+    }
+    expect(f.db.prepare("SELECT COUNT(*) AS n FROM scopes WHERE kind = 'project'").get()).toEqual({ n: 0 });
+    expect(f.db.prepare("SELECT COUNT(*) AS n FROM events WHERE op = 'acl'").get()).toEqual({ n: 0 });
+  });
+
+  // FS-AC-8
+  it("rejects a local skill write whose name is traversing or over 64 characters, storing no event", () => {
+    const f = setup();
+    appendAclEvent(local(f), deterministicId("scope", "sample-app"), { action: "scope_create", name: "sample-app", kind: "project", replication: "all", vendor_policy: "any" });
+    const events = () => (f.db.prepare("SELECT COUNT(*) AS n FROM events").get() as { n: number }).n;
+    const before = events();
+    for (const title of ["../escape", "a".repeat(65)]) {
+      const body = `---\nname: ${title}\ndescription: A sample skill\n---\nSteps`;
+      expect(() => writeEntry(local(f), { scope: "sample-app", kind: "skill", title, body, request_id: newId() } as never)).toThrow(/title must be the skill name/);
+    }
+    expect(events()).toBe(before);
+    expect(f.db.prepare("SELECT COUNT(*) AS n FROM entries WHERE kind = 'skill'").get()).toEqual({ n: 0 });
+  });
 });

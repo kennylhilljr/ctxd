@@ -219,10 +219,11 @@ Pool definitions replicate to every machine as metadata, so an agent has the sam
 | PA-11 | `ctxd access <client>` explains effective access | FR-33 | P1 |
 | PA-12 | Pool definitions replicate; access is identical on every machine | FR-13 | P1 |
 | PA-20 | A sealed pool's key can be rotated on demand, re-encrypting its file and un-enrolling every other machine until it re-enrolls | FR-42 | P2 |
+| PA-21 | A sealed key transfer acts only for the node its peer token authenticates: callers with no pinned node identity and prekeys for another node are refused, no other peer can consume a transfer, each peer holds at most five unexpired pending transfers, and each refusal returns its documented status | FR-42 | P1 |
 
 ## 12. Acceptance criteria
 
-> Owner: A (agent-generated) by persona `product-writer`, derived from the requirements above; pending the owner's approval at Gate 1. Verification status per criterion: [test plan](../../test/test-plan-v1.md).
+> Owner: A (agent-generated) by persona `product-writer`, derived from the requirements above; pending the owner's approval at Gate 1. Verification status per criterion: [test plan](../../test/test-plan-v1.md). PA-21 was stated by the owner in [issue 77](https://github.com/kennylhilljr/ctxd/issues/77); PA-AC-14 to PA-AC-18 derive from it and [LLD: Security and access](../../lld/LLD-security-access-v1.md) 10.6.1.
 
 | ID | EARS pattern | Acceptance criterion | Traces to |
 |---|---|---|---|
@@ -239,6 +240,11 @@ Pool definitions replicate to every machine as metadata, so an agent has the sam
 | PA-AC-11 | Event-driven | When the human runs `ctxd hold adopt`, ctxd shall move the holding scope's approved entries into the project scope and add the agent to the pool in one step. | PA-13 |
 | PA-AC-12 | Event-driven | When the same agent repeats a held write into one scope, ctxd shall keep a single access request, count the attempts, and write nothing to that scope until the human decides. | PA-14 |
 | PA-AC-13 | Event-driven | When the human rotates a sealed pool's key, ctxd shall re-encrypt that pool's file under a new key, keep the pool openable on this machine, and un-enroll every other machine until it completes a fresh key transfer. | PA-20, PA-18 |
+| PA-AC-14 | Unwanted behavior | If a peer token with no pinned node identity calls the key-transfer request or fetch endpoint, then ctxd shall refuse with status 403. | PA-21 |
+| PA-AC-15 | Unwanted behavior | If a key-transfer request presents a prekey for a node other than the one its peer token authenticates, then ctxd shall refuse with status 401 and create no transfer. | PA-21 |
+| PA-AC-16 | Unwanted behavior | If a peer other than a transfer's requester fetches that transfer, then ctxd shall answer status 404, as for an unknown id, and leave the transfer unconsumed. | PA-21 |
+| PA-AC-17 | Unwanted behavior | If a peer already holds five unexpired pending key transfers, then ctxd shall refuse its next request with status 429 and leave other peers' requests unaffected. | PA-21 |
+| PA-AC-18 | Event-driven | When a key-transfer request arrives, ctxd shall delete every expired pending transfer before counting the requesting peer's pending transfers against the limit. | PA-21 |
 
 ## 13. Open questions
 

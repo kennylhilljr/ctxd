@@ -85,7 +85,7 @@ links: ["[[supersedes::ctxd:sample-app/01JAB...]]"]
 ```
 
 - **Writing out.** While the feature is enabled, the server reconciles the mirror every 2 seconds. It rewrites files atomically (temporary file, then rename), and `mirror_files` records the revision and file hash.
-- **Containment.** Every write, rename and unlink in the mirror (and every file `ctxd export` writes) resolves against the mirror root and is refused if the result lies outside it or passes through a symbolic link below the root. This is defence in depth behind the name and slug validation in [LLD-data-model](LLD-data-model-v1.md) section 4.
+- **Containment.** Every write, rename and unlink in the mirror (and every file `ctxd export` writes) resolves against the mirror root and is refused if the result lies outside it or passes through a symbolic link below the root. This is defence in depth behind the name and slug validation in [LLD-data-model](LLD-data-model-v1.md) section 4. Implements FS-10; criteria FS-AC-9 (outside the root), FS-AC-10 (symbolic links in the mirror) and FS-AC-11 (export).
 - **Reading back.** Each reconciliation processes changed files:
   - **Unchanged hash:** ignore, so ctxd's own writes do not loop.
   - **Edited file:** compare the frontmatter `rev` with the current content revision. If it matches, apply the edit as a human-client update through the write path (6). If not, write `<name>.conflict.md` beside the file with my version and add a review item; nothing is applied.

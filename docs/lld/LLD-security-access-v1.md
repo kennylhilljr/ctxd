@@ -6,7 +6,7 @@
 | **Date** | 2026-10-20 |
 | **Layer** | L4 low-level design |
 | **Parent** | [Spec v10](../spec/SPEC-v10.md) section 10 (the threat model, 10.1, stays in the HLD) |
-| **Implements** | [Trust and safety](../prd/components/PRD-trust-safety-v5.md) (TS-1 to TS-17, access and safety requirements), [Persona pools and access](../prd/components/PRD-pools-access-v3.md) (PA-1 to PA-19) |
+| **Implements** | [Trust and safety](../prd/components/PRD-trust-safety-v5.md) (TS-1 to TS-17, access and safety requirements), [Persona pools and access](../prd/components/PRD-pools-access-v3.md) (PA-1 to PA-21) |
 | **Owner** | A (agent-generated) by persona `security-reviewer`; human review at Gate 3 for contracts, persisted schema and access paths |
 | **Code** | `src/security/`, `src/access/`, `src/sealed/` |
 | **Moved from** | Spec v9 sections 10.2 to 10.7; Spec v10 draft W2 (sealed pool key transfer) |
@@ -125,7 +125,7 @@ Implements [PRD-pools-access-v3](../prd/components/PRD-pools-access-v3.md) secti
 
 **Refusal paths**, every one surfaced as a specific error rather than a generic failure: no approval yet (`fetch` before `approve`), wrong or already-used `transferId`, an expired pending request, a revoked or unknown requesting node (checked at request time, not just at approval), and a replayed fetch after the transfer is already consumed.
 
-**Binding to the authenticated peer:** both endpoints act only for the node the peer token authenticates (`peers.remote_node_id`); a token with no pinned node identity gets 403. On `request`, the presented prekey's `nodeId` must be that node (401 otherwise), so a peer cannot replay another node's signed prekey; each peer may hold at most 5 unexpired pending transfers (429 beyond that), and expired pending rows are deleted when a new request arrives. On `fetch`, a caller that is not the transfer's `requester_node_id` gets the same 404 as an unknown id and consumes nothing, so no other peer can burn the one-time fetch.
+**Binding to the authenticated peer:** both endpoints act only for the node the peer token authenticates (`peers.remote_node_id`); a token with no pinned node identity gets 403. On `request`, the presented prekey's `nodeId` must be that node (401 otherwise), so a peer cannot replay another node's signed prekey; each peer may hold at most 5 unexpired pending transfers (429 beyond that), and expired pending rows are deleted when a new request arrives. On `fetch`, a caller that is not the transfer's `requester_node_id` gets the same 404 as an unknown id and consumes nothing, so no other peer can burn the one-time fetch. Implements PA-21; criteria PA-AC-14 (no pinned identity, 403), PA-AC-15 (another node's prekey, 401), PA-AC-16 (another peer's fetch, 404), PA-AC-17 (five pending, 429) and PA-AC-18 (expired rows deleted first).
 
 **Revoking a node:** at minimum, no new keys. A revoked node's peer record fails the un-revoked check at request time, so it can never start or complete a new transfer. **Existing sealed pools are not re-keyed** on revocation: a pool key a since-revoked node already received stays valid for whatever that node already holds, since rotating a pool's key and redistributing it to every other enrolled node is a materially heavier operation (decrypt and re-encrypt the sealed file, re-wrap for every remaining node) that this slice does not build. A future `ctxd pool rekey <pool>` is the place for that, not assumed here.
 
