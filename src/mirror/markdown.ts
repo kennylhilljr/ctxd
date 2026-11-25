@@ -438,11 +438,11 @@ export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: num
     const target = insideRoot(mirrorDir, newPath);
     if (existsSync(target)) continue;
     const trackedLegacy = (trackedAs.get(path) as { path: string } | undefined)?.path;
-    if (trackedLegacy !== undefined) {
-      if (trackedAs.get(newPath)) continue;
-      db.prepare("UPDATE mirror_files SET path = ? WHERE path = ?").run(newPath, trackedLegacy);
+    if (trackedLegacy !== undefined && trackedAs.get(newPath)) continue;
+    db.transaction(() => {
+      if (trackedLegacy !== undefined) db.prepare("UPDATE mirror_files SET path = ? WHERE path = ?").run(newPath, trackedLegacy);
       db.prepare("DELETE FROM mirror_conflicts WHERE lower(path) = lower(?)").run(path);
-    }
+    })();
     renameSync(insideRoot(mirrorDir, path), target);
   }
 

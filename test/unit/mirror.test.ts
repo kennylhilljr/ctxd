@@ -1121,7 +1121,7 @@ describe("journal mirror files (#99)", () => {
       if (edited) writeFileSync(legacyFile, readFileSync(legacyFile, "utf8").replace("Original body", "Edited legacy body"));
       if (tracking === "untracked") f.db.prepare("DELETE FROM mirror_files").run();
       if (tracking === "moved-row") f.db.prepare("UPDATE mirror_files SET path = ?").run(f.path); // a stop before the rename
-      if (oldConflict && tracking === "tracked") {
+      if (oldConflict) {
         // A review item left by the pre-#99 bug, whose copy was the file itself.
         const { entry_id: id } = f.db.prepare("SELECT entry_id FROM entries").get() as { entry_id: string };
         f.db.prepare("INSERT INTO mirror_conflicts (path, entry_id, file_rev, current_rev, reason, created_at) VALUES (?, ?, NULL, '1', 'old', ?)").run(legacy, id, new Date().toISOString());
