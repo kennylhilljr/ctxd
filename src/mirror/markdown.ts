@@ -354,12 +354,6 @@ export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: num
   }
   const byPathCase = new Map<string, string | null>();
   for (const path of byPath.keys()) byPathCase.set(path.toLowerCase(), byPathCase.has(path.toLowerCase()) ? null : path);
-  // Canonical paths of entries in sealed scopes: a file there is plaintext that must not stay on disk
-  // (Spec 12.1), whatever it holds, so it is removed even when its ref was edited or it cannot be parsed (#91).
-  const sealedPaths = new Set<string>();
-  for (const row of sealedRows(db)) {
-    try { sealedPaths.add(relativePath(row)); } catch { /* no path without a skill name */ }
-  }
   let applied = 0;
   let conflicts = 0;
   let archiveRequests = 0;
@@ -413,12 +407,15 @@ export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: num
     }
     untracked.add(skipKey(path));
     try {
-      if (sealedPaths.has(path) && !byPath.has(path)) {
+      const text = readFileSync(file, "utf8");
+      // A file ctxd rendered (it has a `ref` line) in a sealed scope's folder is plaintext that must
+      // not stay on disk (Spec 12.1). Sealing erases the scope's entries from this database, so the
+      // file is matched by folder, not by entry, and removed even if its frontmatter is broken (#91).
+      if (/^ref:\s*"?ctxd:/m.test(text) && isSealedScope(db, path.split(/[\\/]/)[0] ?? "")) {
         removeWithConflict(db, mirrorDir, path);
         clearSkip(db, path);
         continue;
       }
-      const text = readFileSync(file, "utf8");
       // A file at a live entry's canonical path with no mirror_files row was written but never
       // tracked (ctxd stopped in between), so it may hold a user edit (#88). Reconcile it against
       // the entry at that path, whatever its `ref` says, before the export below rewrites it.
@@ -447,11 +444,7 @@ export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: num
       }
       const [scope] = path.split(/[\\/]/);
       if (!scope) continue;
-      const sealed = db.prepare(
-        `SELECT 1 FROM scopes s JOIN pool_grants pg ON pg.scope_id = s.scope_id JOIN pools p ON p.pool_id = pg.pool_id
-         WHERE s.name = ? AND p.storage = 'sealed' LIMIT 1`,
-      ).get(scope);
-      if (sealed) throw new CtxdError("SCOPE_FORBIDDEN", `Mirror writes to sealed scope ${scope} are refused`);
+      if (isSealedScope(db, scope)) throw new CtxdError("SCOPE_FORBIDDEN", `Mirror writes to sealed scope ${scope} are refused`);
       const input = {
         scope, kind: parsed.meta.kind ?? "note", title: parsed.title, body: parsed.body,
         tags: parsed.meta.tags, request_id: importRequestId(db, ctx.clientId, path, text),
@@ -517,14 +510,11 @@ export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: num
   return { written, applied, conflicts, archiveRequests };
 }
 
-/** Entries in sealed scopes, which the mirror never shows. */
-function sealedRows(db: Database.Database): MarkdownRow[] {
+function isSealedScope(db: Database.Database, scope: string): boolean {
   return db.prepare(
-    `SELECT e.*, s.name AS scope_name, s.kind AS scope_kind, '' AS author_name
-     FROM entries e JOIN scopes s ON s.scope_id = e.scope_id
-     WHERE EXISTS (SELECT 1 FROM pool_grants pg JOIN pools p ON p.pool_id = pg.pool_id
-                   WHERE pg.scope_id = e.scope_id AND p.storage = 'sealed')`,
-  ).all() as MarkdownRow[];
+    `SELECT 1 FROM scopes s JOIN pool_grants pg ON pg.scope_id = s.scope_id JOIN pools p ON p.pool_id = pg.pool_id
+     WHERE s.name = ? AND p.storage = 'sealed' LIMIT 1`,
+  ).get(scope) !== undefined;
 }
 
 /**
@@ -543,7 +533,7 @@ function removeWithConflict(db: Database.Database, mirrorDir: string, path: stri
  * Removes an untracked file at the canonical path of the entry its `ref` names, when that entry is no
  * longer mirrored (#91): ctxd stopped between writing it and tracking it, so the tracked loop never
  * sees it. A purged entry's file and conflict copy are deleted unconditionally, as the tracked loop
- * does (sealed scopes are handled by path before parsing). Otherwise a file whose content differs
+ * does (sealed scopes are handled by folder before parsing). Otherwise a file whose content differs
  * from the entry's (a user edit) is kept as a conflict copy before the file goes. A ref'd file
  * anywhere else is left alone. Returns what was done, or null when nothing applies.
  */
@@ -556,9 +546,12 @@ function removeInactiveUntracked(db: Database.Database, mirrorDir: string, path:
   ).get(entryId) as MarkdownRow | undefined;
   // A live entry's file is reconciled and tracked above or rewritten by the export below.
   if (!row || (row.purged_at === null && !UNMIRRORED.has(row.status))) return null;
-  let canonical: string;
-  try { canonical = relativePath(row); } catch { return null; } // a rebuilt purge stub has no skill name
-  if (canonical !== path) return null;
+  let canonical: string | undefined;
+  try { canonical = relativePath(row); } catch { /* a purge stub rebuilt from its event has no skill name */ }
+  const atCanonical = canonical === undefined
+    ? row.purged_at !== null && row.kind === "skill" && path.startsWith(`${row.scope_name}/skills/`) && /^[^/\\]+[/\\]SKILL\.md$/.test(path.slice(row.scope_name.length + 8))
+    : canonical === path;
+  if (!atCanonical) return null;
   if (row.purged_at !== null) {
     removeWithConflict(db, mirrorDir, path);
     return "removed";

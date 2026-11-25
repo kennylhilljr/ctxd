@@ -12,6 +12,8 @@ import { checkMirrorSkips } from "../../src/cli/doctor.js";
 import { setEntryStatus } from "../../src/store/tidy.js";
 import { formatRef } from "../../src/model/refs.js";
 import { purgeEntry } from "../../src/store/purge.js";
+import { SealedPoolStore, TestDatabaseProvider } from "../../src/sealed/store.js";
+import { TestKeyProvider } from "../../src/sealed/key-provider.js";
 
 const scratch: string[] = [];
 afterEach(() => { for (const dir of scratch.splice(0)) rmSync(dir, { recursive: true, force: true }); });
@@ -317,6 +319,60 @@ describe("Markdown export and mirror (Spec v9 section 12.1)", () => {
     expect(syncMirror(f.ctx, f.mirror)).toMatchObject({ conflicts: 1 });
     expect(existsSync(file)).toBe(false);
     expect(existsSync(file.replace(/\.md$/, ".conflict.md"))).toBe(true);
+  });
+
+  it("deletes an untracked file, ref'd or broken, left in a scope sealed by the real seal flow (#91, Spec 12.1)", () => {
+    const f = fixture(); const file = writtenButUntracked(f);
+    const second = writeEntry(f.ctx, { scope: "sample-app", kind: "note", title: "Second entry", body: "Other body", request_id: newId() } as never);
+    if ("held" in second) throw new Error("unexpected held write");
+    syncMirror(f.ctx, f.mirror);
+    const secondPath = (f.db.prepare("SELECT path FROM mirror_files WHERE entry_id = ?").get(second.id) as { path: string }).path;
+    f.db.prepare("DELETE FROM mirror_files").run();
+    const broken = join(f.mirror, secondPath);
+    writeFileSync(broken, readFileSync(broken, "utf8").replace(/\n---\n/, "\n")); // unclosed frontmatter
+    const scopeId = (f.db.prepare("SELECT scope_id FROM scopes WHERE name = 'sample-app'").get() as { scope_id: string }).scope_id;
+    const poolId = newId();
+    f.db.prepare("INSERT INTO pools (pool_id, name, created_at) VALUES (?, 'pool-private', ?)").run(poolId, new Date().toISOString());
+    f.db.prepare("INSERT INTO pool_grants (pool_id, scope_id, level) VALUES (?, ?, 'write')").run(poolId, scopeId);
+    const sealedFile = new SealedPoolStore(f.db, f.root, new TestKeyProvider(), new TestDatabaseProvider(), 1).seal(poolId, f.ctx.nodeId);
+    f.db.prepare("UPDATE pools SET storage = 'sealed', sealed_file = ? WHERE pool_id = ?").run(sealedFile, poolId); // the pool_seal ACL event
+    expect(count(f, "entries")).toBe(0); // sealing erased the entries from this database
+    syncMirror(f.ctx, f.mirror);
+    expect(existsSync(file)).toBe(false);
+    expect(existsSync(broken)).toBe(false);
+  });
+
+  it("deletes an untracked skill file of a purged entry rebuilt without its skill name (#91)", () => {
+    const f = fixture();
+    const skill = writeEntry(f.ctx, { scope: "sample-app", kind: "skill", title: "foo", body: "---\nname: foo\ndescription: Does foo things\n---\nInstructions", request_id: newId() } as never);
+    if ("held" in skill) throw new Error("unexpected held write");
+    syncMirror(f.ctx, f.mirror);
+    const { path } = f.db.prepare("SELECT path FROM mirror_files").get() as { path: string };
+    f.db.prepare("DELETE FROM mirror_files").run();
+    purgeEntry(f.ctx, formatRef("sample-app", skill.id), "test");
+    f.db.prepare("UPDATE entries SET skill_name = NULL").run(); // as a rebuild from the purge event leaves it
+    syncMirror(f.ctx, f.mirror);
+    expect(existsSync(join(f.mirror, path))).toBe(false);
+  });
+
+  it("converges after an untracked file's entry leaves the mirror, whatever the change and edit (#91, property)", () => {
+    const changes = ["archived", "deleted", "superseded", "quarantined", "purged", "sealed"] as const;
+    fc.assert(fc.property(fc.constantFrom(...changes), fc.boolean(), fc.nat({ max: 2 }), (change, edited, extraCycles) => {
+      const f = fixture(); const file = writtenButUntracked(f);
+      if (edited) writeFileSync(file, readFileSync(file, "utf8").replace("Original body", "Edited while stopped"));
+      if (change === "purged") purgeEntry(f.ctx, entryRef(f), "test");
+      else if (change === "sealed") sealScope(f);
+      else f.db.prepare("UPDATE entries SET status = ?").run(change); // the status alone decides mirroring
+      syncMirror(f.ctx, f.mirror);
+      const after = readdirSync(f.mirror, { recursive: true }).sort();
+      for (let i = 0; i < extraCycles; i++) expect(syncMirror(f.ctx, f.mirror)).toEqual({ written: 0, applied: 0, conflicts: 0, archiveRequests: 0 });
+      expect(readdirSync(f.mirror, { recursive: true }).sort()).toEqual(after);
+      expect(existsSync(file)).toBe(false);
+      const kept = edited && change !== "purged" && change !== "sealed";
+      expect(existsSync(file.replace(/\.md$/, ".conflict.md"))).toBe(kept);
+      expect(mirrorCount(f, "mirror_conflicts")).toBe(kept ? 1 : 0);
+      expect(mirrorCount(f, "mirror_files")).toBe(0);
+    }), { numRuns: 30 });
   });
 
   it("deletes an untracked file of a purged entry (#91)", () => {
