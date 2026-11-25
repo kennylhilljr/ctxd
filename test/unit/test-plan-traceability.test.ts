@@ -10,10 +10,20 @@ import { describe, expect, it } from "vitest";
 
 const root = join(import.meta.dirname, "..", "..");
 const read = (path: string) => readFileSync(join(root, path), "utf8");
-const plan = read("docs/test/test-plan-v1.md");
+const plan = read(mappedTestPlan());
 // Rows in the per-component sections; the "Gaps to close first" table above them repeats some IDs.
 const sections = plan.slice(plan.indexOf("\n## BS:"));
 const rows = [...sections.matchAll(/^\| ([A-Z]+-AC-\d+) \| ([A-Za-z ]+?) \|/gm)].map((m) => ({ id: m[1]!, status: m[2]! }));
+
+/** The test plan the doc map lists in its L4 Test plan row (issue 102: the plan is versioned like any L4 doc). */
+function mappedTestPlan(): string {
+  const readme = read("docs/README.md");
+  const row = readme.split("\n").filter((line) => line.startsWith("| L4 Test plan |"));
+  if (row.length !== 1) throw new Error(`docs/README.md needs exactly one "L4 Test plan" row, found ${row.length}`);
+  const links = [...row[0]!.matchAll(/\]\((test\/test-plan-v\d+\.md)\)/g)];
+  if (links.length !== 1) throw new Error(`the L4 Test plan row needs exactly one test plan link, found ${links.length}`);
+  return `docs/${links[0]![1]}`;
+}
 
 function latestComponentPrds(): string[] {
   const readme = read("docs/README.md");

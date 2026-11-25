@@ -37,7 +37,7 @@
 | Term | Definition | Specified in |
 |---|---|---|
 | A, C, H | Section ownership tags: agent-generated, co-authored (agent drafts, owner decides), human-authored | [SDD standard](standards/spec-driven-development-v1.md) |
-| Acceptance criterion | One testable statement with an ID (`<prefix>-AC-n`), written in EARS | [Test plan](test/test-plan-v1.md) |
+| Acceptance criterion | One testable statement with an ID (`<prefix>-AC-n`), written in EARS | [Test plan](test/test-plan-v2.md) |
 | ADR | Architecture decision record: numbered once, superseded rather than versioned | [ADR template](templates/adr-template.md) |
 | Constitution | The rules every agent and document obey; in this repository, `AGENTS.md` | [AGENTS.md](../AGENTS.md) |
 | Contract | The external surface of a component (MCP tools, CLI); changes need owner approval | [contracts/](contracts/) |

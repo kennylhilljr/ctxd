@@ -37,7 +37,7 @@ flowchart TB
 | L3 System HLD | `spec/SPEC-vN.md` | [Spec v10](spec/SPEC-v10.md) | C | `architect`, decided at Gate 2 |
 | L4 LLDs | `lld/LLD-<component>-vN.md` | Table below | A | `component-designer`, `security-reviewer`, `sre` |
 | L4 Contracts | `contracts/<surface>-vN.md` | [MCP tools v1](contracts/mcp-tools-v1.md), [CLI reference v1](contracts/cli-reference-v1.md) | A, human review at Gate 3 | `component-designer` |
-| L4 Test plan | `test/test-plan-vN.md` | [Test plan v1](test/test-plan-v1.md) | A | `test-architect` |
+| L4 Test plan | `test/test-plan-vN.md` | [Test plan v2](test/test-plan-v2.md) | A | `test-architect` |
 | L5 Plans | `build/M<n>-{kickoff,plan}-vN.md` | Per milestone in [build/](build/) | A | `planner` |
 | L6 Evidence | `build/M<n>-handoff-vN.md`, `src/`, `test/` | Per milestone in [build/](build/) | A | `implementer`, checked by `verifier` |
 
@@ -65,12 +65,12 @@ Beside the stack:
 | Context hygiene | [v2](prd/components/PRD-context-hygiene-v2.md) | CH-1 to CH-12 | CH-AC-n | [Context hygiene v1](lld/LLD-context-hygiene-v1.md) |
 | Replication and offline work | [v7](prd/components/PRD-replication-v7.md) | RP-1 to RP-18 | RP-AC-n | [Replication v2](lld/LLD-replication-v2.md) |
 | Briefs and search | [v5](prd/components/PRD-briefs-search-v5.md) | BS-1 to BS-20 | BS-AC-n | [Briefs and search v1](lld/LLD-briefs-search-v1.md), [MCP tools v1](contracts/mcp-tools-v1.md) |
-| Filesystem view | [v3](prd/components/PRD-filesystem-view-v3.md) | FS-1 to FS-10 | FS-AC-n | [Data model v1](lld/LLD-data-model-v1.md) 4.2, [Operations v2](lld/LLD-operations-v2.md) 12.1 |
-| Skills | [v3](prd/components/PRD-skills-v3.md) | SK-1 to SK-8 | SK-AC-n | [Operations v2](lld/LLD-operations-v2.md) 12.2 |
+| Filesystem view | [v3](prd/components/PRD-filesystem-view-v3.md) | FS-1 to FS-10 | FS-AC-n | [Data model v1](lld/LLD-data-model-v1.md) 4.2, [Operations v3](lld/LLD-operations-v3.md) 12.1 |
+| Skills | [v3](prd/components/PRD-skills-v3.md) | SK-1 to SK-8 | SK-AC-n | [Operations v3](lld/LLD-operations-v3.md) 12.2 |
 | Memory and journal | [v2](prd/components/PRD-memory-journal-v2.md) | MJ-1 to MJ-10 | MJ-AC-n | [Briefs and search v1](lld/LLD-briefs-search-v1.md) |
 | Feature flags | [v2](prd/components/PRD-feature-flags-v2.md) | FF-1 to FF-8 | FF-AC-n | [Configuration v1](lld/LLD-configuration-v1.md) |
 | Mobile inbox (M7) | [v2](prd/components/PRD-mobile-inbox-v2.md) | MI-1 to MI-12 | MI-AC-n | [Mobile inbox v1](lld/LLD-mobile-inbox-v1.md) |
-| Operations (cross-cutting) | Parent PRD NFRs | NFR-n | | [Operations v2](lld/LLD-operations-v2.md) |
+| Operations (cross-cutting) | Parent PRD NFRs | NFR-n | | [Operations v3](lld/LLD-operations-v3.md) |
 
 ## Conventions
 
