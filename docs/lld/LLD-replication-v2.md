@@ -20,7 +20,7 @@ Claim semantics (7.5) are in [LLD: Claims](LLD-claims-v1.md); cleanup operations
 
 ### 7.1 Protocol
 
-- **Endpoint:** `POST /v1/pull`, served on the sync listener and reachable only through `tailscale serve`. Body size, bad JSON, timeouts and internal errors follow [LLD: MCP server](LLD-mcp-server-v1.md) 8.3.1.
+- **Endpoint:** `POST /v1/pull`, served on the sync listener and reachable only through `tailscale serve`. Body size, bad JSON, timeouts and internal errors follow [LLD: MCP server](LLD-mcp-server-v2.md) 8.3.1.
 - **Request:** `{ "node": "<requesting node_id>", "vector": { "<origin_node>": <through_seq>, ... }, "limit": 500 }`
 - **Response:** `{ "events": [...], "through": { "<origin_node>": <seq>, ... }, "more": true|false }`
 - **What the server returns:** events where `origin_seq > vector[origin]`, ordered by `(origin_node, origin_seq)`, filtered by the replication policy for the requesting node (7.2).
