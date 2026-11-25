@@ -47,7 +47,7 @@ A scope may set `{"decision": "auto-if-confirmed"}` so decisions with `confirmed
    - open or close signals (11.4).
 8. **Return** `{entry_id, ref, rev, status}`, where `ref` is the entry's reference and `rev` is its content revision.
 
-**Rejected writes.** Any write refused at steps 1 to 5 adds a `rejections` row: client, scope, entry, tool, error code, and detector names or revision numbers. Submitted text is never stored. Rejections are local to the node, kept for 90 days, and summarized in `ctxd review` (for example "codex@laptop: 4 REV_CONFLICT on ctxd:ctxd/01JAB... this week").
+**Rejected writes.** Any write refused at steps 1 to 5 adds a `rejections` row: client, scope, entry, tool, error code, and detector names or revision numbers. Submitted text is never stored. Rejections are local to the node, kept for 90 days, and summarized in `ctxd review` (for example "codex@laptop: 4 REV_CONFLICT on ctxd:sample-app/01JAB... this week").
 
 **Failure semantics (PRD NFR-10):**
 
