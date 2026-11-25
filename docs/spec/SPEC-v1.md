@@ -87,7 +87,7 @@ turns_threshold = 20
 completion_markers = ["done", "implemented", "merged", "complete"]
 
 [scope_map]                      # optional path or remote to scope mapping
-"~/code/ctxd" = "ctxd"
+"~/code/notes" = "notes"
 "github.com/example/sample-app" = "sample-app"
 
 [backup]
@@ -98,7 +98,7 @@ copy_to = ""                     # optional, e.g. a Google Drive folder path
 A repository can also declare its scope in a committed `.ctxd.toml`:
 
 ```toml
-scope = "ctxd"
+scope = "sample-app"
 ```
 
 **Scope resolution order** (first match wins):
@@ -400,7 +400,7 @@ ctxd hook <event> --client <claude-code|codex> [--scope <name>]
 Per-session state lives in `sessions/<client>-<session_id>.json`:
 
 ```json
-{ "scope": "ctxd", "started_at": "...", "turns": 14, "last_head": "3fa2c1e",
+{ "scope": "sample-app", "started_at": "...", "turns": 14, "last_head": "3fa2c1e",
   "last_handoff_at": null, "last_nudge_at": null, "nudge_pending": false }
 ```
 

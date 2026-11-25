@@ -106,7 +106,7 @@ Alongside project knowledge, ctxd keeps **memory** about me (preferences and exp
 | `journal` | A short record of something that happened, with a significance | "blocker: sealed pool tests need a Keychain stub" |
 
 - **Status of an entry:** `active`, `proposed` (awaiting my review), `flagged`, `quarantined`, `superseded`, `archived`, `conflicted`.
-- **Path:** a readable, stable address for every entry and folder, for example `ctxd://ctxd/decisions/use-an-event-log-7k2pqz.md`, interchangeable with its reference.
+- **Path:** a readable, stable address for every entry and folder, for example `ctxd://sample-app/decisions/use-an-event-log-7k2pqz.md`, interchangeable with its reference.
 - **Open signal:** a blocker, incident, blocking task or open flag, pinned in briefs until resolved.
 - **Brief:** a budgeted, deterministic assembly of a scope's most useful entries, in one of three sizes: `micro` (about 300 tokens), `normal` (about 1,500), `full` (about 4,000).
 - **Client (agent):** an agent installation with its own token, for example `claude-code@air` or `codex@laptop`. Every write is attributed to a client. Clients belong to persona pools directly or by tag.

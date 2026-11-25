@@ -123,7 +123,7 @@ turns_threshold = 20
 completion_markers = ["done", "implemented", "merged", "complete"]
 
 [scope_map]                      # optional path or remote to scope mapping
-"~/code/ctxd" = "ctxd"
+"~/code/notes" = "notes"
 "github.com/example/sample-app" = "sample-app"
 
 [backup]
@@ -673,7 +673,7 @@ A scope may set `{"decision": "auto-if-confirmed"}` so decisions with `confirmed
    - open or close signals (11.4).
 8. **Return** `{entry_id, ref, rev, status}`, where `ref` is the entry's reference and `rev` is its content revision.
 
-**Rejected writes.** Any write refused at steps 1 to 5 adds a `rejections` row: client, scope, entry, tool, error code, and detector names or revision numbers. Submitted text is never stored. Rejections are local to the node, kept for 90 days, and summarized in `ctxd review` (for example "codex@laptop: 4 REV_CONFLICT on ctxd:ctxd/01JAB... this week").
+**Rejected writes.** Any write refused at steps 1 to 5 adds a `rejections` row: client, scope, entry, tool, error code, and detector names or revision numbers. Submitted text is never stored. Rejections are local to the node, kept for 90 days, and summarized in `ctxd review` (for example "codex@laptop: 4 REV_CONFLICT on ctxd:sample-app/01JAB... this week").
 
 **Failure semantics (PRD NFR-10):**
 
@@ -979,7 +979,7 @@ All tools return JSON text. Descriptions are kept terse; the total `tools/list` 
 
 Errors use the envelope in 8.5.
 
-**Output framing:** every returned body is preceded by a provenance line with its reference (`[ctxd:ctxd/01JAB... | decision | proposed | by codex@laptop | 2026-10-16]`) so the model can see who wrote it, whether it is approved, and how to cite it.
+**Output framing:** every returned body is preceded by a provenance line with its reference (`[ctxd:sample-app/01JAB... | decision | proposed | by codex@laptop | 2026-10-16]`) so the model can see who wrote it, whether it is approved, and how to cite it.
 
 ### 8.3 Internal API
 
@@ -1091,7 +1091,7 @@ A session not seen for 6 hours while `active` or `compacting` is shown as `unkno
 Per-session state lives in `sessions/<client>-<session_id>.json`:
 
 ```json
-{ "scope": "ctxd", "started_at": "...", "turns": 14, "last_head": "3fa2c1e",
+{ "scope": "sample-app", "started_at": "...", "turns": 14, "last_head": "3fa2c1e",
   "last_handoff_at": null, "last_nudge_at": null, "nudge_pending": false }
 ```
 
@@ -1513,7 +1513,7 @@ Implements [Memory and journal](../prd/components/PRD-memory-journal-v1.md) sect
 - **When a resolved link counts.** From the later of the link and the approval of the entry holding it, so a proposed fix closes nothing until approved. Once counted, a resolution stands: archiving the fix later, or removing the link afterwards, does not reopen the signal.
 - **Removed links close, never erase.** Removing a `blocks` link closes the task signal at the removal, so time to resolve is kept.
 - **Time to resolve.** `resolved_hlc` minus `opened_hlc`, reported by the weekly digest.
-- **Briefs.** Open signals for the session's working set appear in section 3 of every brief, with their age, for example `BLOCKER (2d): waiting on the test fixture for sealed pools, ctxd:ctxd/01JAB...`. Signals in scopes the session cannot read are never shown (10.7).
+- **Briefs.** Open signals for the session's working set appear in section 3 of every brief, with their age, for example `BLOCKER (2d): waiting on the test fixture for sealed pools, ctxd:sample-app/01JAB...`. Signals in scopes the session cannot read are never shown (10.7).
 
 ### 11.5 Weekly digest
 
@@ -1560,14 +1560,14 @@ Implements [Filesystem view](../prd/components/PRD-filesystem-view-v1.md) sectio
 
 ```markdown
 ---
-ref: ctxd:ctxd/01JABCDEF000000000007K2PQZ
+ref: ctxd:sample-app/01JABCDEF000000000007K2PQZ
 kind: decision
 status: active
 rev: 3-01JABCDEF0
 by: claude-code@laptop
 updated: 2026-10-18T14:02:11Z
 review_after: null
-links: ["[[supersedes::ctxd:ctxd/01JAB...]]"]
+links: ["[[supersedes::ctxd:sample-app/01JAB...]]"]
 ---
 # Use an event log, not cr-sqlite
 ...
