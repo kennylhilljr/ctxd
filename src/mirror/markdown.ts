@@ -426,6 +426,22 @@ export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: num
   let conflicts = 0;
   let archiveRequests = 0;
 
+  // A journal file under its pre-#99 name (`<day>.md--<slug>`, never walked: it does not end in `.md`)
+  // moves to `<day>--<slug>.md` first, and is then handled there like any file, tracked or not. Its
+  // tracking moves before the file does, so a stop in between leaves an untracked legacy file with a
+  // tracked target, which the next cycle renames; never a tracked file that reads as deleted.
+  const trackedPath = db.prepare("SELECT 1 FROM mirror_files WHERE path = ?");
+  for (const path of legacyJournalFiles(mirrorDir)) {
+    const newPath = path.replace(/(\d{2})\.md--([^/\\]+)$/, "$1--$2.md");
+    const target = insideRoot(mirrorDir, newPath);
+    if (existsSync(target)) continue;
+    if (trackedPath.get(path)) {
+      if (trackedPath.get(newPath)) continue;
+      db.prepare("UPDATE mirror_files SET path = ? WHERE path = ?").run(newPath, path);
+    }
+    renameSync(insideRoot(mirrorDir, path), target);
+  }
+
   const tracked = db.prepare("SELECT path, entry_id, file_hash FROM mirror_files").all() as { path: string; entry_id: string; file_hash: string }[];
   const trackedPaths = new Set(tracked.map((state) => state.path));
   const trackedByCase = new Map(tracked.map((state) => [state.path.toLowerCase(), state.path]));
@@ -465,15 +481,6 @@ export function syncMirror(ctx: WriteContext, mirrorDir: string): { written: num
       db.prepare("DELETE FROM mirror_files WHERE path = ?").run(state.path);
       unlinkSync(file);
     }
-  }
-
-  // A journal file written under its pre-#99 name (`<day>.md--<slug>`) but never tracked is not
-  // walked (its name does not end in `.md`), so it is first renamed to `<day>--<slug>.md` and then
-  // handled below like any untracked file there: reconciled, held, imported or removed.
-  for (const path of legacyJournalFiles(mirrorDir)) {
-    if (trackedPaths.has(path)) continue;
-    const target = insideRoot(mirrorDir, path.replace(/(\d{2})\.md--([^/\\]+)$/, "$1--$2.md"));
-    if (!existsSync(target)) renameSync(insideRoot(mirrorDir, path), target);
   }
 
   // A conflict copy is never walked, so one whose scope is now sealed or whose entry was purged is

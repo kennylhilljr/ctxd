@@ -1059,16 +1059,30 @@ describe("journal mirror files (#99)", () => {
     expect(f.db.prepare("SELECT COUNT(*) AS n FROM archive_requests").get()).toEqual({ n: 0 });
   });
 
-  it("keeps an edit to a journal file under its old name as a conflict copy before moving it (#99)", () => {
+  it("moves a journal file under its old name and keeps its edit as a conflict copy (#99)", () => {
     const f = journalFixture();
     const legacy = toLegacy(f);
     const legacyFile = join(f.mirror, legacy);
     writeFileSync(legacyFile, readFileSync(legacyFile, "utf8").replace("Original body", "Edited legacy body"));
     expect(syncMirror(f.ctx, f.mirror)).toMatchObject({ conflicts: 1 });
-    expect(readFileSync(`${legacyFile}.conflict.md`, "utf8")).toContain("Edited legacy body");
+    expect(readFileSync(f.file.replace(/\.md$/, ".conflict.md"), "utf8")).toContain("Edited legacy body");
+    expect(existsSync(`${legacyFile}.conflict.md`)).toBe(false);
     expect(existsSync(legacyFile)).toBe(false);
+    expect(f.db.prepare("SELECT path FROM mirror_conflicts").all()).toEqual([{ path: f.path }]);
     expect(readFileSync(f.file, "utf8")).toContain("Original body");
     expect(body(f)).toBe("Original body");
+  });
+
+  it("finishes moving a journal file whose tracking moved before a stop (#99)", () => {
+    const f = journalFixture();
+    const legacyFile = join(f.mirror, toLegacy(f));
+    writeFileSync(legacyFile, readFileSync(legacyFile, "utf8").replace("Original body", "Edited legacy body"));
+    f.db.prepare("UPDATE mirror_files SET path = ?").run(f.path); // the stop came before the rename
+    expect(syncMirror(f.ctx, f.mirror)).toMatchObject({ conflicts: 1, archiveRequests: 0 });
+    expect(existsSync(legacyFile)).toBe(false);
+    expect(readFileSync(f.file.replace(/\.md$/, ".conflict.md"), "utf8")).toContain("Edited legacy body");
+    expect(f.db.prepare("SELECT path FROM mirror_conflicts").all()).toEqual([{ path: f.path }]);
+    expect(syncMirror(f.ctx, f.mirror)).toMatchObject({ applied: 0, conflicts: 0 });
   });
 
   it("reconciles an untracked journal file under its old name at its new name (#99)", () => {
