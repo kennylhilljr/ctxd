@@ -123,7 +123,7 @@ Implements [Memory and journal](../prd/components/PRD-memory-journal-v2.md) sect
 - **When a resolved link counts.** From the later of the link and the approval of the entry holding it, so a proposed fix closes nothing until approved. Once counted, a resolution stands: archiving the fix later, or removing the link afterwards, does not reopen the signal.
 - **Removed links close, never erase.** Removing a `blocks` link closes the task signal at the removal, so time to resolve is kept.
 - **Time to resolve.** `resolved_hlc` minus `opened_hlc`, reported by the weekly digest.
-- **Briefs.** Open signals for the session's working set appear in section 3 of every brief, with their age, for example `BLOCKER (2d): waiting on the test fixture for sealed pools, ctxd:ctxd/01JAB...`. Signals in scopes the session cannot read are never shown (10.7).
+- **Briefs.** Open signals for the session's working set appear in section 3 of every brief, with their age, for example `BLOCKER (2d): waiting on the test fixture for sealed pools, ctxd:sample-app/01JAB...`. Signals in scopes the session cannot read are never shown (10.7).
 
 ### 11.5 Weekly digest
 
