@@ -6,6 +6,7 @@
 - Spec section numbers (for example `SPEC 9.1`) are one namespace across the HLD and the LLDs; the HLD's section table says which file holds each number. A change inside one component goes into the next version of its LLD or contract; a change to system shape goes into the next HLD version, usually with an ADR.
 - Acceptance criteria have IDs (`<prefix>-AC-n`). A new or changed test that verifies one names its ID in the test title or a comment, and the [test plan](docs/test/test-plan-v1.md) maps every ID to its tests.
 - Component PRDs reference their parent, their siblings and the spec sections that implement them. Keep those references current when adding or versioning a document. Links inside an unchanged component may point to sibling versions current when it was written; the parent PRD's component index is authoritative.
+- [docs/README.md](docs/README.md) is authoritative for which version of each document is latest. A new LLD or contract version updates that map and, in the same change, the links in the latest HLD's section table, traceability rows and section summaries. That is a link update in place, not a new HLD version; a new HLD version is cut only for a change to system shape. Rows that record history (the HLD's change list, resolved open issues) keep their original links. If an HLD link and the map ever disagree, follow the map and fix the link.
 - Use the latest numbered version of each document. Never edit a past version; create the next numbered file instead.
 
 ## Rules

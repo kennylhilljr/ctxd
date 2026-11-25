@@ -51,7 +51,7 @@ The Spec's section numbers are one namespace shared by this HLD and the LLDs. A 
 | 15, 16 | Repository layout, open issues | This document |
 | 17 | Mobile inbox: transport, pull engine, provenance, cloud adapter, brief publishing, CLI | [LLD: Mobile inbox](../lld/LLD-mobile-inbox-v1.md); deployment in [runbooks](../runbooks/mobile-inbox-deploy-v1.md) |
 
-**Rule for changes.** A change that alters system shape (a new listener, a new store, a new trust boundary, a new component) changes this HLD and usually needs an ADR. A change inside one component changes only its LLD or contract: create the next numbered version of that file and update its row above in the next HLD version. Never edit a past version.
+**Rule for changes.** A change that alters system shape (a new listener, a new store, a new trust boundary, a new component) changes this HLD and usually needs an ADR. A change inside one component changes only its LLD or contract: create the next numbered version of that file and, in the same change, update the [documentation map](../README.md) and this HLD's links to it (the tables above and the section summaries below) in place; that does not need a new HLD version. Rows that record history keep their links. The documentation map is authoritative for which version is latest. Never edit a past version.
 
 ### Traceability
 
