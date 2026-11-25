@@ -74,7 +74,7 @@ Beside the stack:
 
 ## Conventions
 
-- **Versions.** Every versioned document is `<name>-vN.md`. Never edit a past version; create the next number and update this map in the same change. ADRs are the exception: numbered once, with a Status line, superseded by a new ADR.
+- **Versions.** Every versioned document is `<name>-vN.md`. Never edit a past version; create the next number and update this map in the same change. A new LLD or contract version also updates its links in the latest Spec (section table, traceability rows, section summaries) in place; it does not need a new Spec version. This map wins if the two disagree. ADRs are the exception: numbered once, with a Status line, superseded by a new ADR.
 - **IDs.** Parent requirements are `FR-n` and `NFR-n`; component requirements use the component prefix (`HK-n`); acceptance criteria are `<prefix>-AC-n`. Every ID cites its parent, and every test that verifies a criterion names its ID, so traceability runs from vision to test.
 - **Spec section numbers** are one namespace shared by the HLD and the LLDs: "Spec 9.1" is the hook CLI contract wherever it is cited, and the HLD's [section table](spec/SPEC-v10.md#how-this-spec-is-organized) says which file holds it.
 - **Acceptance criteria** are EARS by default; Given/When/Then is allowed when a spec declares it, never mixed within one spec.
