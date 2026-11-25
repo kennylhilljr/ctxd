@@ -143,9 +143,24 @@ describe("ctxd mcp launcher: transport errors become JSON-RPC errors (#81)", () 
   it.each([
     ["an object with neither method nor result", "{}"],
     ["an empty batch", "[]"],
-  ])("answers %s as one invalid request with id null", (_label, line) => {
+    ["a notification without jsonrpc 2.0", JSON.stringify({ method: "notifications/initialized" })],
+    ["a response carrying both result and error", JSON.stringify({ jsonrpc: "2.0", id: 1, result: {}, error: {} })],
+  ])("answers %s as one invalid request: -32600 with id null", (_label, line) => {
     const out = JSON.parse(responseFor(line, { status: 400, contentType: "application/json", body: "" })!);
-    expect(out).toMatchObject({ jsonrpc: "2.0", id: null, error: { code: -32603 } });
+    expect(out).toEqual({ jsonrpc: "2.0", id: null, error: { code: -32600, message: "Invalid Request" } });
+  });
+
+  it("answers an invalid member of a batch in place, alongside the server's responses", () => {
+    const body = JSON.stringify([{ jsonrpc: "2.0", id: 1, result: {} }]);
+    const out = JSON.parse(responseFor(`[${call(1)},{}]`, { status: 200, contentType: "application/json", body })!);
+    expect(out).toEqual([{ jsonrpc: "2.0", id: 1, result: {} }, { jsonrpc: "2.0", id: null, error: { code: -32600, message: "Invalid Request" } }]);
+  });
+
+  it("splits an SSE reply framed with CRLF", () => {
+    const one = { jsonrpc: "2.0", id: 1, result: {} };
+    const two = { jsonrpc: "2.0", id: 2, result: {} };
+    const sse = `event: message\r\ndata: ${JSON.stringify(one)}\r\n\r\nevent: message\r\ndata: ${JSON.stringify(two)}\r\n\r\n`;
+    expect(JSON.parse(responseFor(`[${call(1)},${call(2)}]`, { status: 200, contentType: "text/event-stream", body: sse })!)).toEqual([one, two]);
   });
 
   it("writes nothing for a notification, even when the server fails", async () => {

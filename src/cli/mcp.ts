@@ -99,17 +99,22 @@ type JsonRpcId = string | number | null;
  * invalid request, answered with id null as JSON-RPC 2.0 requires. An empty batch is one invalid
  * request, answered with a single object rather than an array.
  */
-type ParsedLine = { kind: "parse-error" } | { kind: "message"; ids: JsonRpcId[]; batch: boolean };
+/** A request awaiting its response, or an invalid message the launcher answers itself with -32600. */
+type Pending = JsonRpcId | typeof INVALID;
+const INVALID = Symbol("invalid request");
 
-function pendingIdOf(message: unknown): JsonRpcId | undefined {
-  if (typeof message !== "object" || message === null || Array.isArray(message)) return null;
+type ParsedLine = { kind: "parse-error" } | { kind: "message"; ids: Pending[]; batch: boolean };
+
+function pendingIdOf(message: unknown): Pending | undefined {
+  if (typeof message !== "object" || message === null || Array.isArray(message)) return INVALID;
   const m = message as Record<string, unknown>;
+  if (m.jsonrpc !== "2.0") return INVALID;
   if (typeof m.method === "string") {
     if (!("id" in m)) return undefined; // a notification
-    return typeof m.id === "string" || typeof m.id === "number" || m.id === null ? m.id : null;
+    return typeof m.id === "string" || typeof m.id === "number" || m.id === null ? m.id : INVALID;
   }
-  if ("id" in m && ("result" in m || "error" in m)) return undefined; // the client answering a server request
-  return null;
+  if ("id" in m && ("result" in m) !== ("error" in m)) return undefined; // the client answering a server request
+  return INVALID;
 }
 
 function parseLine(line: string): ParsedLine {
@@ -119,10 +124,14 @@ function parseLine(line: string): ParsedLine {
   } catch {
     return { kind: "parse-error" };
   }
-  if (Array.isArray(parsed) && parsed.length === 0) return { kind: "message", ids: [null], batch: false };
+  if (Array.isArray(parsed) && parsed.length === 0) return { kind: "message", ids: [INVALID], batch: false };
   const messages = Array.isArray(parsed) ? parsed : [parsed];
-  const ids = messages.map(pendingIdOf).filter((id): id is JsonRpcId => id !== undefined);
+  const ids = messages.map(pendingIdOf).filter((id): id is Pending => id !== undefined);
   return { kind: "message", ids, batch: Array.isArray(parsed) };
+}
+
+function invalidRequest(): Record<string, unknown> {
+  return jsonRpcError(null, -32600, "Invalid Request");
 }
 
 function jsonRpcError(id: JsonRpcId, code: number, message: string, data?: unknown): Record<string, unknown> {
@@ -132,7 +141,7 @@ function jsonRpcError(id: JsonRpcId, code: number, message: string, data?: unkno
 /** One error per request in the line, as a single object or, for a batch, an array; null when the line holds only notifications. */
 function errorsFor(parsed: Extract<ParsedLine, { kind: "message" }>, code: number, message: string, data?: unknown): string | null {
   if (parsed.ids.length === 0) return null;
-  const errors = parsed.ids.map((id) => jsonRpcError(id, code, message, data));
+  const errors = parsed.ids.map((id) => (id === INVALID ? invalidRequest() : jsonRpcError(id, code, message, data)));
   return JSON.stringify(parsed.batch ? errors : errors[0]);
 }
 
@@ -148,6 +157,7 @@ function isJsonRpcResponse(value: unknown): value is JsonRpcResponse {
 /** Extract each event's `data:` payload from a text/event-stream body (one JSON-RPC message each). */
 function parseSseMessages(raw: string): string[] {
   return raw
+    .replace(/\r\n?/g, "\n")
     .split("\n\n")
     .map((block) =>
       block
@@ -207,7 +217,7 @@ export function responseFor(line: string, reply: HttpReply): string | null {
 
   const byId = new Map<JsonRpcId, JsonRpcResponse>();
   for (const r of received) if (!byId.has(r.id)) byId.set(r.id, r);
-  const responses = parsed.ids.map((id) => byId.get(id) ?? fallback(id));
+  const responses = parsed.ids.map((id) => (id === INVALID ? invalidRequest() : (byId.get(id) ?? fallback(id))));
   return JSON.stringify(parsed.batch ? responses : responses[0]);
 }
 
