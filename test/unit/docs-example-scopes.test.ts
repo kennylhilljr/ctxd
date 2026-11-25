@@ -30,12 +30,12 @@ const filesWithExamples = [
   ...[6, 7, 8].map((n) => `docs/prd/PRD-v${n}.md`),
 ];
 
-// Scope segments in: refs (ctxd:<scope>/), paths (ctxd://<scope>/), JSON
+// Scope segments in: refs (ctxd:<scope>/), paths (ctxd://<scope>[/...]), JSON
 // ("scope": "<scope>"), TOML (scope = "<scope>") and scope_map values
 // ("<path or remote>" = "<scope>").
 const SCOPE_PATTERNS = [
   /ctxd:(?!\/\/)([^\s/`"'\]|]+)\//g,
-  /ctxd:\/\/([^\s/`"'\]|]+)\//g,
+  /ctxd:\/\/([^\s/`"'\]|),.]+)/g,
   /"scope"\s*:\s*"([^"]+)"/g,
   /^\s*scope\s*=\s*"([^"]+)"/gm,
   /^\s*"[^"]+"\s*=\s*"([^"]+)"/gm,
@@ -50,13 +50,14 @@ describe("docs example scopes", () => {
     const forms = [
       `ctxd:${projectName}/01JAB...`,
       `ctxd://${projectName}/decisions/x.md`,
+      `ctxd://${projectName}`,
       `{ "scope": "${projectName}" }`,
       `scope = "${projectName}"`,
       `"~/code/x" = "${projectName}"`,
     ];
     for (const form of forms) expect(exampleScopes(form)).toEqual([projectName]);
     expect(exampleScopes("ctxd:sample-app/01JAB... and ctxd://sample-app/notes")).toEqual(["sample-app", "sample-app"]);
-    expect(exampleScopes("see ctxd:// and ctxd://_me")).toEqual([]);
+    expect(exampleScopes("see ctxd:// and ctxd://_me")).toEqual(["_me"]);
   });
 
   for (const file of filesWithExamples) {
