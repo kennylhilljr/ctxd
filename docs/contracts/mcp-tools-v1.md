@@ -53,7 +53,7 @@ All tools return JSON text. Descriptions are kept terse; the total `tools/list` 
 
 Errors use the envelope in 8.5.
 
-**Output framing:** every returned body is preceded by a provenance line with its reference (`[ctxd:ctxd/01JAB... | decision | proposed | by codex@laptop | 2026-10-16]`) so the model can see who wrote it, whether it is approved, and how to cite it.
+**Output framing:** every returned body is preceded by a provenance line with its reference (`[ctxd:sample-app/01JAB... | decision | proposed | by codex@laptop | 2026-10-16]`) so the model can see who wrote it, whether it is approved, and how to cite it.
 
 ### 8.5 Input aliases, error envelope and metering
 

@@ -47,7 +47,7 @@ turns_threshold = 20
 completion_markers = ["done", "implemented", "merged", "complete"]
 
 [scope_map]                      # optional path or remote to scope mapping
-"~/code/ctxd" = "ctxd"
+"~/code/notes" = "notes"
 "github.com/example/sample-app" = "sample-app"
 
 [backup]

@@ -112,9 +112,9 @@ An entry is made of parts (DataHub calls them aspects), and each part has its ow
 
 ## 5. References
 
-Every entry has a stable, citable reference of the form `ctxd:<scope>/<id>`, for example `ctxd:ctxd/01JABCDEF...`. Agents use references in handoffs, decisions and commit messages ("implements `ctxd:ctxd/01JAB...`"). A reference stays valid across machines, renames and supersession: following a superseded reference shows the replacement.
+Every entry has a stable, citable reference of the form `ctxd:<scope>/<id>`, for example `ctxd:sample-app/01JABCDEF...`. Agents use references in handoffs, decisions and commit messages ("implements `ctxd:sample-app/01JAB...`"). A reference stays valid across machines, renames and supersession: following a superseded reference shows the replacement.
 
-Every entry also has a readable **path**, for example `ctxd://ctxd/decisions/use-an-event-log-7k2pqz.md`, fixed when it is created ([Filesystem view](PRD-filesystem-view-v1.md)). Paths and references are interchangeable wherever an entry is named, and a skill can also be named as `skill:<name>`.
+Every entry also has a readable **path**, for example `ctxd://sample-app/decisions/use-an-event-log-7k2pqz.md`, fixed when it is created ([Filesystem view](PRD-filesystem-view-v1.md)). Paths and references are interchangeable wherever an entry is named, and a skill can also be named as `skill:<name>`.
 
 ## 6. Relationships
 

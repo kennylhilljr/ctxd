@@ -81,7 +81,7 @@ A session not seen for 6 hours while `active` or `compacting` is shown as `unkno
 Per-session state lives in `sessions/<client>-<session_id>.json`:
 
 ```json
-{ "scope": "ctxd", "started_at": "...", "turns": 14, "last_head": "3fa2c1e",
+{ "scope": "sample-app", "started_at": "...", "turns": 14, "last_head": "3fa2c1e",
   "last_handoff_at": null, "last_nudge_at": null, "nudge_pending": false }
 ```
 

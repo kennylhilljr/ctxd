@@ -119,7 +119,7 @@ turns_threshold = 20
 completion_markers = ["done", "implemented", "merged", "complete"]
 
 [scope_map]                      # optional path or remote to scope mapping
-"~/code/ctxd" = "ctxd"
+"~/code/notes" = "notes"
 "github.com/example/sample-app" = "sample-app"
 
 [backup]
@@ -130,7 +130,7 @@ copy_to = ""                     # optional, e.g. a Google Drive folder path
 A repository can also declare its scope in a committed `.ctxd.toml`:
 
 ```toml
-scope = "ctxd"
+scope = "sample-app"
 ```
 
 **Scope resolution order** (first match wins). Implements [PRD-hooks-v2](../prd/components/PRD-hooks-v2.md) section 2.1.
@@ -402,7 +402,7 @@ A scope may set `{"decision": "auto-if-confirmed"}` so decisions with `confirmed
    - mark a superseded entry if `supersedes` is set, and queue supersession notices (4.1).
 8. **Return** `{entry_id, ref, rev, status}`, where `ref` is the entry's reference and `rev` is its content revision.
 
-**Rejected writes.** Any write refused at steps 1 to 5 adds a `rejections` row: client, scope, entry, tool, error code, and detector names or revision numbers. Submitted text is never stored. Rejections are local to the node, kept for 90 days, and summarized in `ctxd review` (for example "codex@laptop: 4 REV_CONFLICT on ctxd:ctxd/01JAB... this week").
+**Rejected writes.** Any write refused at steps 1 to 5 adds a `rejections` row: client, scope, entry, tool, error code, and detector names or revision numbers. Submitted text is never stored. Rejections are local to the node, kept for 90 days, and summarized in `ctxd review` (for example "codex@laptop: 4 REV_CONFLICT on ctxd:sample-app/01JAB... this week").
 
 **Failure semantics (PRD NFR-10):**
 
@@ -627,7 +627,7 @@ All tools return JSON text. Descriptions are kept terse; the total `tools/list` 
 | `BUDGET_EXCEEDED` | Request asks for more than the maximum budget |
 | `IDEMPOTENCY_MISMATCH` | A `request_id` was reused with different input |
 
-**Output framing:** every returned body is preceded by a provenance line with its reference (`[ctxd:ctxd/01JAB... | decision | proposed | by codex@laptop | 2026-10-16]`) so the model can see who wrote it, whether it is approved, and how to cite it.
+**Output framing:** every returned body is preceded by a provenance line with its reference (`[ctxd:sample-app/01JAB... | decision | proposed | by codex@laptop | 2026-10-16]`) so the model can see who wrote it, whether it is approved, and how to cite it.
 
 ### 8.3 Internal API
 
@@ -681,7 +681,7 @@ A session not seen for 6 hours while `active` or `compacting` is shown as `unkno
 Per-session state lives in `sessions/<client>-<session_id>.json`:
 
 ```json
-{ "scope": "ctxd", "started_at": "...", "turns": 14, "last_head": "3fa2c1e",
+{ "scope": "sample-app", "started_at": "...", "turns": 14, "last_head": "3fa2c1e",
   "last_handoff_at": null, "last_nudge_at": null, "nudge_pending": false }
 ```
 
